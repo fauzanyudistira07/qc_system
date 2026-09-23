@@ -1,0 +1,27 @@
+{
+  "name": "qc-maestro",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "tsx apps/api/src/server.ts",
+    "dev:web": "npm run dev --workspace @qc/web",
+    "dev:demo": "node apps/demo-app/server.js",
+    "check": "tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
+    "start": "tsx apps/api/src/server.ts",
+    "test": "tsx --test apps/api/src/tests/*.test.ts",
+    "test:e2e": "tsx apps/api/src/tests/e2e.ts",
+    "setup": "npm install && npm run playwright:install && npm run build",
+    "build": "npm run build --workspace @qc/web",
+    "validate:example": "tsx packages/flow-schema/src/cli.ts docs/examples/login.yaml",
+    "playwright:install": "playwright install chromium",
+    "infra:up": "docker compose -f infrastructure/compose/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infrastructure/compose/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
