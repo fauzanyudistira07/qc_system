@@ -161,6 +161,7 @@ type EvidenceGroup = {
   assets: EvidenceAsset[];
   screenshots: EvidenceAsset[];
   videos: EvidenceAsset[];
+  metadata?: Record<string, unknown>;
 };
 
 const evidenceExtensions = new Set(['.json', '.png', '.jpg', '.jpeg', '.webm', '.html', '.zip', '.trace']);
@@ -261,6 +262,7 @@ async function makeEvidenceGroup(input: {
   reportPath?: string;
   directories?: string[];
   files?: string[];
+  metadata?: Record<string, unknown>;
 }) {
   const report = input.reportPath ? await makeEvidenceAsset(input.reportPath, 'report', `${input.title} report.json`) : undefined;
   const candidateFiles = [...(input.files ?? [])];
@@ -282,8 +284,116 @@ async function makeEvidenceGroup(input: {
     report,
     assets,
     screenshots: assets.filter((asset) => asset.type === 'screenshot'),
-    videos: assets.filter((asset) => asset.type === 'video')
+    videos: assets.filter((asset) => asset.type === 'video'),
+    metadata: input.metadata
   } satisfies EvidenceGroup;
+}
+
+function normaliseProjectSlug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+async function collectTargetQualityReports(job: { id: string; name: string }) {
+  const reports: Array<{ reportPath: string; directory: string; report: any }> = [];
+  const expectedSlug = normaliseProjectSlug(job.name);
+  try {
+    const files = await collectEvidenceFiles(artifactRoot);
+    for (const reportPath of files.filter((filePath) => path.basename(filePath).toLowerCase() === 'report.json')) {
+      try {
+        const report = JSON.parse(await readFile(reportPath, 'utf8')) as any;
+        const reportProject = String(report.project ?? '').toLowerCase();
+        const reportSourceJob = String(report.sourceJobId ?? '');
+        const matchesJob = reportSourceJob === job.id || (expectedSlug && reportProject.includes(expectedSlug));
+        if (matchesJob) reports.push({ reportPath, directory: path.dirname(reportPath), report });
+      } catch { /* Ignore incomplete report files while a runner is writing. */ }
+    }
+  } catch { /* Quality reports are optional until the target audit has run. */ }
+  const sessions = [...new Set(reports.map((item) => String(item.report.auditSessionId ?? '')).filter(Boolean))].sort();
+  const selectedReports = sessions.length ? reports.filter((item) => item.report.auditSessionId === sessions[sessions.length - 1]) : reports;
+  return selectedReports.sort((a, b) => String(b.report.generatedAt ?? b.reportPath).localeCompare(String(a.report.generatedAt ?? a.reportPath)));
+}
+
+async function screenshotForTargetCheck(reportPath: string, check: Record<string, any>, checks: Array<Record<string, any>>) {
+  const visualEvidence = checks.find((candidate) => candidate.area === 'visual-evidence'
+    && candidate.route === check.route
+    && candidate.browser === check.browser
+    && candidate.viewport === check.viewport
+    && candidate.passed !== false);
+  const detailPath = String(visualEvidence?.detail ?? '');
+  const screenshotName = detailPath ? path.basename(detailPath.replaceAll('\\', '/')) : '';
+  if (!screenshotName) return undefined;
+  const candidatePath = path.join(path.dirname(reportPath), 'screenshots', screenshotName);
+  return makeEvidenceAsset(candidatePath, 'screenshot', `${check.route || 'target'} · ${check.viewport || 'viewport'} · ${check.area || 'UI'}`);
+}
+
+async function buildTargetQualityEvidence(job: { id: string; name: string }) {
+  const reports = await collectTargetQualityReports(job);
+  const findings: Array<Record<string, unknown>> = [];
+  let passed = 0;
+  let total = 0;
+  const routes = new Set<string>();
+  const browsers = new Set<string>();
+  const viewports = new Set<string>();
+  const directories = reports.map((item) => item.directory);
+
+  for (const item of reports) {
+    const checks = Array.isArray(item.report.checks) ? item.report.checks as Array<Record<string, any>> : [];
+    total += Number(item.report.total ?? checks.length);
+    passed += Number(item.report.passed ?? checks.filter((check) => check.passed !== false).length);
+    for (const route of item.report.scope?.routes ?? []) routes.add(String(route));
+    for (const browser of item.report.scope?.browsers ?? []) browsers.add(String(browser));
+    for (const viewport of item.report.scope?.viewports ?? []) viewports.add(String(viewport.name ?? viewport));
+    for (const check of checks.filter((candidate) => candidate.passed === false)) {
+      const screenshot = await screenshotForTargetCheck(item.reportPath, check, checks);
+      findings.push({
+        area: check.area,
+        name: check.name,
+        detail: check.detail,
+        browser: check.browser,
+        viewport: check.viewport,
+        route: check.route,
+        location: [check.route, check.viewport, check.browser].filter(Boolean).join(' · '),
+        screenshot: screenshot?.relativePath,
+        passed: false
+      });
+    }
+  }
+
+  const failed = findings.length || Math.max(0, total - passed);
+  const latest = reports[0];
+  const group = await makeEvidenceGroup({
+    id: 'target-quality',
+    title: `${job.name} · UI Quality Audit`,
+    category: 'UI Quality',
+    status: failed > 0 ? 'FAILED' : reports.length ? 'PASSED' : 'READY',
+    summary: reports.length ? `${passed}/${total} pemeriksaan lulus; ${failed} finding UI perlu ditindaklanjuti.` : 'Belum ada report UI quality untuk job ini.',
+    folder: latest ? evidenceRelativePath(path.dirname(latest.reportPath)) : '',
+    reportPath: latest?.reportPath,
+    directories,
+    metadata: {
+      passed,
+      total,
+      failed,
+      routes: [...routes],
+      browsers: [...browsers],
+      viewports: [...viewports],
+      findings
+    }
+  });
+  return {
+    project: job.name,
+    generatedAt: new Date().toISOString(),
+    groups: [group],
+    totals: {
+      groups: 1,
+      passed: failed > 0 ? 0 : 1,
+      failed: failed > 0 ? 1 : 0,
+      reports: reports.length,
+      screenshots: group.screenshots.length,
+      videos: group.videos.length,
+      assets: group.assets.length
+    }
+  };
 }
 
 async function buildZannoraEvidence() {
@@ -298,7 +408,8 @@ async function buildZannoraEvidence() {
     groups.push(await makeEvidenceGroup({
       id: 'api-e2e', title: 'API E2E — seluruh endpoint', category: 'API & CRUD', status: String(apiSummary.failed ?? 0) === '0' ? 'PASSED' : 'FAILED',
       summary: `${apiSummary.passed ?? 0}/${apiSummary.total ?? 0} assertion API lulus; mencakup auth, passenger, airline, airport, airplane, seat, flight, booking, payment, ticket, dan cancellation.`,
-      folder: evidenceRelativePath(path.dirname(apiReportPath)), reportPath: apiReportPath
+      folder: evidenceRelativePath(path.dirname(apiReportPath)), reportPath: apiReportPath,
+      metadata: { passed: apiSummary.passed ?? 0, total: apiSummary.total ?? 0, failed: apiSummary.failed ?? 0 }
     }));
   }
 
@@ -306,11 +417,14 @@ async function buildZannoraEvidence() {
   const crudDirectory = await newestEvidenceDirectory(path.join(zannoraRuns, 'crud-airline'));
   if (crudReportPath) {
     const crudReport = JSON.parse(await readFile(crudReportPath, 'utf8')) as Record<string, unknown>;
-    const crudPassed = ['create', 'read', 'update', 'delete'].every((key) => crudReport[key] === 'PASSED');
+    const operations = ['create', 'read', 'update', 'delete'];
+    const crudPassedCount = operations.filter((key) => crudReport[key] === 'PASSED').length;
+    const crudPassed = crudPassedCount === operations.length;
     groups.push(await makeEvidenceGroup({
       id: 'crud', title: 'CRUD browser — Airline', category: 'API & CRUD', status: crudPassed ? 'PASSED' : 'FAILED',
       summary: 'Bukti UI create, read, update, dan delete data airline.', folder: evidenceRelativePath(path.dirname(crudReportPath)), reportPath: crudReportPath,
-      directories: crudDirectory ? [crudDirectory] : []
+      directories: crudDirectory ? [crudDirectory] : [],
+      metadata: { passed: crudPassedCount, total: operations.length, failed: operations.length - crudPassedCount, operations }
     }));
   }
 
@@ -327,7 +441,8 @@ async function buildZannoraEvidence() {
     groups.push(await makeEvidenceGroup({
       id: 'roles', title: 'Role access — admin, manager, staff, customer', category: 'Web Flow', status: rolesReport.status ?? 'UNKNOWN',
       summary: `${passed}/${total} skenario role dan pembatasan akses lulus.`, folder: evidenceRelativePath(path.dirname(rolesReportPath)), reportPath: rolesReportPath,
-      directories: roleDirectories
+      directories: roleDirectories,
+      metadata: { passed, total, failed: total - passed, roles: ['admin', 'manager', 'staff', 'customer'] }
     }));
   }
 
@@ -339,26 +454,63 @@ async function buildZannoraEvidence() {
     groups.push(await makeEvidenceGroup({
       id: 'full-flow', title: 'Full flow — booking sampai e-ticket', category: 'Web Flow', status: 'PASSED',
       summary: `${passed}/${total} langkah lulus: login, passenger, seat, booking, payment handoff, acc admin, ticket, dan e-ticket.`, folder: evidenceRelativePath(fullFlow.directory), reportPath: fullFlow.reportPath,
-      directories: [fullFlow.directory]
+      directories: [fullFlow.directory],
+      metadata: { passed, total, failed: total - passed, bookingCode: report.bookingCode, findings: (report.checks ?? []).map((check: any) => ({ name: check.name, detail: check.detail, passed: check.passed })) }
     }));
   }
 
   const navigationDirectory = await newestEvidenceDirectory(path.join(zannoraRuns, 'navigation'));
   const navigationReportPath = await newestEvidenceFile(path.join(zannoraReports, 'navigation'), (name) => name.endsWith('.json'));
   if (navigationDirectory) {
+    let navigationMetadata: Record<string, unknown> = { passed: 15, total: 15, failed: 0 };
+    if (navigationReportPath) {
+      try {
+        const report = JSON.parse(await readFile(navigationReportPath, 'utf8')) as any;
+        const checks = Array.isArray(report.checks) ? report.checks : Array.isArray(report.results) ? report.results : [];
+        const passed = checks.length ? checks.filter((check: any) => check.passed || check.status === 'PASSED').length : 15;
+        const total = checks.length || 15;
+        navigationMetadata = { passed, total, failed: total - passed, findings: checks.map((check: any) => ({ name: check.name || check.title, detail: check.detail || check.error, passed: check.passed ?? check.status === 'PASSED' })) };
+      } catch { /* Older reports can be summary-only. */ }
+    }
     groups.push(await makeEvidenceGroup({
       id: 'navigation', title: 'Navigation smoke — halaman admin', category: 'Web Flow', status: 'PASSED',
-      summary: '15/15 langkah smoke navigation lulus untuk login, dashboard, airlines, flights, dan reports.', folder: evidenceRelativePath(navigationDirectory), reportPath: navigationReportPath, directories: [navigationDirectory]
+      summary: `${navigationMetadata.passed ?? 0}/${navigationMetadata.total ?? 0} langkah smoke navigation lulus untuk login, dashboard, airlines, flights, dan reports.`, folder: evidenceRelativePath(navigationDirectory), reportPath: navigationReportPath, directories: [navigationDirectory], metadata: navigationMetadata
     }));
   }
 
   const responsive = await newestEvidenceRunWithReport(path.join(zannoraRuns, 'responsive'));
   if (responsive) {
-    const report = responsive.report as { status?: string; total?: number; passed?: number; failed?: number };
+    const report = responsive.report as { status?: string; total?: number; passed?: number; failed?: number; checks?: Array<Record<string, any>>; results?: Array<Record<string, any>>; scope?: { routes?: string[]; browsers?: string[]; viewports?: Array<{ name?: string }> } };
+    const checks = report.checks ?? [];
+    const hasTextQualityGate = checks.some((check) => check.area === 'content-quality') || (report.results ?? []).some((result) => Object.prototype.hasOwnProperty.call(result, 'textQualityIssues'));
+    const evidenceStatus = hasTextQualityGate ? (report.status ?? 'UNKNOWN') : 'RETEST';
+    const evidenceTotal = report.total ?? 0;
+    const evidenceFindings = checks.filter((check) => check.passed === false).map((check) => ({ area: check.area, name: check.name, detail: check.detail, browser: check.browser, viewport: check.viewport, route: check.route, passed: false }));
+    if (!hasTextQualityGate) evidenceFindings.unshift({ area: 'content-quality', name: 'Retest required: text quality rule belum tercakup', detail: 'Report ini dibuat sebelum engine memeriksa merged/camelCase text, clipping, line-height, dan text overlap. Status lama tidak boleh dianggap CLEAR.', browser: undefined, viewport: undefined, route: undefined, passed: false });
     groups.push(await makeEvidenceGroup({
-      id: 'responsive', title: 'Responsive & layout — desktop, tablet, mobile', category: 'UI Quality', status: report.status ?? 'UNKNOWN',
-      summary: `${report.passed ?? 0}/${report.total ?? 0} pemeriksaan viewport lulus; ${report.failed ?? 0} temuan layout perlu perbaikan.`, folder: evidenceRelativePath(responsive.directory), reportPath: responsive.reportPath,
-      directories: [responsive.directory]
+      id: 'responsive', title: 'Responsive & layout — desktop, tablet, mobile', category: 'UI Quality', status: evidenceStatus,
+      summary: hasTextQualityGate ? `${report.passed ?? 0}/${evidenceTotal} pemeriksaan viewport lulus; ${report.failed ?? 0} temuan layout perlu perbaikan.` : `RETEST wajib: report lama ${evidenceTotal} pemeriksaan belum mencakup validasi kualitas teks.`, folder: evidenceRelativePath(responsive.directory), reportPath: responsive.reportPath,
+      directories: [responsive.directory],
+      metadata: { passed: hasTextQualityGate ? (report.passed ?? 0) : 0, total: evidenceTotal, failed: hasTextQualityGate ? (report.failed ?? 0) : evidenceTotal, routes: report.scope?.routes ?? [], browsers: report.scope?.browsers ?? [], viewports: report.scope?.viewports?.map((item) => item.name).filter(Boolean) ?? [], findings: evidenceFindings }
+    }));
+  }
+
+  const quality = await newestEvidenceRunWithReport(path.join(zannoraRuns, 'quality'));
+  if (quality) {
+    const report = quality.report as { status?: string; total?: number; passed?: number; failed?: number; checks?: Array<Record<string, any>>; scope?: { browsers?: string[]; routes?: string[]; viewports?: Array<{ name?: string }> } };
+    const checks = report.checks ?? [];
+    const hasTextQualityGate = checks.some((check) => check.area === 'content-quality');
+    const evidenceStatus = hasTextQualityGate ? (report.status ?? 'UNKNOWN') : 'RETEST';
+    const evidenceTotal = report.total ?? 0;
+    const evidenceFindings = checks.filter((check) => check.passed === false).map((check) => ({ area: check.area, name: check.name, detail: check.detail, browser: check.browser, viewport: check.viewport, route: check.route, passed: false }));
+    if (!hasTextQualityGate) evidenceFindings.unshift({ area: 'content-quality', name: 'Retest required: text quality rule belum tercakup', detail: 'Report ini dibuat sebelum engine memeriksa merged/camelCase text, clipping, line-height, dan text overlap. Status lama tidak boleh dianggap CLEAR.', browser: undefined, viewport: undefined, route: undefined, passed: false });
+    const browserNames = report.scope?.browsers?.join(', ') || 'Chromium, Firefox, WebKit';
+    const viewportNames = report.scope?.viewports?.map((viewport) => viewport.name).filter(Boolean).join(', ') || 'desktop, tablet, mobile';
+    groups.push(await makeEvidenceGroup({
+      id: 'quality', title: 'Visual, accessibility & browser quality', category: 'UI Quality', status: evidenceStatus,
+      summary: hasTextQualityGate ? `${report.passed ?? 0}/${evidenceTotal} quality checks lulus; contrast WCAG, typography, state, pixel regression, ARIA, dense data, dan ${browserNames} pada ${viewportNames}.` : `RETEST wajib: report lama ${evidenceTotal} quality checks belum mencakup validasi kualitas teks.`, folder: evidenceRelativePath(quality.directory), reportPath: quality.reportPath,
+      directories: [quality.directory],
+      metadata: { passed: hasTextQualityGate ? (report.passed ?? 0) : 0, total: evidenceTotal, failed: hasTextQualityGate ? (report.failed ?? 0) : evidenceTotal, routes: report.scope?.routes ?? [], browsers: report.scope?.browsers ?? [], viewports: report.scope?.viewports?.map((item) => item.name).filter(Boolean) ?? [], findings: evidenceFindings }
     }));
   }
 
@@ -815,6 +967,15 @@ app.post<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/restart', async
   }
 });
 
+app.post<{ Params: { id: string }; Body: { password?: string } }>('/api/v1/discovery/jobs/:id/quality-audit', async (request, reply) => {
+  try {
+    const job = await discoveryService.startQualityAudit(request.params.id, request.body?.password || '');
+    return job;
+  } catch (err) {
+    return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 app.delete<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id', async (request, reply) => {
   const success = discoveryService.deleteJob(request.params.id);
   if (!success) return reply.code(404).send({ error: 'Job tidak ditemukan' });
@@ -931,6 +1092,12 @@ app.get('/api/v1/test-runs/full-flow/video', async (_, reply) => {
 });
 
 app.get('/api/v1/zannora-evidence', async () => buildZannoraEvidence());
+
+app.get<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/quality-evidence', async (request, reply) => {
+  const job = discoveryService.getJob(request.params.id);
+  if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
+  return buildTargetQualityEvidence({ id: job.id, name: job.config.name });
+});
 
 app.get<{ Params: { '*': string } }>('/api/v1/zannora-evidence/artifacts/*', async (request, reply) => {
   let decodedRelative: string;

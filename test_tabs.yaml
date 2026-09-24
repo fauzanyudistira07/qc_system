@@ -1,0 +1,18 @@
+appId: com.sopan.digital
+name: "Test All Tabs"
+---
+- tapOn:
+    text: "Absensi"
+- takeScreenshot: test-absensi
+- tapOn:
+    text: "Keuangan"
+- takeScreenshot: test-keuangan
+- tapOn:
+    text: "Informasi"
+- takeScreenshot: test-informasi
+- tapOn:
+    text: "T2Q"
+- takeScreenshot: test-t2q
+- tapOn:
+    text: "Beranda"
+- takeScreenshot: test-beranda

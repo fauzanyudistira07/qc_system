@@ -34,6 +34,7 @@ export function Wizard({
         accounts: (cfg.accounts && cfg.accounts.length > 0) ? cfg.accounts : initialConfig().accounts,
         database: cfg.database || initialConfig().database,
         rules: cfg.rules || initialConfig().rules,
+        qualityAudit: { ...initialConfig().qualityAudit, ...(cfg.qualityAudit || {}) },
       };
     }
     return initialConfig();
@@ -89,6 +90,7 @@ export function Wizard({
         accounts: (cfg.accounts && cfg.accounts.length > 0) ? cfg.accounts : initialConfig().accounts,
         database: cfg.database || initialConfig().database,
         rules: cfg.rules || initialConfig().rules,
+        qualityAudit: { ...initialConfig().qualityAudit, ...(cfg.qualityAudit || {}) },
       });
       setPaths({
         include: (cfg.rules?.includePaths ?? []).join('\n'),
@@ -108,6 +110,8 @@ export function Wizard({
   const patch = (value: Partial<Config>) => setConfig(c => ({ ...c, ...value }));
   const db = (value: Partial<Config['database']>) => setConfig(c => ({ ...c, database: { ...c.database, ...value } }));
   const rule = (value: Partial<Config['rules']>) => setConfig(c => ({ ...c, rules: { ...c.rules, ...value } }));
+  const quality = (value: Partial<Config['qualityAudit']>) => setConfig(c => ({ ...c, qualityAudit: { ...initialConfig().qualityAudit, ...c.qualityAudit, ...value } }));
+  const updateService = (index: number, value: Partial<Config['services'][number]>) => setConfig(c => ({ ...c, services: c.services.map((item, itemIndex) => itemIndex === index ? { ...item, ...value } : item) }));
 
   function validate(index: number): string {
     if (index === 0) {
@@ -124,6 +128,16 @@ export function Wizard({
       }
       if (config.database.engine !== 'none' && config.database.source === 'sql' && !config.database.sqlUploadId) {
         return 'Pilih file .SQL dump atau ubah pilihan ke "Database Backend Aktif".';
+      }
+      if (config.database.engine !== 'none' && config.database.source === 'migrate' && !config.database.migrationCommand?.trim()) {
+        return 'Isi migration command atau pilih sumber database lain.';
+      }
+      if (config.database.engine !== 'none' && config.database.source === 'seed' && !config.database.seedCommand?.trim()) {
+        return 'Isi seed command atau pilih sumber database lain.';
+      }
+      if (config.platform === 'web' && config.qualityAudit?.enabled !== false) {
+        if (!config.qualityAudit?.browsers?.length) return 'Pilih minimal satu browser untuk Quality Audit.';
+        if (!config.qualityAudit?.viewports?.length) return 'Pilih minimal satu viewport untuk Quality Audit.';
       }
     }
     return '';
@@ -567,12 +581,22 @@ export function Wizard({
                     </button>
                   </div>
 
+                  <div className="form-grid" style={{ marginTop: 14 }}>
+                    <Field label="Runtime Stack" hint="Auto mendeteksi framework; pilih manual bila perlu.">
+                      <select value={config.stack} onChange={e => patch({ stack: e.target.value as Config['stack'] })}>
+                        <option value="auto">Auto Detect</option>
+                        <option value="laravel">Laravel / PHP</option>
+                        <option value="custom">Custom Runtime Services</option>
+                      </select>
+                    </Field>
+                  </div>
+
                   <Field
                     label="URL Endpoint Backend API"
                     hint={
                       config.platform === 'android'
                         ? 'Tip Android Emulator: Gunakan http://10.0.2.2:8000 untuk mengakses backend lokal laptop Anda.'
-                        : 'URL server API tempat backend menerima request dari frontend/web.'
+                        : 'Informasi endpoint API pendukung. Untuk crawl UI web, engine memakai URL Website Target di atas.'
                     }
                     wide
                   >
@@ -750,6 +774,45 @@ export function Wizard({
                     </div>
                   </div>
 
+                  <div className="form-grid" style={{ marginBottom: 14 }}>
+                    <Field label="Database Engine" hint="Engine ini dipakai managed-local runner.">
+                      <select
+                        value={config.database.engine}
+                        onChange={e => db({ engine: e.target.value as Config['database']['engine'] })}
+                      >
+                        <option value="none">Tidak membuat container database</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="postgres">PostgreSQL</option>
+                        <option value="sqlite">SQLite</option>
+                      </select>
+                    </Field>
+                    <Field label="Sumber / Bootstrap Data" hint="Cara engine menyiapkan schema dan data uji.">
+                      <select
+                        value={config.database.source}
+                        onChange={e => db({ source: e.target.value as Config['database']['source'] })}
+                      >
+                        <option value="empty">Database backend aktif / kosong</option>
+                        <option value="sql">Import SQL dump</option>
+                        <option value="migrate">Jalankan migration command</option>
+                        <option value="seed">Jalankan seed command</option>
+                      </select>
+                    </Field>
+                  </div>
+
+                  {config.database.engine !== 'none' && config.database.source !== 'sql' && (
+                    <div className="form-grid" style={{ marginBottom: 14 }}>
+                      <Field label="Provision Command" hint="Opsional, dijalankan sebelum migration/seed.">
+                        <input value={config.database.provisionCommand || ''} placeholder="php artisan migrate:fresh" onChange={e => db({ provisionCommand: e.target.value })} />
+                      </Field>
+                      <Field label="Migration Command" hint="Wajib jika sumber = migration.">
+                        <input value={config.database.migrationCommand || ''} placeholder="php artisan migrate --force" onChange={e => db({ migrationCommand: e.target.value })} />
+                      </Field>
+                      <Field label="Seed Command" hint="Wajib jika sumber = seed.">
+                        <input value={config.database.seedCommand || ''} placeholder="php artisan db:seed --force" onChange={e => db({ seedCommand: e.target.value })} />
+                      </Field>
+                    </div>
+                  )}
+
                   <div className="db-choice-grid">
                     <button
                       type="button"
@@ -856,6 +919,59 @@ export function Wizard({
                   )}
                 </div>
 
+                {/* QUALITY AUDIT SETTINGS */}
+                {config.platform === 'web' && (
+                  <div className="clean-section" style={{ marginTop: 24 }}>
+                    <div className="inline-heading">
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Icon name="discovery" size={18} />
+                          <h3>Quality Audit UI &amp; Evidence</h3>
+                        </div>
+                        <p>Atur browser, viewport, batas route, timeout, dan screenshot yang dijalankan setelah Discovery selesai.</p>
+                      </div>
+                      <Badge value={config.qualityAudit?.enabled !== false ? 'Auto Run' : 'Manual'} />
+                    </div>
+
+                    <label className="toggle-row">
+                      <input type="checkbox" checked={config.qualityAudit?.enabled !== false} onChange={e => quality({ enabled: e.target.checked })} />
+                      <span><strong>Jalankan Quality Audit otomatis</strong><small>Memeriksa HTTP, contrast WCAG, typography, responsive overflow, accessibility, text quality, dense-data, dan screenshot evidence.</small></span>
+                    </label>
+
+                    <div className="form-grid" style={{ marginTop: 14 }}>
+                      <Field label="Maksimum Route" hint="0 = semua route unik yang ditemukan; angka positif = batch terbatas.">
+                        <input type="number" min={0} max={1000} value={config.qualityAudit?.maxRoutes ?? 0} onChange={e => quality({ maxRoutes: Number(e.target.value) })} />
+                      </Field>
+                      <Field label="Route Offset" hint="Mulai dari route ke-N untuk batch audit.">
+                        <input type="number" min={0} value={config.qualityAudit?.routeOffset ?? 0} onChange={e => quality({ routeOffset: Number(e.target.value) })} />
+                      </Field>
+                      <Field label="Navigation Timeout (ms)" hint="10.000–180.000 ms.">
+                        <input type="number" min={10000} max={180000} step={1000} value={config.qualityAudit?.navigationTimeoutMs ?? 60000} onChange={e => quality({ navigationTimeoutMs: Number(e.target.value) })} />
+                      </Field>
+                    </div>
+
+                    <div className="audit-option-group">
+                      <span className="field-label">Browser yang dijalankan</span>
+                      <div className="audit-option-list">
+                        {(['chromium', 'firefox', 'webkit'] as const).map(browser => {
+                          const selected = config.qualityAudit?.browsers?.includes(browser) ?? false;
+                          return <label key={browser} className={`audit-option ${selected ? 'selected' : ''}`}><input type="checkbox" checked={selected} onChange={e => { const current = config.qualityAudit?.browsers ?? []; quality({ browsers: e.target.checked ? [...new Set([...current, browser])] : current.filter(item => item !== browser) }); }} /><span>{browser}</span></label>;
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="audit-option-group">
+                      <span className="field-label">Viewport yang dijalankan</span>
+                      <div className="audit-option-list">
+                        {(['desktop', 'tablet', 'mobile'] as const).map(viewport => {
+                          const selected = config.qualityAudit?.viewports?.includes(viewport) ?? false;
+                          return <label key={viewport} className={`audit-option ${selected ? 'selected' : ''}`}><input type="checkbox" checked={selected} onChange={e => { const current = config.qualityAudit?.viewports ?? []; quality({ viewports: e.target.checked ? [...new Set([...current, viewport])] : current.filter(item => item !== viewport) }); }} /><span>{viewport}</span></label>;
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* COLLAPSIBLE ADVANCED SETTINGS (FOR THOSE WHO NEED THEM, CLEAN FOR EVERYONE ELSE) */}
                 <div className="advanced-accordion">
                   <button
@@ -877,6 +993,35 @@ export function Wizard({
                       <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
                         Secara default, engine sudah memiliki deteksi otomatis cerdas untuk form login, selector button, dan batas discovery. Anda hanya perlu mengubah opsi di bawah jika aplikasi Anda menggunakan format non-standar.
                       </p>
+
+                      {(config.backendMode === 'repo' || config.stack === 'custom' || config.services.length > 0) && (
+                        <div className="runtime-services-editor">
+                          <div className="inline-heading">
+                            <div>
+                              <h3>Runtime Services</h3>
+                              <p>Definisikan service yang harus di-install, dinyalakan, dan dicek health-nya oleh managed-local runner.</p>
+                            </div>
+                            <button type="button" className="quiet" onClick={() => patch({ services: [...config.services, { id: `service-${Date.now()}`, name: '', kind: 'custom', workingDir: '.', installCommand: '', startCommand: '', healthCheck: config.baseUrl, port: undefined, dependsOn: [], runtimeImage: 'node:24-bookworm-slim' }] })}><Icon name="plus" size={14} /> Tambah Service</button>
+                          </div>
+                          {config.services.length === 0 && <p className="muted" style={{ fontSize: 12 }}>Belum ada service manual. Auto Detect tetap digunakan.</p>}
+                          {config.services.map((serviceItem, index) => (
+                            <div className="runtime-service-card" key={serviceItem.id || index}>
+                              <div className="runtime-service-header"><strong>Service {index + 1}</strong><button type="button" className="quiet danger-text" onClick={() => patch({ services: config.services.filter((_, itemIndex) => itemIndex !== index) })}><Icon name="trash" size={14} /> Hapus</button></div>
+                              <div className="form-grid">
+                                <Field label="Nama Service"><input value={serviceItem.name} placeholder="web-frontend" onChange={e => updateService(index, { name: e.target.value })} /></Field>
+                                <Field label="Kind"><select value={serviceItem.kind} onChange={e => updateService(index, { kind: e.target.value as Config['services'][number]['kind'] })}><option value="frontend">Frontend</option><option value="backend">Backend</option><option value="worker">Worker</option><option value="custom">Custom</option></select></Field>
+                                <Field label="Runtime Image"><input value={serviceItem.runtimeImage || ''} placeholder="node:24-bookworm-slim" onChange={e => updateService(index, { runtimeImage: e.target.value })} /></Field>
+                                <Field label="Working Directory"><input value={serviceItem.workingDir} placeholder="." onChange={e => updateService(index, { workingDir: e.target.value })} /></Field>
+                                <Field label="Install Command"><input value={serviceItem.installCommand} placeholder="npm ci" onChange={e => updateService(index, { installCommand: e.target.value })} /></Field>
+                                <Field label="Start Command"><input value={serviceItem.startCommand} placeholder="npm run dev -- --host 0.0.0.0 --port=3000" onChange={e => updateService(index, { startCommand: e.target.value })} /></Field>
+                                <Field label="Health Check"><input value={serviceItem.healthCheck} placeholder="http://127.0.0.1:3000" onChange={e => updateService(index, { healthCheck: e.target.value })} /></Field>
+                                <Field label="Port"><input type="number" min={1} max={65535} value={serviceItem.port || ''} placeholder="3000" onChange={e => updateService(index, { port: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+                                <Field label="Depends On"><input value={serviceItem.dependsOn.join(', ')} placeholder="api, database" onChange={e => updateService(index, { dependsOn: lines(e.target.value.replace(/,/g, '\n')) })} /></Field>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       <div className="form-grid">
                         <Field label="Path Halaman Login" hint="Default: /login">
@@ -1067,6 +1212,15 @@ export function Wizard({
                     </div>
                     <strong>{config.database.source === 'sql' ? 'SQL Dump Import' : 'Database Backend Aktif'}</strong>
                     <small>{filenames.sql ? `File: ${filenames.sql}` : 'Menggunakan data backend langsung'}</small>
+                  </div>
+
+                  <div className="summary-item-card">
+                    <div className="summary-item-header">
+                      <Icon name="discovery" size={18} />
+                      <span>Quality Audit UI</span>
+                    </div>
+                    <strong>{config.platform === 'web' && config.qualityAudit?.enabled !== false ? 'Auto Run aktif' : 'Tidak dijalankan'}</strong>
+                    <small>{config.platform === 'web' ? `${config.qualityAudit?.browsers?.join(', ') || 'browser'} · ${config.qualityAudit?.viewports?.join(', ') || 'viewport'}` : 'Khusus target Web'}</small>
                   </div>
                 </div>
 

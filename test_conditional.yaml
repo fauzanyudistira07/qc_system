@@ -1,0 +1,11 @@
+appId: com.sopan.digital
+name: "Test conditional login"
+---
+- runFlow:
+    when:
+      visible: "Masuk"
+    commands:
+      - tapOn: "Masuk"
+- assertVisible:
+    text: "Beranda"
+- takeScreenshot: beranda-verified

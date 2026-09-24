@@ -1,6 +1,7 @@
 import { stringify } from 'yaml';
 import type { FlowStep } from '@qc/flow-schema';
 import type { Inventory, DiscoveryConfig, GeneratedFlow } from '../discovery/types.ts';
+import { detectCapabilities } from '../discovery/capability-model.ts';
 
 /**
  * Menghasilkan raw Maestro YAML commands untuk login.
@@ -181,7 +182,9 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
   }
   const flows: GeneratedFlow[] = [];
   const rules = config.rules;
-  const loginSteps = (): FlowStep[] => rules.loginPath && rules.emailSelector && rules.passwordSelector && rules.submitSelector && rules.successUrl ? [
+  const capabilityProfile = inventory.capabilities ?? detectCapabilities({ pages: inventory.pages, routes: inventory.routes, api: inventory.api });
+  const authenticationDetected = capabilityProfile.capabilities.some((capability) => capability.id === 'authentication');
+  const loginSteps = (): FlowStep[] => authenticationDetected && rules.loginPath && rules.emailSelector && rules.passwordSelector && rules.submitSelector && rules.successUrl ? [
     { id: 'login-page', action: 'open', url: rules.loginPath },
     { id: 'login-email', action: 'input', target: { selector: rules.emailSelector }, value: '${QC_EMAIL}' },
     { id: 'login-password', action: 'input', target: { selector: rules.passwordSelector }, value: '${QC_PASSWORD}' },
@@ -260,7 +263,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
   }
 
   // ── Flow 3: Eksplorasi Data Master & Armada (Admin) ────────────────────────
-  if (loginSteps().length && adminResourceRoutes.length > 0) {
+  if (!inventory.capabilities && loginSteps().length && adminResourceRoutes.length > 0) {
     const masterSteps: FlowStep[] = [...loginSteps()];
     const selectedMasters = adminResourceRoutes.slice(0, 4);
     for (const [idx, r] of selectedMasters.entries()) {
@@ -272,15 +275,15 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
     }
     flows.push({
       id: 'web-master-data',
-      name: '3. Eksplorasi Data Master Maskapai & Armada',
-      source: toSource('3. Eksplorasi Data Master Maskapai & Armada', masterSteps),
+      name: '3. Eksplorasi Modul Data Admin',
+      source: toSource('3. Eksplorasi Modul Data Admin', masterSteps),
       platform: 'web',
       status: 'READY'
     });
   }
 
   // ── Flow 4: Manajemen Operasional, Transaksi & Laporan (Admin) ─────────────
-  if (loginSteps().length && adminOpsRoutes.length > 0) {
+  if (!inventory.capabilities && loginSteps().length && adminOpsRoutes.length > 0) {
     const opsSteps: FlowStep[] = [...loginSteps()];
     const selectedOps = adminOpsRoutes.slice(0, 4);
     for (const [idx, r] of selectedOps.entries()) {
@@ -300,7 +303,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
   }
 
   // ── Flow 5: Eksplorasi Layanan Pelanggan (Customer / User) ────────────────
-  if (loginSteps().length && customerRoutes.length > 0) {
+  if (!inventory.capabilities && loginSteps().length && customerRoutes.length > 0) {
     const custSteps: FlowStep[] = [...loginSteps()];
     const selectedCust = customerRoutes.slice(0, 4);
     for (const [idx, r] of selectedCust.entries()) {
@@ -315,6 +318,41 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
       source: toSource('5. Eksplorasi Portal Layanan Pelanggan', custSteps),
       platform: 'web',
       status: 'READY'
+    });
+  }
+
+  // New projects use the capability profile instead of product-specific route
+  // names. These flows are intentionally read-only: they map the feature
+  // surface and collect evidence without inventing destructive business data.
+  const pageByRoute = new Map(inventory.pages.map((page) => [page.path, page]));
+  const generatedCapabilityIds = new Set<string>(['public-navigation', 'authentication']);
+  let capabilityIndex = flows.length + 1;
+  for (const capability of capabilityProfile.capabilities) {
+    if (generatedCapabilityIds.has(capability.id)) continue;
+    const routes = [...new Set(capability.evidence.routes)]
+      .filter((route) => route.startsWith('/') && !route.includes('{') && !/\/api(?:\/|$)/i.test(route) && route !== rules.loginPath)
+      .slice(0, 8);
+    if (!routes.length) continue;
+    const slug = capability.id.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+    const requiresAuth = routes.some((route) => {
+      const page = pageByRoute.get(route);
+      return page?.authentication?.startsWith('authenticated:') || /(?:^|\/)admin(?:\/|$)|(?:^|\/)dashboard(?:\/|$)/i.test(route);
+    });
+    const steps: FlowStep[] = requiresAuth && loginSteps().length ? [...loginSteps()] : [];
+    routes.forEach((route, index) => {
+      const routeSlug = route.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || `route-${index}`;
+      steps.push({ id: `${slug}-${index}-open`, action: 'open', url: route });
+      steps.push({ id: `${slug}-${index}-url`, action: 'assertUrl', value: route });
+      steps.push({ id: `${slug}-${index}-body`, action: 'assertVisible', target: { selector: 'body' } });
+      steps.push({ id: `${slug}-${index}-snap`, action: 'screenshot', name: `${slug}-${routeSlug}` });
+    });
+    flows.push({
+      id: `web-capability-${slug}`,
+      name: `${String(capabilityIndex++).padStart(2, '0')}. Capability · ${capability.label}`,
+      source: toSource(`Capability · ${capability.label}`, steps),
+      platform: 'web',
+      status: capability.status === 'detected' ? 'READY' : 'REVIEW_REQUIRED',
+      reason: `${capability.rationale} Pemeriksaan lanjutan: ${capability.recommendedChecks.join(', ')}.`,
     });
   }
 

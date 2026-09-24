@@ -1,0 +1,29 @@
+appId: com.sopan.digital
+name: "QC Navigation All Screens"
+---
+- tapOn:
+    text: "Masuk"
+    optional: true
+- assertVisible:
+    text: "Beranda"
+- takeScreenshot: beranda-screen
+
+- tapOn:
+    text: "Absensi"
+- takeScreenshot: absensi-screen
+
+- tapOn:
+    text: "Keuangan"
+- takeScreenshot: keuangan-screen
+
+- tapOn:
+    text: "Informasi"
+- takeScreenshot: informasi-screen
+
+- tapOn:
+    text: "T2Q"
+- takeScreenshot: t2q-screen
+
+- tapOn:
+    text: "Beranda"
+- takeScreenshot: back-to-beranda

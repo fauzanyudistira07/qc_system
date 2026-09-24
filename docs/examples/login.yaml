@@ -1,0 +1,37 @@
+schemaVersion: "1.0"
+name: Login Admin Demo
+description: Memastikan admin dapat login ke aplikasi
+target:
+  platform: web
+  targetId: demo-web
+  baseUrl: http://localhost:4173
+variables:
+  email: admin@example.com
+  password: admin123
+execution:
+  timeoutMs: 10000
+  screenshot: on-failure
+  trace: retain-on-failure
+  video: retain-on-failure
+steps:
+  - id: open-login
+    action: open
+    url: /login
+  - id: fill-email
+    action: input
+    target:
+      testId: email
+    value: ${email}
+  - id: fill-password
+    action: input
+    target:
+      testId: password
+    value: ${password}
+  - id: submit-login
+    action: click
+    target:
+      testId: login-button
+  - id: verify-dashboard
+    action: assertVisible
+    target:
+      text: Dashboard

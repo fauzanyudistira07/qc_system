@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Job, Step, Artifact } from './types';
+import { Job, Step, Artifact, ZannoraEvidence } from './types';
 import { Icon } from './ui';
 import { request } from './api';
 
@@ -157,8 +157,9 @@ function getLatestScreenshot(job?: Job | null): { url: string; name: string } | 
   return null;
 }
 
-export function LiveViewport({ job }: { job?: Job | null }) {
-  const isProjectSelected = Boolean(job);
+export function LiveViewport({ job, evidence }: { job?: Job | null; evidence?: ZannoraEvidence | null }) {
+  const isProjectSelected = Boolean(job || evidence);
+  const evidenceScreenshot = evidence?.groups.find((group) => group.id === 'full-flow')?.screenshots[0] || evidence?.groups.find((group) => group.screenshots.length > 0)?.screenshots[0];
   const projectPlatform = job?.config?.platform === 'android' ? 'android' : 'web';
 
   const [platform, setPlatform] = useState<'web' | 'android'>(
@@ -228,7 +229,7 @@ export function LiveViewport({ job }: { job?: Job | null }) {
   }, [isProjectSelected, platform, autoRefresh, fetchNextScreen]);
 
   // Latest artifact screenshot from test runs (if available)
-  const latestArtifact = getLatestScreenshot(job);
+  const latestArtifact = getLatestScreenshot(job) || (evidenceScreenshot ? { url: evidenceScreenshot.url, name: evidenceScreenshot.name } : null);
   const latestResult = job?.results && job.results.length > 0 ? job.results[job.results.length - 1] : undefined;
   const [fullFlowVideo, setFullFlowVideo] = useState<FullFlowVideo | null>(null);
 
@@ -426,7 +427,7 @@ export function LiveViewport({ job }: { job?: Job | null }) {
                 <div className="browser-tab active">
                   <span className="tab-icon">🌐</span>
                   <span className="tab-title">
-                    {isProjectSelected ? (job?.name || 'Web Target') : (stepIndex >= 4 ? 'Dashboard Utama - Zannora ERP' : 'Autentikasi Pengguna - Portal QC')}
+                    {isProjectSelected ? (job?.name || evidence?.project || 'Web Target') : (stepIndex >= 4 ? 'Dashboard Utama - Zannora ERP' : 'Autentikasi Pengguna - Portal QC')}
                   </span>
                 </div>
               </div>
@@ -828,7 +829,7 @@ export function LiveViewport({ job }: { job?: Job | null }) {
               <strong className="ticker-desc">
                 {latestResult 
                   ? `Pengujian Terakhir: Flow "${latestResult.flowId}" selesai dengan status ${latestResult.status}`
-                  : `Proyek aktif: ${job?.name}. Siap menjalankan skenario otomatisasi.`}
+                    : `Proyek aktif: ${job?.name || evidence?.project || 'Zannora'}. Evidence siap diputar dan diperiksa.`}
               </strong>
               <div className="ticker-target mono">
                 <span className="target-label">Target:</span>

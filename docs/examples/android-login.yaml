@@ -1,0 +1,12 @@
+schemaVersion: "1.0"
+name: Android Login Demo
+target:
+  platform: android
+  appId: com.demo.app
+steps:
+  - id: launch
+    action: launchApp
+  - id: check-dashboard
+    action: assertVisible
+    target:
+      text: Dashboard

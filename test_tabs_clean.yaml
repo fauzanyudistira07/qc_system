@@ -1,0 +1,8 @@
+appId: com.sopan.digital
+name: "Test All Tabs Clean"
+---
+- tapOn: "Absensi"
+- tapOn: "Keuangan"
+- tapOn: "Informasi"
+- tapOn: "T2Q"
+- tapOn: "Beranda"

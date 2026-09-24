@@ -10,6 +10,7 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
     reports: <><path d="M14 3H5v18h14V8ZM14 3v5h5M8 12h8M8 16h5"/></>,
     settings: <><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></>,
     arrow: <path d="M4 12h16m-6-6 6 6-6 6"/>, plus: <path d="M12 5v14M5 12h14"/>, check: <path d="m5 12 4 4L19 6"/>, close: <path d="m6 6 12 12M6 18 18 6"/>,
+    'chevron-down': <path d="m6 9 6 6 6-6"/>, 'chevron-up': <path d="m6 15 6-6 6 6"/>,
     refresh: <><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></>,
     database: <><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/></>,
     globe: <><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></>,

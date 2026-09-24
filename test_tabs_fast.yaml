@@ -1,0 +1,18 @@
+appId: com.sopan.digital
+name: "Test Tabs Fast"
+---
+- tapOn:
+    text: "Absensi"
+    waitToSettleTimeoutMs: 500
+- tapOn:
+    text: "Keuangan"
+    waitToSettleTimeoutMs: 500
+- tapOn:
+    text: "Informasi"
+    waitToSettleTimeoutMs: 500
+- tapOn:
+    text: "T2Q"
+    waitToSettleTimeoutMs: 500
+- tapOn:
+    text: "Beranda"
+    waitToSettleTimeoutMs: 500

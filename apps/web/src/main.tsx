@@ -1,11 +1,356 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
-import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset } from './types';
+import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile } from './types';
 import { Icon, Badge, Panel, Metric, Progress, Notice, Empty } from './ui';
 import { Wizard } from './wizard';
 import { LiveViewport } from './live-viewport';
 import { request, send, jobPath, artifactUrl, downloadReport, date, duration, errorText } from './api';
+
+type ProcessNode = {
+  id: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  icon: string;
+  color: 'blue' | 'cyan' | 'green' | 'yellow' | 'violet' | 'red';
+  status: 'CLEAR' | 'RUNNING' | 'ATTENTION' | 'BLOCKED' | 'RETEST' | 'READY' | 'PASSED' | 'FAILED' | 'PENDING';
+  count: string;
+  items: string[];
+  details: string[];
+  evidenceIds: string[];
+  target: View;
+  x: number;
+  y: number;
+};
+
+function CapabilityProfilePanel({ profile }: { profile?: CapabilityProfile }) {
+  if (!profile) return null;
+  return (
+    <Panel title="Capability profile" description="Engine memilih flow berdasarkan kemampuan yang benar-benar terdeteksi; fitur yang tidak ditemukan tidak dipaksa dijalankan.">
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+        <Badge value={`${profile.detectedCount}/${profile.totalCatalogCapabilities} detected`} />
+        {profile.domainHints.map((hint) => <span key={hint} className="tag" style={{ color: 'var(--cyan)' }}>{hint}</span>)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 8, maxHeight: 360, overflowY: 'auto' }}>
+        {profile.capabilities.map((capability) => (
+          <details key={capability.id} style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-panel-sub)' }}>
+            <summary style={{ cursor: 'pointer', padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ color: capability.status === 'detected' ? 'var(--green)' : 'var(--yellow)' }}>●</span>
+              <strong style={{ flex: 1 }}>{capability.label}</strong>
+              <small style={{ color: 'var(--text-dim)' }}>{Math.round(capability.confidence * 100)}%</small>
+            </summary>
+            <div style={{ padding: '0 12px 12px', color: 'var(--text-muted)', fontSize: 12 }}>
+              <div>{capability.rationale}</div>
+              <div style={{ marginTop: 6 }}>Routes: {capability.evidence.routes.length} · API: {capability.evidence.apiRoutes.length} · Checks: {capability.recommendedChecks.length}</div>
+              {capability.evidence.routes.length > 0 && <code style={{ display: 'block', marginTop: 6, color: 'var(--cyan)', whiteSpace: 'normal' }}>{capability.evidence.routes.slice(0, 5).join(' · ')}</code>}
+            </div>
+          </details>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function ProcessMap({ nodes, progress, centralStatus, onNavigate }: { nodes: ProcessNode[]; progress: number; centralStatus: string; onNavigate: (view: View) => void }) {
+  const statusLabel = (status: ProcessNode['status']) => status === 'PASSED' ? 'CLEAR' : status === 'FAILED' ? 'ATTENTION' : status === 'RUNNING' ? 'RUNNING' : 'READY';
+  return (
+    <section className="qc-map-panel" aria-label="QC Maestro technical process map">
+      <div className="qc-map-header">
+        <div>
+          <div className="qc-map-kicker">ZANNORA QC / TECHNICAL MAP v1.0</div>
+          <h2>QC Execution Topology</h2>
+          <p>Jalur kerja dari target discovery sampai evidence, defect, dan retest. Klik node untuk membuka detail proses.</p>
+        </div>
+        <div className="qc-map-legend" aria-label="Process status legend">
+          <span><i className="qc-map-dot passed" /> Clear</span>
+          <span><i className="qc-map-dot running" /> Running</span>
+          <span><i className="qc-map-dot failed" /> Attention</span>
+          <span><i className="qc-map-dot pending" /> Ready</span>
+        </div>
+      </div>
+
+      <div className="qc-map-canvas">
+        <div className="qc-map-grid" />
+        <div className="qc-map-corner-stat"><strong>6</strong><span>PHASES</span></div>
+        <div className="qc-map-corner-note">LIVE EXECUTION GRAPH<br /><span>evidence-aware orchestration</span></div>
+        <svg className="qc-map-connectors" viewBox="0 0 1000 650" preserveAspectRatio="none" aria-hidden="true">
+          {nodes.map((node) => {
+            const targetX = node.x * 10;
+            const targetY = node.y * 6.5 + 24;
+            const centerX = 500;
+            const centerY = 345;
+            const midX = (centerX + targetX) / 2;
+            const midY = (centerY + targetY) / 2;
+            return <path key={node.id} className={`qc-map-line ${node.color} ${node.status.toLowerCase()}`} d={`M ${centerX} ${centerY} C ${midX} ${centerY}, ${midX} ${targetY}, ${targetX} ${targetY}`} />;
+          })}
+        </svg>
+
+        <div className="qc-map-center-node">
+          <div className="qc-map-center-orbit" />
+          <div className="qc-map-center-icon"><Icon name="shield" size={30} /></div>
+          <strong>QC Maestro</strong>
+          <span>Zannora E2E Control</span>
+          <em className={`qc-map-center-status ${centralStatus.toLowerCase()}`}><i />{centralStatus}</em>
+        </div>
+
+        {nodes.map((node) => (
+          <button
+            key={node.id}
+            className={`qc-map-node ${node.color} ${node.status.toLowerCase()}`}
+            style={{ left: `${node.x}%`, top: `${node.y}%` }}
+            onClick={() => onNavigate(node.target)}
+            title={`Buka ${node.title}`}
+          >
+            <span className="qc-map-node-icon"><Icon name={node.icon} size={20} /></span>
+            <span className="qc-map-node-copy">
+              <small>{node.eyebrow}</small>
+              <strong>{node.title}</strong>
+              <span>{node.description}</span>
+            </span>
+            <span className="qc-map-node-status"><i />{statusLabel(node.status)} · {node.count}</span>
+            <span className="qc-map-node-items">{node.items.map((item) => <b key={item}>{item}</b>)}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="qc-map-footer">
+        <div><strong>Suite progress</strong><span>{progress}% mapped to evidence</span></div>
+        <div className="qc-map-progress"><span style={{ width: `${progress}%` }} /></div>
+        <button className="quiet" onClick={() => onNavigate('evidence')}>Open Evidence Center <Icon name="arrow" size={14} /></button>
+      </div>
+    </section>
+  );
+}
+
+type MilestoneStatus = 'CLEAR' | 'RUNNING' | 'ATTENTION' | 'BLOCKED' | 'RETEST' | 'READY';
+
+const milestoneStatusLabel = (status: MilestoneStatus) => ({
+  CLEAR: 'CLEAR', RUNNING: 'RUNNING', ATTENTION: 'ATTENTION', BLOCKED: 'BLOCKED', RETEST: 'RETEST', READY: 'READY'
+}[status]);
+
+const milestoneStatusIcon = (status: MilestoneStatus) => status === 'CLEAR' ? 'check' : status === 'ATTENTION' || status === 'BLOCKED' ? 'warning' : status === 'RUNNING' ? 'runs' : status === 'RETEST' ? 'refresh' : 'clock';
+
+function milestonePath(from: ProcessNode, to: ProcessNode, connectionIndex: number) {
+  const x1 = from.x * 10;
+  const y1 = from.y * 7.6;
+  const x2 = to.x * 10;
+  const y2 = to.y * 7.6;
+  if (connectionIndex === 3) {
+    const outerX = 950;
+    return `M ${x1} ${y1} C ${outerX} ${y1}, ${outerX} ${y2}, ${x2} ${y2}`;
+  }
+  if (Math.abs(y1 - y2) < 20) return `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`;
+  return `M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${(y1 + y2) / 2}, ${x2} ${y2}`;
+}
+
+function MilestoneFlow({ nodes, progress, centralStatus, sourceLabel, isLive, selectedNodeId, onSelect, onNavigate }: { nodes: ProcessNode[]; progress: number; centralStatus: MilestoneStatus; sourceLabel: string; isLive: boolean; selectedNodeId: string | null; onSelect: (node: ProcessNode) => void; onNavigate: (view: View) => void }) {
+  const completion = nodes.filter((node) => node.status === 'CLEAR' || node.status === 'ATTENTION').length;
+  return (
+    <section className="milestone-flow" aria-label="QC Maestro milestone flow">
+      <div className="milestone-flow-header">
+        <div>
+          <div className="milestone-kicker">LIVE MILESTONE FLOW / {nodes.length} CHECKPOINTS</div>
+          <h2>Website Milestone Flow</h2>
+          <p>Alur QC dari input website sampai final report. Klik milestone untuk melihat substep, cabang, dan outputnya.</p>
+        </div>
+        <div className={`milestone-live-badge ${isLive ? 'is-live' : 'is-snapshot'}`}><span className="milestone-live-dot" /><div><strong>{isLive ? 'LIVE MILESTONE FLOW' : 'EVIDENCE SNAPSHOT'}</strong><small>{sourceLabel}</small></div></div>
+      </div>
+
+      <div className="milestone-flow-canvas">
+        <div className="milestone-grid" />
+        <div className="milestone-watermark">WEBSITE PROJECT MILESTONE FLOW</div>
+        <svg className="milestone-connectors" viewBox="0 0 1000 760" preserveAspectRatio="none" aria-hidden="true">
+          {nodes.slice(1).map((node, index) => {
+            const from = nodes[index];
+            const path = milestonePath(from, node, index);
+            const active = node.status === 'RUNNING' || (node.status === 'RETEST' && from.status === 'CLEAR');
+            const completed = node.status === 'CLEAR' || node.status === 'ATTENTION' || node.status === 'RETEST';
+            return (
+              <g key={`${from.id}-${node.id}`}>
+                <path className={`milestone-line ${completed ? 'completed' : ''} ${active ? 'active' : ''} ${node.status.toLowerCase()}`} d={path} />
+                {(active || completed) && <path className={`milestone-signal ${active ? 'active' : 'completed'}`} d={path} pathLength="100" style={{ animationDelay: `${index * 0.28}s` }} />}
+              </g>
+            );
+          })}
+        </svg>
+
+        <div className={`milestone-center ${centralStatus.toLowerCase()}`}>
+          <div className="milestone-center-orbit" />
+          <div className="milestone-center-icon"><Icon name="shield" size={24} /></div>
+          <strong>QC MAESTRO</strong>
+          <span>{centralStatus === 'RUNNING' ? 'QC process is running' : 'QC project control'}</span>
+          <em><i />{milestoneStatusLabel(centralStatus)}</em>
+        </div>
+
+        {nodes.map((node) => (
+          <button key={node.id} className={`milestone-card ${node.color} ${node.status.toLowerCase()} ${selectedNodeId === node.id ? 'selected' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }} onClick={() => onSelect(node)} title={`Buka detail ${node.title}`} aria-pressed={selectedNodeId === node.id}>
+            <span className="milestone-number">{node.eyebrow.replace('PHASE ', '').padStart(2, '0')}</span>
+            <span className="milestone-card-icon"><Icon name={node.icon} size={22} /></span>
+            <span className="milestone-card-copy"><small>{node.eyebrow}</small><strong>{node.title}</strong><span>{node.description}</span></span>
+            <span className="milestone-card-status"><i><Icon name={milestoneStatusIcon(node.status as MilestoneStatus)} size={11} /></i>{milestoneStatusLabel(node.status as MilestoneStatus)} <b>·</b> {node.count}</span>
+            <span className="milestone-card-tags">{node.items.map((item) => <b key={item}>{item}</b>)}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="milestone-flow-footer">
+        <div><strong>Progress proyek</strong><span>{completion}/{nodes.length} milestone selesai · {progress}% mapped</span></div>
+        <div className="milestone-progress-track"><span style={{ width: `${progress}%` }} /></div><strong className="milestone-progress-value">{progress}%</strong>
+        <button className="quiet" onClick={() => onNavigate('reports')}>Open Progress Report <Icon name="arrow" size={14} /></button>
+      </div>
+    </section>
+  );
+}
+
+function MilestoneDetails({ node, activeJob, evidence, onClose, onNavigate, onOpenEvidenceGroup }: { node: ProcessNode; activeJob: Job | null; evidence: ZannoraEvidence | null; onClose: () => void; onNavigate: (view: View) => void; onOpenEvidenceGroup: (groupId: string) => void }) {
+  const status = (['CLEAR', 'RUNNING', 'ATTENTION', 'BLOCKED', 'RETEST', 'READY'] as MilestoneStatus[]).includes(node.status as MilestoneStatus) ? node.status as MilestoneStatus : 'READY';
+  const relatedEvidence = evidence?.groups.filter((group) => node.evidenceIds.includes(group.id)) ?? [];
+  const projectLabel = activeJob?.name || evidence?.project || 'Belum ada project';
+  const folderLabel = activeJob?.workspace?.runPath || relatedEvidence[0]?.folder || 'Menunggu output';
+  return (
+    <aside className={`milestone-detail-panel ${status.toLowerCase()}`} role="dialog" aria-modal="true" aria-label={`Detail ${node.title}`}>
+      <div className="milestone-detail-header"><div><span className="milestone-kicker">{node.eyebrow}</span><h3>{node.title}</h3></div><button className="icon-btn" onClick={onClose} aria-label="Tutup detail"><Icon name="close" size={17} /></button></div>
+      <div className="milestone-detail-status"><span><i><Icon name={milestoneStatusIcon(status)} size={12} /></i>{milestoneStatusLabel(status)}</span><strong>{node.count}</strong></div>
+      <p className="milestone-detail-description">{node.description}. Semua output milestone ini disimpan ke folder project/run aktif.</p>
+      <div className="milestone-detail-section"><span className="milestone-detail-label">CHECKPOINT OUTPUT</span><ul>{node.details.map((detail) => <li key={detail}><Icon name={status === 'READY' ? 'clock' : 'check'} size={14} />{detail}</li>)}</ul></div>
+      <div className="milestone-detail-section"><span className="milestone-detail-label">RELATED OUTPUT</span>{relatedEvidence.length > 0 ? <div className="milestone-related-evidence">{relatedEvidence.map((group) => <button key={group.id} className="milestone-related-evidence-card" onClick={() => onOpenEvidenceGroup(group.id)}><span><strong>{group.title}</strong><small>{group.screenshots.length} screenshot · {group.videos.length} video · {group.assets.length} asset</small></span><Badge value={group.status} /><Icon name="arrow" size={13} /></button>)}</div> : <p className="milestone-detail-empty">Output fase ini akan muncul setelah milestone dijalankan pada project/run yang dipilih.</p>}</div>
+      <div className="milestone-detail-section"><span className="milestone-detail-label">RUN CONTEXT</span><div className="milestone-detail-context"><span>Project<strong>{projectLabel}</strong></span><span>Phase<strong>{activeJob?.phase?.replace(/_/g, ' ') || status}</strong></span><span>Folder<strong>{folderLabel}</strong></span></div></div>
+      <div className="milestone-detail-actions"><button className="primary" onClick={() => { onClose(); onNavigate(node.target); }}>Open Detail <Icon name="arrow" size={14} /></button><button className="quiet" onClick={() => { onClose(); if (relatedEvidence[0]) onOpenEvidenceGroup(relatedEvidence[0].id); else onNavigate('evidence'); }}>Evidence</button></div>
+    </aside>
+  );
+}
+
+type EvidenceFocus = { groupId: string; asset?: EvidenceAsset } | null;
+
+function EvidenceInspector({ focus, evidence, onClose, onOpenAsset }: { focus: EvidenceFocus; evidence: ZannoraEvidence | null; onClose: () => void; onOpenAsset: (asset: EvidenceAsset) => void }) {
+  if (!focus || !evidence) return null;
+  const group = evidence.groups.find((item) => item.id === focus.groupId);
+  if (!group) return null;
+  return (
+    <section className="evidence-inline-inspector" aria-label={`Evidence detail ${group.title}`}>
+      <div className="evidence-inline-header"><div><span className="evidence-group-kicker">INLINE EVIDENCE INSPECTOR</span><h2>{group.title}</h2><p>{group.summary}</p></div><button className="icon-btn" onClick={onClose} aria-label="Tutup evidence detail"><Icon name="close" size={17} /></button></div>
+      <div className="evidence-inline-meta"><Badge value={group.status} /><span>{group.screenshots.length} screenshot</span><span>{group.videos.length} video</span><code>{group.folder}</code></div>
+      {focus.asset && <div className="evidence-inline-focus"><div><span className="evidence-group-kicker">SELECTED CHECKPOINT</span><strong>{focus.asset.name}</strong><small>{focus.asset.relativePath}</small></div><button className="quiet" onClick={() => onOpenAsset(focus.asset!)}>Open full size <Icon name="arrow" size={13} /></button></div>}
+      {group.videos.length > 0 && <div className="evidence-inline-section"><div className="evidence-section-title"><span>VIDEO TERKAIT</span><small>{group.videos.length} file</small></div><div className="evidence-video-grid">{group.videos.map((asset) => <div className="evidence-video-card" key={asset.relativePath}><video controls preload="metadata" src={asset.url} /><div className="evidence-asset-footer"><div><strong>{asset.label}</strong><small>{asset.relativePath}</small></div><a href={asset.url} download>Download</a></div></div>)}</div></div>}
+      {group.screenshots.length > 0 && <div className="evidence-inline-section"><div className="evidence-section-title"><span>SCREENSHOT YANG PERLU DICEK</span><small>{group.screenshots.length} checkpoint</small></div><div className="evidence-screenshot-grid">{group.screenshots.map((asset) => <button className={`evidence-screenshot-card ${focus.asset?.relativePath === asset.relativePath ? 'selected' : ''}`} key={asset.relativePath} onClick={() => { onOpenAsset(asset); }} title="Buka screenshot checkpoint"><img src={asset.url} alt={asset.label} loading="lazy" /><span>{asset.name}</span></button>)}</div></div>}
+    </section>
+  );
+}
+
+function findingScreenshot(evidence: ZannoraEvidence | null, finding: EvidenceFinding) {
+  const group = evidence?.groups.find((item) => item.id === finding.groupId);
+  if (!group) return undefined;
+  if (finding.screenshot) return group.screenshots.find((asset) => asset.relativePath === finding.screenshot);
+  return group.screenshots.find((asset) => finding.route && asset.label.includes(finding.route));
+}
+
+function findingDescription(finding: EvidenceFinding) {
+  const route = finding.route || 'halaman yang diuji';
+  switch (finding.area) {
+    case 'contrast': return `Warna teks atau komponen pada ${route} tidak memenuhi batas contrast WCAG AA. Detail di bawah menunjukkan elemen dan rasio contrast yang terdeteksi.`;
+    case 'typography': return `Ukuran atau dimensi kontrol/teks pada ${route} berada di luar baseline yang ditetapkan, atau teks tidak muat di dalam elemennya.`;
+    case 'responsive': return `Ada elemen pada ${route} yang lebih lebar dari viewport ${finding.viewport || 'yang diuji'}, sehingga berpotensi keluar layar atau membutuhkan scroll horizontal.`;
+    case 'accessibility': return `Ada kontrol interaktif pada ${route} yang belum memiliki label atau identitas aksesibel yang dapat dibaca assistive technology.`;
+    case 'http': return `Route ${route} tidak memberikan respons HTTP yang valid dalam batas audit.`;
+    case 'dense-data': return `Tabel pada ${route} melebihi area tampil atau tidak aman saat menampilkan data padat.`;
+    case 'content-quality': return `Ada teks pada ${route} yang terpotong, bertumpuk, atau tidak terbaca dengan benar.`;
+    default: return `Engine menandai pemeriksaan UI pada ${route} sebagai finding yang perlu ditinjau.`;
+  }
+}
+
+function FindingEvidenceDropdown({ finding, evidence }: { finding: EvidenceFinding; evidence: ZannoraEvidence | null }) {
+  const screenshot = findingScreenshot(evidence, finding);
+  return (
+    <div className="finding-evidence-dropdown">
+      <div className="finding-evidence-context">
+        <div><span>LOKASI ERROR</span><strong>{finding.location || [finding.route, finding.viewport, finding.browser].filter(Boolean).join(' · ') || 'Lokasi tidak tersedia'}</strong></div>
+        <div><span>AREA</span><strong>{finding.area || 'UI quality'}</strong></div>
+      </div>
+      <div className="finding-evidence-body">
+        {screenshot ? <a className="finding-evidence-image" href={screenshot.url} target="_blank" rel="noreferrer"><img src={screenshot.url} alt={`Screenshot bukti ${finding.name || 'finding'}`} /><span>Buka screenshot penuh ↗</span></a> : <div className="finding-evidence-no-image">Screenshot untuk checkpoint ini belum tersedia.</div>}
+        <div className="finding-evidence-copy"><span className="evidence-group-kicker">KESIMPULAN MASALAH</span><strong className="finding-evidence-summary">{findingDescription(finding)}</strong><span className="evidence-group-kicker finding-detail-kicker">DETAIL ENGINE / ELEMEN TERDETEKSI</span><p>{finding.detail || 'Engine menandai pemeriksaan ini sebagai failed.'}</p>{screenshot && <small>{screenshot.relativePath}</small>}</div>
+      </div>
+    </div>
+  );
+}
+
+function evidenceMetric(group?: EvidenceGroup) {
+  const metadata = group?.metadata;
+  if (metadata && typeof metadata.passed === 'number' && typeof metadata.total === 'number') {
+    return { passed: metadata.passed, total: metadata.total, failed: metadata.failed ?? Math.max(0, metadata.total - metadata.passed) };
+  }
+  const match = group?.summary.match(/(\d+)\s*\/\s*(\d+)/);
+  const passed = match ? Number(match[1]) : group?.status === 'PASSED' ? 1 : 0;
+  const total = match ? Number(match[2]) : group ? 1 : 0;
+  return { passed, total, failed: Math.max(0, total - passed) };
+}
+
+function zannoraRoutes(evidence: ZannoraEvidence | null) {
+  const routeGroups = evidence?.groups.filter((group) => group.id === 'quality' || group.id === 'responsive') ?? [];
+  return [...new Set(routeGroups.flatMap((group) => group.metadata?.routes ?? []))];
+}
+
+function zannoraFindings(evidence: ZannoraEvidence | null): EvidenceFinding[] {
+  const syntheticFindingSeen = new Set<string>();
+  return evidence?.groups.flatMap((group) => (group.metadata?.findings ?? []).map((finding) => ({ ...finding, groupId: group.id }))).filter((finding) => {
+    if (finding.passed !== false) return false;
+    const isSyntheticRetest = String(finding.name || '').startsWith('Retest required:');
+    if (!isSyntheticRetest) return true;
+    const key = `${finding.name}|${finding.detail}`;
+    if (syntheticFindingSeen.has(key)) return false;
+    syntheticFindingSeen.add(key);
+    return true;
+  }) ?? [];
+}
+
+function ZannoraOverview({ evidence, onNavigate, onOpenEvidence }: { evidence: ZannoraEvidence; onNavigate: (view: View) => void; onOpenEvidence: (id: string) => void }) {
+  const routes = zannoraRoutes(evidence);
+  const designGroups = evidence.groups.filter((group) => ['api-e2e', 'crud', 'roles'].includes(group.id));
+  const executionGroups = evidence.groups.filter((group) => ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation'].includes(group.id));
+  const executionMetric = executionGroups.reduce((acc, group) => { const metric = evidenceMetric(group); return { passed: acc.passed + metric.passed, total: acc.total + metric.total }; }, { passed: 0, total: 0 });
+  const passRate = executionMetric.total ? Math.round((executionMetric.passed / executionMetric.total) * 100) : 0;
+  const findings = zannoraFindings(evidence).length;
+  return (
+    <div>
+      <div className="view-header"><div><h1>Project Summary · Zannora</h1><p>Snapshot real dari evidence QC terakhir. Semua angka di bawah berasal dari report yang tersimpan.</p></div><div className="header-actions"><button className="quiet" onClick={() => onNavigate('process')}><Icon name="map" size={15} /> Milestone Flow</button><button className="primary" onClick={() => onNavigate('evidence')}><Icon name="reports" size={15} /> Evidence Center</button></div></div>
+      <div className="metric-grid">
+        <Metric tone="cyan" label="Route Terpetakan" value={routes.length} note="route pada quality scope" icon="map" onClick={() => onNavigate('map')} />
+        <Metric tone="violet" label="Test Design Suites" value={designGroups.length} note={designGroups.reduce((n, group) => n + evidenceMetric(group).total, 0) + ' assertion'} icon="flows" onClick={() => onNavigate('flows')} />
+        <Metric tone="yellow" label="Execution Checks" value={executionMetric.total} note={executionMetric.passed + ' passed · ' + (executionMetric.total - executionMetric.passed) + ' failed'} icon="runs" onClick={() => onNavigate('runs')} />
+        <Metric tone="green" label="Pass Rate" value={passRate + '%'} note={findings + ' open finding'} icon="warning" onClick={() => onNavigate('findings')} />
+      </div>
+      <Panel title="Zannora Evidence Snapshot" description={'Generated ' + date(evidence.generatedAt) + ' · ' + evidence.totals.assets + ' artifact terindeks'}>
+        <div className="table-wrap"><table><thead><tr><th>Suite</th><th>Status</th><th>Coverage</th><th>Evidence</th><th>Action</th></tr></thead><tbody>{evidence.groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.category}</small></td><td><Badge value={group.status} /></td><td>{metric.passed}/{metric.total}</td><td>{group.screenshots.length} screenshot · {group.videos.length} video</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div>
+      </Panel>
+    </div>
+  );
+}
+
+function ZannoraDiscovery({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
+  const routes = zannoraRoutes(evidence);
+  return <div><div className="view-header"><div><h1>Discovery &amp; Inventory · Zannora</h1><p>Inventory diambil dari scope quality/responsive dan suite yang benar-benar dijalankan.</p></div><span className="evidence-project-chip">LIVE EVIDENCE SNAPSHOT</span></div><div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.25fr) minmax(280px, .75fr)', gap: 18 }}><Panel title={'Evidence pipeline (' + evidence.groups.length + ' suites)'}><div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{evidence.groups.map((group) => { const metric = evidenceMetric(group); return <button key={group.id} className="milestone-related-evidence-card" onClick={() => onOpenEvidence(group.id)}><span><strong>{group.title}</strong><small>{metric.passed}/{metric.total} checks · {group.assets.length} asset · {date(group.report?.updatedAt)}</small></span><Badge value={group.status} /><Icon name="arrow" size={13} /></button>; })}</div></Panel><Panel title={'Route scope (' + routes.length + ')'}><div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{routes.length ? routes.map((route) => <code key={route} style={{ color: 'var(--cyan)', padding: '8px 10px', background: 'var(--bg-panel)', borderRadius: 6 }}>{route}</code>) : <Empty title="Route scope belum tersedia">Report suite belum membawa daftar route.</Empty>}</div></Panel></div></div>;
+}
+
+function ZannoraAppMap({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
+  const routes = zannoraRoutes(evidence);
+  const quality = evidence.groups.find((group) => group.id === 'quality');
+  return <div><div className="view-header"><div><h1>App Map · Zannora</h1><p>Route inventory real dari report quality, dengan browser, viewport, dan status evidence.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Inspect quality evidence</button></div><div className="split-view"><div className="list-pane"><div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>Routes ({routes.length})</div>{routes.map((route) => <div key={route} style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}><strong>{route}</strong><small style={{ display: 'block', marginTop: 5, color: 'var(--text-dim)' }}>covered by quality audit · desktop / tablet / mobile</small></div>)}</div><div className="detail-pane"><Panel title="Inventory source" description={quality?.summary}><div className="evidence-inline-meta"><Badge value={quality?.status ?? 'UNKNOWN'} /><span>{quality?.metadata?.browsers?.join(' · ') || 'browser scope unavailable'}</span><span>{quality?.metadata?.viewports?.join(' · ') || 'viewport scope unavailable'}</span></div><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>App Map ini memakai daftar route yang tersimpan di report; bukan data demo atau hasil hitungan statis.</p></Panel><Panel title="Quality coverage"><div className="table-wrap"><table><thead><tr><th>Area</th><th>Checks</th><th>Status</th></tr></thead><tbody>{evidence.groups.filter((group) => group.category === 'UI Quality').map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td>{group.title}</td><td>{metric.passed}/{metric.total}</td><td><Badge value={group.status} /></td></tr>; })}</tbody></table></div></Panel></div></div></div>;
+}
+
+function ZannoraTestDesign({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
+  const groups = evidence.groups.filter((group) => ['API & CRUD', 'Web Flow'].includes(group.category));
+  return <div><div className="view-header"><div><h1>Test Design · Zannora</h1><p>Suite nyata yang menjadi dasar test design: API, CRUD, role access, navigation, dan full flow.</p></div><button className="quiet" onClick={() => onOpenEvidence('api-e2e')}><Icon name="reports" size={15} /> Open source evidence</button></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>{groups.map((group) => { const metric = evidenceMetric(group); return <Panel key={group.id} title={group.title} description={group.summary} actions={<Badge value={group.status} />}><div className="evidence-inline-meta"><strong>{metric.passed}/{metric.total}</strong><span>{group.category}</span></div><div className="evidence-asset-count"><span>{group.assets.length} artifact</span><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Detail &amp; evidence <Icon name="arrow" size={12} /></button></div></Panel>; })}</div></div>;
+}
+
+function ZannoraRuns({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
+  return <div><div className="view-header"><div><h1>Execution Runs · Zannora</h1><p>Ringkasan eksekusi yang dirakit dari report JSON terbaru tiap suite.</p></div><span className="evidence-project-chip">{evidence.totals.passed}/{evidence.totals.groups} SUITES PASSED</span></div><Panel title="Real execution ledger"><div className="table-wrap"><table><thead><tr><th>Run</th><th>Passed / Total</th><th>Failed</th><th>Artifacts</th><th>Report</th></tr></thead><tbody>{evidence.groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.id}</small></td><td>{metric.passed}/{metric.total}</td><td>{metric.failed}</td><td>{group.assets.length}</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div></Panel></div>;
+}
+
+function ZannoraReport({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
+  const total = evidence.groups.reduce((acc, group) => { const metric = evidenceMetric(group); return { passed: acc.passed + metric.passed, total: acc.total + metric.total }; }, { passed: 0, total: 0 });
+  return <div><div className="view-header"><div><h1>Final Report · Zannora</h1><p>Executive summary live dari seluruh report dan evidence yang tersedia.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Open quality report</button></div><div className="metric-grid"><Metric tone="green" label="Suite Clear" value={evidence.totals.passed + '/' + evidence.totals.groups} note="evidence groups" icon="check" /><Metric tone="cyan" label="Checks Passed" value={total.passed + '/' + total.total} note="across all reports" icon="runs" /><Metric tone="violet" label="Screenshots" value={evidence.totals.screenshots} note="checkpoint evidence" icon="reports" /><Metric tone="yellow" label="Videos" value={evidence.totals.videos} note="flow recording" icon="discovery" /></div><Panel title="Report index"><div className="table-wrap"><table><thead><tr><th>Category</th><th>Summary</th><th>Folder</th><th>Open</th></tr></thead><tbody>{evidence.groups.map((group) => <tr key={group.id}><td><Badge value={group.category} /></td><td>{group.summary}</td><td><code>{group.folder}</code></td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Evidence <Icon name="arrow" size={12} /></button></td></tr>)}</tbody></table></div></Panel></div>;
+}
 
 export function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -54,9 +399,12 @@ export function App() {
 
   // Curated Zannora evidence state
   const [zannoraEvidence, setZannoraEvidence] = useState<ZannoraEvidence | null>(null);
+  const [targetEvidence, setTargetEvidence] = useState<ZannoraEvidence | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState('');
   const [evidenceGroupFilter, setEvidenceGroupFilter] = useState('all');
+  const [evidenceFocus, setEvidenceFocus] = useState<EvidenceFocus>(null);
+  const [flowSource, setFlowSource] = useState<'zannora' | 'job'>('zannora');
 
   // Live WIB Clock
   const formatCurrentWIB = () => new Intl.DateTimeFormat('id-ID', {
@@ -123,9 +471,43 @@ export function App() {
     }
   }, []);
 
+  const refreshTargetEvidence = useCallback(async (jobId: string | null = activeJobId) => {
+    if (!jobId) {
+      setTargetEvidence(null);
+      return;
+    }
+    setEvidenceLoading(true);
+    try {
+      const evidence = await request<ZannoraEvidence>(`/api/v1/discovery/jobs/${jobId}/quality-evidence`);
+      setTargetEvidence(evidence);
+      setEvidenceError('');
+    } catch (error) {
+      setTargetEvidence(null);
+      setEvidenceError(errorText(error));
+    } finally {
+      setEvidenceLoading(false);
+    }
+  }, [activeJobId]);
+
   useEffect(() => {
     void refreshZannoraEvidence();
   }, [refreshZannoraEvidence]);
+
+  useEffect(() => {
+    if (flowSource !== 'job') return;
+    void refreshTargetEvidence(activeJobId);
+  }, [activeJobId, flowSource, refreshTargetEvidence]);
+
+  // Keep the selected evidence source live. Zannora is the default source, so its report-backed nav data refreshes too.
+  useEffect(() => {
+    if (flowSource === 'zannora') {
+      const timer = window.setInterval(() => void refreshZannoraEvidence(), 5000);
+      return () => clearInterval(timer);
+    }
+    if (!activeJobId || !activeJob || (activeJob.status !== 'RUNNING' && activeJob.status !== 'QUEUED' && currentView !== 'findings')) return;
+    const timer = window.setInterval(() => void refreshTargetEvidence(activeJobId), 5000);
+    return () => clearInterval(timer);
+  }, [activeJob, activeJobId, currentView, flowSource, refreshTargetEvidence, refreshZannoraEvidence]);
 
   // Poll active job details
   useEffect(() => {
@@ -197,6 +579,87 @@ export function App() {
     return { pagesCount, elementsCount, flowsCount, passedCount, failedCount, totalRuns: results.length };
   }, [activeJob]);
 
+  const flowJob = flowSource === 'job' ? activeJob : null;
+  const flowEvidence = flowSource === 'zannora' ? zannoraEvidence : targetEvidence;
+  const flowSourceLabel = flowSource === 'zannora' ? 'Zannora · latest evidence' : flowJob?.name || 'Active discovery run';
+  const zannoraRouteCount = zannoraRoutes(zannoraEvidence).length;
+  const zannoraOpenFindings = zannoraFindings(zannoraEvidence);
+  const activeEvidence = flowSource === 'zannora' ? zannoraEvidence : targetEvidence;
+  const activeOpenFindings = zannoraFindings(activeEvidence);
+  const zannoraDesignGroups = zannoraEvidence?.groups.filter((group) => ['api-e2e', 'crud', 'roles'].includes(group.id)) ?? [];
+  const zannoraExecutionGroups = zannoraEvidence?.groups.filter((group) => ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation'].includes(group.id)) ?? [];
+  const zannoraExecutionTotal = zannoraExecutionGroups.reduce((total, group) => total + evidenceMetric(group).total, 0);
+  const [selectedMilestone, setSelectedMilestone] = useState<ProcessNode | null>(null);
+  const [expandedFindingKey, setExpandedFindingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedMilestone) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedMilestone(null);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [selectedMilestone]);
+
+  const processNodes = useMemo<ProcessNode[]>(() => {
+    const groups = new Map((flowEvidence?.groups || []).map((group) => [group.id, group]));
+    const active = flowJob?.status === 'RUNNING' || flowJob?.status === 'QUEUED';
+    const failedJob = flowJob?.status === 'FAILED' || flowJob?.results?.some((result) => result.status !== 'PASSED');
+    const hasSource = Boolean(flowJob || flowEvidence);
+    const groupStatus = (id: string, fallback: MilestoneStatus = 'READY'): MilestoneStatus => {
+      const group = groups.get(id);
+      if (group?.status === 'PASSED') return 'CLEAR';
+      if (group?.status === 'FAILED') return 'ATTENTION';
+      return fallback;
+    };
+    const phaseMatches = (pattern: RegExp) => active && pattern.test(flowJob?.phase || '');
+    const setupStatus: MilestoneStatus = phaseMatches(/PREPAR|DATABASE|RUNTIME|BOOT|ENV|STARTING/) ? 'RUNNING' : failedJob ? 'ATTENTION' : hasSource ? 'CLEAR' : 'READY';
+    const discoveryStatus: MilestoneStatus = phaseMatches(/DISCOVER|SCAN|CRAWL|INVENTORY/) ? 'RUNNING' : failedJob && !flowJob?.inventory ? 'ATTENTION' : flowJob?.inventory || flowEvidence ? 'CLEAR' : 'READY';
+    const designReady = Boolean((flowJob?.flows?.length ?? 0) > 0 || (groups.get('api-e2e')?.status === 'PASSED' && groups.get('crud')?.status === 'PASSED' && groups.get('roles')?.status === 'PASSED'));
+    const designStatus: MilestoneStatus = phaseMatches(/FLOW|DESIGN|SYNTHESIS/) ? 'RUNNING' : failedJob && !designReady ? 'ATTENTION' : designReady ? 'CLEAR' : 'READY';
+    const executionGroupStatus = groupStatus('full-flow', 'READY');
+    const executionStatus: MilestoneStatus = phaseMatches(/RUN|EXECUTE|PLAYWRIGHT|MAESTRO/) ? 'RUNNING' : executionGroupStatus !== 'READY' ? executionGroupStatus : (flowJob?.results?.length ? (failedJob ? 'ATTENTION' : 'CLEAR') : 'READY');
+    const responsiveStatus = groupStatus('responsive', groupStatus('target-quality', 'READY'));
+    const visualQualityStatus = groupStatus('quality', groupStatus('target-quality', 'READY'));
+    const qualityStatus: MilestoneStatus = phaseMatches(/RESPONSIVE|LAYOUT|UI|QUALITY|ACCESSIBILITY|VISUAL/) ? 'RUNNING' : responsiveStatus === 'ATTENTION' || visualQualityStatus === 'ATTENTION' ? 'ATTENTION' : responsiveStatus === 'CLEAR' && visualQualityStatus === 'CLEAR' ? 'CLEAR' : flowEvidence ? 'READY' : 'READY';
+    const hasOpenRetest = groups.get('responsive')?.status === 'FAILED' || groups.get('quality')?.status === 'FAILED' || groups.get('target-quality')?.status === 'FAILED' || failedJob;
+    const retestStatus: MilestoneStatus = phaseMatches(/RETEST|RETRY|EVIDENCE/) ? 'RUNNING' : hasOpenRetest ? 'RETEST' : flowEvidence && flowEvidence.totals.assets > 0 ? 'CLEAR' : flowJob?.results?.length && !failedJob ? 'CLEAR' : 'READY';
+    const evidenceStatus: MilestoneStatus = flowEvidence && flowEvidence.totals.assets > 0 ? (flowEvidence.totals.failed > 0 ? 'ATTENTION' : 'CLEAR') : flowJob?.results?.length ? (failedJob ? 'ATTENTION' : 'CLEAR') : 'READY';
+    const requiredEvidenceIds = flowSource === 'zannora' ? ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation', 'responsive', 'quality'] : ['target-quality'];
+    const allEvidenceReady = flowEvidence ? requiredEvidenceIds.every((id) => groups.get(id)?.status === 'PASSED') : flowJob?.status === 'COMPLETED';
+    const finalStatus: MilestoneStatus = hasOpenRetest || evidenceStatus === 'ATTENTION' ? 'ATTENTION' : hasSource && allEvidenceReady ? 'CLEAR' : 'READY';
+    const pageCount = flowJob?.inventory?.pages?.length;
+    const evidenceCount = flowEvidence?.totals.assets;
+    const nodes: ProcessNode[] = [
+      { id: 'start-analysis', eyebrow: 'PHASE 01', title: 'Start & Analysis', description: 'Repository, scope, stack, dan target', icon: 'overview', color: 'blue', status: failedJob ? 'ATTENTION' : hasSource ? 'CLEAR' : 'READY', count: hasSource ? 'Target mapped' : 'Waiting input', items: ['Repository', 'Scope', 'Stack'], details: ['Project input tervalidasi', 'Repository / target URL tercatat', 'Scope dan platform pengujian ditetapkan'], evidenceIds: [], target: 'projects', x: 12, y: 20 },
+      { id: 'setup-environment', eyebrow: 'PHASE 02', title: 'Setup Environment', description: 'ENV, database, service, dan akun uji', icon: 'settings', color: 'cyan', status: setupStatus, count: setupStatus === 'RUNNING' ? 'Preparing' : hasSource ? 'Environment ready' : 'Waiting', items: ['ENV', 'DB', 'Service'], details: ['Environment variables disiapkan', 'Database dan service health check', 'Akun testing siap digunakan'], evidenceIds: [], target: 'discovery', x: 39, y: 20 },
+      { id: 'discovery-inventory', eyebrow: 'PHASE 03', title: 'Discovery & Inventory', description: 'Halaman, endpoint, elemen, dan evidence awal', icon: 'discovery', color: 'green', status: discoveryStatus, count: pageCount ? `${pageCount} pages` : flowEvidence ? `${flowEvidence.totals.groups} suites` : hasSource ? 'Asset mapped' : 'Waiting', items: ['Pages', 'Routes', 'Evidence'], details: ['Static source analysis', 'Dynamic crawl dan route inventory', 'Screenshot halaman awal'], evidenceIds: [], target: 'map', x: 66, y: 20 },
+      { id: 'test-design', eyebrow: 'PHASE 04', title: 'Test Design', description: 'Skenario role, CRUD, API, UI, dan full flow', icon: 'flows', color: 'yellow', status: designStatus, count: flowEvidence ? '83 API · 3 suites' : flowJob?.flows?.length ? `${flowJob.flows.length} flows` : 'Waiting', items: ['Roles', 'CRUD', 'Flow'], details: ['Canonical scenarios dibuat', 'Access matrix setiap role', 'Flow siap dieksekusi atau review'], evidenceIds: ['api-e2e', 'crud', 'roles'], target: 'flows', x: 89, y: 20 },
+      { id: 'execution', eyebrow: 'PHASE 05', title: 'Execution', description: 'API, master data, role access, dan customer journey', icon: 'runs', color: 'green', status: executionStatus, count: groups.get('full-flow')?.status === 'PASSED' ? '28 steps' : flowJob?.results?.length ? `${flowJob.results.length} runs` : 'Queued', items: ['API', 'UI', 'E2E'], details: ['API E2E seluruh endpoint', 'CRUD dan role access', 'Booking, payment ACC, ticket, e-ticket'], evidenceIds: ['api-e2e', 'full-flow', 'navigation'], target: 'runs', x: 89, y: 78 },
+      { id: 'responsive-quality', eyebrow: 'PHASE 06', title: 'Responsive & UI Quality', description: 'Desktop, tablet, mobile, layout, dan usability', icon: 'discovery', color: 'violet', status: qualityStatus, count: groups.get('responsive')?.status === 'FAILED' || groups.get('quality')?.status === 'FAILED' || groups.get('target-quality')?.status === 'FAILED' ? 'Quality findings' : groups.has('quality') ? `${groups.get('quality')?.screenshots.length ?? 0} quality assets` : groups.has('responsive') ? `${groups.get('responsive')?.screenshots.length ?? 0} checks` : groups.has('target-quality') ? `${groups.get('target-quality')?.screenshots.length ?? 0} quality assets` : 'Waiting', items: ['Desktop', 'Tablet', 'Mobile'], details: ['Viewport desktop, tablet, mobile', 'Contrast, typography, pixel regression, dan dense data', 'Keyboard, ARIA, state, dan cross-browser smoke'], evidenceIds: flowSource === 'zannora' ? ['responsive', 'quality'] : ['target-quality'], target: 'findings', x: 66, y: 78 },
+      { id: 'evidence-retest', eyebrow: 'PHASE 07', title: 'Evidence & Retest', description: 'Screenshot, video, report, defect, dan retest', icon: 'reports', color: 'blue', status: retestStatus, count: evidenceCount ? `${evidenceCount} files` : 'Waiting', items: ['Screenshot', 'Video', 'Retest'], details: ['Evidence dikelompokkan per milestone', 'Video full flow 30 FPS 720p', 'Defect diperbaiki dan diverifikasi ulang'], evidenceIds: flowSource === 'zannora' ? ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation', 'responsive', 'quality'] : ['target-quality'], target: 'evidence', x: 38, y: 78 },
+      { id: 'final-report', eyebrow: 'PHASE 08', title: 'Defect & Final Report', description: 'Triage defect, status akhir, dan kesimpulan QC', icon: 'reports', color: 'violet', status: finalStatus, count: finalStatus === 'CLEAR' ? 'Final ready' : finalStatus === 'ATTENTION' ? 'Review needed' : 'Waiting', items: ['Defect', 'Report', 'Summary'], details: ['Severity critical/high/medium/low', 'Final milestone summary', 'Laporan siap diunduh atau dibagikan'], evidenceIds: flowSource === 'zannora' ? ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation', 'responsive', 'quality'] : ['target-quality'], target: 'reports', x: 12, y: 78 },
+    ];
+    return nodes.map((node) => {
+      if (!flowEvidence) return node;
+      if (flowSource === 'job' && node.id === 'test-design') return { ...node, count: `${flowJob?.flows?.length ?? 0} flows` };
+      if (flowSource === 'job' && node.id === 'execution') return node;
+      if (node.id === 'test-design') return { ...node, count: `${zannoraDesignGroups.reduce((total, group) => total + evidenceMetric(group).total, 0)} checks · ${zannoraDesignGroups.length} suites` };
+      if (node.id === 'execution') { const fullFlow = groups.get('full-flow'); return { ...node, count: fullFlow ? `${evidenceMetric(fullFlow).passed}/${evidenceMetric(fullFlow).total} full-flow` : node.count }; }
+      if (node.id === 'responsive-quality') { const quality = groups.get('quality') || groups.get('responsive') || groups.get('target-quality'); return { ...node, count: quality ? `${evidenceMetric(quality).passed}/${evidenceMetric(quality).total} checks` : node.count }; }
+      return node;
+    });
+  }, [flowEvidence, flowJob, flowSource, zannoraDesignGroups]);
+
+  const processProgress = useMemo(() => Math.round((processNodes.filter((node) => node.status === 'CLEAR' || node.status === 'ATTENTION').length / Math.max(1, processNodes.length)) * 100), [processNodes]);
+  const centralProcessStatus: MilestoneStatus = flowJob?.status === 'RUNNING' || flowJob?.status === 'QUEUED' ? 'RUNNING' : processNodes.some((node) => node.status === 'BLOCKED') ? 'BLOCKED' : processNodes.some((node) => node.status === 'ATTENTION' || node.status === 'RETEST') ? 'ATTENTION' : processProgress === 100 ? 'CLEAR' : 'READY';
+  const openEvidenceGroup = (groupId: string) => {
+    setEvidenceGroupFilter('all');
+    setEvidenceFocus({ groupId });
+    setSelectedMilestone(null);
+    setCurrentView('evidence');
+  };
+
   // Actions
   const handleSaveFlow = async () => {
     if (!activeJobId || !selectedFlowId) return;
@@ -225,6 +688,25 @@ export function App() {
       setCurrentView('runs');
       setActionSuccess('Eksekusi flow berhasil diselesaikan!');
       setTimeout(() => setActionSuccess(''), 3000);
+    } catch (err) {
+      setActionError(errorText(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRunQualityAudit = async () => {
+    if (!activeJobId) return;
+    const password = window.prompt('Masukkan password akun untuk Quality Audit. Password tidak disimpan ke job.');
+    if (!password) return;
+    setLoading(true);
+    setActionError('');
+    try {
+      const updated = await send<Job>(`/api/v1/discovery/jobs/${activeJobId}/quality-audit`, { password }, 'POST');
+      setActiveJob(updated);
+      setCurrentView('discovery');
+      setActionSuccess('Quality Audit dimulai. Pantau kategori QUALITY pada Runtime Log.');
+      setTimeout(() => setActionSuccess(''), 4000);
     } catch (err) {
       setActionError(errorText(err));
     } finally {
@@ -395,117 +877,55 @@ export function App() {
           onClick={() => { setCurrentView('new'); }}
         >
           <Icon name="plus" size={16} />
-          New Discovery Run
+          New QC Run
         </button>
 
         <div className="nav-menu">
-          <div className="nav-section-title">CORE WORKSPACE</div>
-          <button
-            className={`nav-item ${currentView === 'overview' ? 'active' : ''}`}
-            onClick={() => setCurrentView('overview')}
-          >
-            <div className="nav-item-left">
-              <Icon name="overview" size={18} />
-              <span>Overview</span>
-            </div>
+          <div className="nav-context-card">
+            <span className="nav-context-label">CURRENT PROJECT</span>
+            <strong>{flowSource === 'zannora' ? 'Zannora Evidence' : activeJob?.name || 'No active project'}</strong>
+            <small>{activeJob ? `${activeJob.status} · ${activeJob.workspace?.runLabel || 'latest run'}` : 'Input website untuk memulai QC'}</small>
+          </div>
+
+          <div className="nav-section-title">WORKSPACE</div>
+          <button className={`nav-item ${currentView === 'process' ? 'active' : ''}`} onClick={() => setCurrentView('process')}>
+            <div className="nav-item-left"><Icon name="map" size={18} /><span>Milestone Flow</span></div><span className="nav-badge">{processProgress}%</span>
+          </button>
+          <button className={`nav-item ${currentView === 'overview' ? 'active' : ''}`} onClick={() => setCurrentView('overview')}>
+            <div className="nav-item-left"><Icon name="overview" size={18} /><span>Project Summary</span></div>
+          </button>
+          <button className={`nav-item ${currentView === 'projects' ? 'active' : ''}`} onClick={() => setCurrentView('projects')}>
+            <div className="nav-item-left"><Icon name="projects" size={18} /><span>Project Library</span></div><span className="nav-badge">{jobs.length}</span>
           </button>
 
-          <button
-            className={`nav-item ${currentView === 'projects' ? 'active' : ''}`}
-            onClick={() => setCurrentView('projects')}
-          >
-            <div className="nav-item-left">
-              <Icon name="projects" size={18} />
-              <span>Projects</span>
-            </div>
-            <span className="nav-badge">{jobs.length}</span>
+          <div className="nav-section-title" style={{ marginTop: 12 }}>ANALYSIS</div>
+          <button className={`nav-item ${currentView === 'discovery' ? 'active' : ''}`} onClick={() => setCurrentView('discovery')}>
+            <div className="nav-item-left"><Icon name="discovery" size={18} /><span>Discovery &amp; Inventory</span></div>{(activeJob?.status === 'RUNNING' || (flowSource === 'zannora' && evidenceLoading)) && <span className="status-dot active" />}
+          </button>
+          <button className={`nav-item ${currentView === 'map' ? 'active' : ''}`} onClick={() => setCurrentView('map')}>
+            <div className="nav-item-left"><Icon name="map" size={18} /><span>App Map</span></div><span className="nav-badge">{flowSource === 'zannora' ? zannoraRouteCount : activeJob?.inventory?.pages.length ?? 0}</span>
+          </button>
+          <button className={`nav-item ${currentView === 'flows' ? 'active' : ''}`} onClick={() => setCurrentView('flows')}>
+            <div className="nav-item-left"><Icon name="flows" size={18} /><span>Test Design</span></div><span className="nav-badge">{flowSource === 'zannora' ? zannoraDesignGroups.length : activeJob?.flows?.length ?? 0}</span>
           </button>
 
-          <button
-            className={`nav-item ${currentView === 'discovery' ? 'active' : ''}`}
-            onClick={() => setCurrentView('discovery')}
-          >
-            <div className="nav-item-left">
-              <Icon name="discovery" size={18} />
-              <span>Discovery Progress</span>
-            </div>
-            {activeJob && (activeJob.status === 'RUNNING' || activeJob.status === 'QUEUED') && (
-              <span className="status-dot active" />
-            )}
+          <div className="nav-section-title" style={{ marginTop: 12 }}>EXECUTION</div>
+          <button className={`nav-item ${currentView === 'runs' ? 'active' : ''}`} onClick={() => setCurrentView('runs')}>
+            <div className="nav-item-left"><Icon name="runs" size={18} /><span>Execution Runs</span></div><span className="nav-badge">{flowSource === 'zannora' ? zannoraExecutionTotal : activeJob?.results?.length ?? 0}</span>
+          </button>
+          <button className={`nav-item ${currentView === 'live' ? 'active' : ''}`} onClick={() => setCurrentView('live')}>
+            <div className="nav-item-left"><Icon name="discovery" size={18} /><span>Live Viewport</span></div><span className="nav-live-badge">LIVE</span>
           </button>
 
-          <div className="nav-section-title" style={{ marginTop: 12 }}>ANALYSIS &amp; TEST</div>
-          <button
-            className={`nav-item ${currentView === 'map' ? 'active' : ''}`}
-            onClick={() => setCurrentView('map')}
-          >
-            <div className="nav-item-left">
-              <Icon name="map" size={18} />
-              <span>App Map</span>
-            </div>
-            <span className="nav-badge">{activeJob?.inventory?.pages.length ?? 0}</span>
+          <div className="nav-section-title" style={{ marginTop: 12 }}>QUALITY &amp; OUTPUT</div>
+          <button className={`nav-item ${currentView === 'findings' ? 'active' : ''}`} onClick={() => setCurrentView('findings')}>
+            <div className="nav-item-left"><Icon name="warning" size={18} /><span>Findings &amp; Retest</span></div><span className="nav-badge nav-badge-warning">{activeOpenFindings.length}</span>
           </button>
-
-          <button
-            className={`nav-item ${currentView === 'flows' ? 'active' : ''}`}
-            onClick={() => setCurrentView('flows')}
-          >
-            <div className="nav-item-left">
-              <Icon name="flows" size={18} />
-              <span>Test Flows</span>
-            </div>
-            <span className="nav-badge">{activeJob?.flows?.length ?? 0}</span>
+          <button className={`nav-item ${currentView === 'evidence' ? 'active' : ''}`} onClick={() => { setCurrentView('evidence'); void refreshZannoraEvidence(); }}>
+            <div className="nav-item-left"><Icon name="reports" size={18} /><span>Evidence Center</span></div><span className="nav-badge">{activeEvidence?.totals.assets ?? 0}</span>
           </button>
-
-          <button
-            className={`nav-item ${currentView === 'runs' ? 'active' : ''}`}
-            onClick={() => setCurrentView('runs')}
-          >
-            <div className="nav-item-left">
-              <Icon name="runs" size={18} />
-              <span>Test Runs</span>
-            </div>
-            <span className="nav-badge">{activeJob?.results?.length ?? 0}</span>
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'live' ? 'active' : ''}`}
-            onClick={() => setCurrentView('live')}
-          >
-            <div className="nav-item-left">
-              <Icon name="discovery" size={18} />
-              <span>Live Viewport</span>
-            </div>
-            <span style={{
-              fontSize: 10,
-              fontWeight: 700,
-              padding: '2px 6px',
-              borderRadius: 4,
-              background: 'rgba(53, 208, 186, 0.15)',
-              color: 'var(--cyan)',
-              border: '1px solid rgba(53, 208, 186, 0.3)'
-            }}>LIVE</span>
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'reports' ? 'active' : ''}`}
-            onClick={() => setCurrentView('reports')}
-          >
-            <div className="nav-item-left">
-              <Icon name="reports" size={18} />
-              <span>Executive Report</span>
-            </div>
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'evidence' ? 'active' : ''}`}
-            onClick={() => { setCurrentView('evidence'); void refreshZannoraEvidence(); }}
-          >
-            <div className="nav-item-left">
-              <Icon name="reports" size={18} />
-              <span>Zannora Evidence</span>
-            </div>
-            <span className="nav-badge">{zannoraEvidence?.totals.assets ?? 0}</span>
+          <button className={`nav-item ${currentView === 'reports' ? 'active' : ''}`} onClick={() => setCurrentView('reports')}>
+            <div className="nav-item-left"><Icon name="reports" size={18} /><span>Final Report</span></div><span className="nav-badge">{activeEvidence?.totals.failed ?? 0}</span>
           </button>
 
           <div className="nav-section-title" style={{ marginTop: 12 }}>SYSTEM</div>
@@ -555,13 +975,18 @@ export function App() {
           <div className="topbar-left">
             <div className="project-select-pill">
               <span className="project-monogram" style={{ width: 26, height: 26, fontSize: 11, borderRadius: 6 }}>
-                {activeJob?.name?.slice(0, 2).toUpperCase() || 'QC'}
+                {flowSource === 'zannora' ? 'ZA' : activeJob?.name?.slice(0, 2).toUpperCase() || 'QC'}
               </span>
               <select
-                value={activeJobId ?? ''}
-                onChange={(e) => setActiveJobId(e.target.value)}
+                value={flowSource === 'zannora' ? 'zannora-evidence' : activeJobId ?? ''}
+                onChange={(e) => {
+                  if (e.target.value === 'zannora-evidence') setFlowSource('zannora');
+                  else { setFlowSource('job'); setActiveJobId(e.target.value); }
+                  setSelectedMilestone(null);
+                }}
                 style={{ background: 'transparent', border: 'none', fontWeight: 600, color: '#FFFFFF', outline: 'none', cursor: 'pointer' }}
               >
+                <option value="zannora-evidence" style={{ background: '#0F172A', color: '#FFF' }}>Zannora · latest evidence</option>
                 {jobs.map(j => (
                   <option key={j.id} value={j.id} style={{ background: '#0F172A', color: '#FFF' }}>
                     {j.name} ({j.config?.runMode})
@@ -570,12 +995,7 @@ export function App() {
               </select>
             </div>
 
-            {activeJob && (
-              <>
-                <Badge value={activeJob.config?.platform ?? 'web'} />
-                <Badge value={activeJob.status} />
-              </>
-            )}
+            {flowSource === 'zannora' ? <Badge value="EVIDENCE ARCHIVE" /> : activeJob && <><Badge value={activeJob.config?.platform ?? 'web'} /><Badge value={activeJob.status} /></>}
           </div>
 
           <div className="topbar-right">
@@ -613,15 +1033,16 @@ export function App() {
 
           {/* VIEW: OVERVIEW */}
           {currentView === 'overview' && (
+            flowSource === 'zannora' && zannoraEvidence ? <ZannoraOverview evidence={zannoraEvidence} onNavigate={setCurrentView} onOpenEvidence={openEvidenceGroup} /> : (
             <div>
               <div className="view-header">
                 <div>
-                  <h1>QA Control Center</h1>
-                  <p>Orkestrator pengujian otonom: pemetaan repository, penyiapan basis data, dan verifikasi alur deterministik.</p>
+                  <h1>Project Summary</h1>
+                  <p>Ringkasan project dan run aktif. Buka Milestone Flow untuk melihat alur QC lengkap dari input website sampai final report.</p>
                 </div>
                 <div className="header-actions">
-                  <button className="quiet" onClick={() => setCurrentView('discovery')}>
-                    <Icon name="terminal" size={16} /> Live Logs
+                  <button className="quiet" onClick={() => setCurrentView('process')}>
+                    <Icon name="map" size={16} /> Open Milestone Flow
                   </button>
                   <button className="primary" onClick={() => handleRunFlows()} disabled={loading || !activeJob?.flows?.length}>
                     <Icon name="runs" size={16} /> Run Regression Test
@@ -773,6 +1194,34 @@ export function App() {
                 )}
               </Panel>
             </div>
+            )
+          )}
+
+          {/* VIEW: QC PROCESS MAP */}
+          {currentView === 'process' && (
+            <div>
+              <div className="view-header">
+                <div>
+                  <h1>Milestone Flow</h1>
+                  <p>Alur project QC aktif. Milestone yang belum dikerjakan dibuat redup, milestone aktif dianimasikan, dan setiap card membuka output lengkapnya.</p>
+                </div>
+                <div className="header-actions">
+                  <button className="primary" onClick={() => setCurrentView('evidence')}><Icon name="reports" size={15} /> Evidence Center</button>
+                </div>
+              </div>
+              <MilestoneFlow nodes={processNodes} progress={processProgress} centralStatus={centralProcessStatus} sourceLabel={flowSourceLabel} isLive={Boolean(flowJob && (flowJob.status === 'RUNNING' || flowJob.status === 'QUEUED'))} selectedNodeId={selectedMilestone?.id || null} onSelect={setSelectedMilestone} onNavigate={setCurrentView} />
+              {selectedMilestone && (
+                <div className="milestone-floating-layer">
+                  <button className="milestone-floating-backdrop" aria-label="Tutup detail milestone" onClick={() => setSelectedMilestone(null)} />
+                  <MilestoneDetails node={selectedMilestone} activeJob={flowJob} evidence={flowEvidence} onClose={() => setSelectedMilestone(null)} onNavigate={setCurrentView} onOpenEvidenceGroup={openEvidenceGroup} />
+                </div>
+              )}
+              <div className="milestone-status-strip">
+                <div><span className="milestone-status-dot clear" /><strong>{processNodes.filter((node) => node.status === 'CLEAR').length} clear</strong><small>milestone selesai tanpa temuan</small></div>
+                <div><span className="milestone-status-dot running" /><strong>{processNodes.filter((node) => node.status === 'RUNNING').length} berjalan</strong><small>{activeJob?.phase?.replace(/_/g, ' ') || 'Tidak ada run aktif'}</small></div>
+                <div><span className="milestone-status-dot attention" /><strong>{processNodes.filter((node) => node.status === 'ATTENTION' || node.status === 'RETEST').length} perlu tindak lanjut</strong><small>lihat findings dan retest</small></div>
+              </div>
+            </div>
           )}
 
           {/* VIEW: NEW DISCOVERY WIZARD */}
@@ -780,8 +1229,8 @@ export function App() {
             <div>
               <div className="view-header">
                 <div>
-                  <h1>{editingJob ? `Edit Suite: ${editingJob.name}` : 'Start New Discovery & Test Engine'}</h1>
-                  <p>{editingJob ? 'Perbarui konfigurasi discovery suite dan jalankan ulang pengujian.' : 'Konfigurasikan target repository, lingkungan database isolated, aturan crawling, dan akun uji.'}</p>
+                  <h1>{editingJob ? `Edit QC Run: ${editingJob.name}` : 'Start New QC Run'}</h1>
+                  <p>{editingJob ? 'Perbarui konfigurasi project dan jalankan ulang milestone dari awal.' : 'Input website, repository, environment, akun, lalu QC Maestro akan membuat project/run folder dan menjalankan milestone secara berurutan.'}</p>
                 </div>
               </div>
               <Wizard
@@ -791,7 +1240,7 @@ export function App() {
                 onCreated={(newJob) => {
                   setEditingJob(null);
                   setActiveJobId(newJob.id);
-                  setCurrentView('discovery');
+                  setCurrentView('process');
                   void refreshJobs();
                 }}
               />
@@ -877,14 +1326,21 @@ export function App() {
                     </button>
                   )}
                   {activeJob?.status === 'COMPLETED' && (
-                    <button className="primary" onClick={() => setCurrentView('map')}>
-                      Buka Application Map <Icon name="arrow" size={16} />
-                    </button>
+                    <>
+                      {activeJob.config?.platform === 'web' && <button className="quiet" style={{ color: 'var(--violet)', borderColor: 'rgba(139, 124, 255, 0.45)' }} onClick={() => void handleRunQualityAudit()} disabled={loading}>
+                        <Icon name="discovery" size={16} /> Jalankan Quality Audit
+                      </button>}
+                      <button className="primary" onClick={() => setCurrentView('map')}>
+                        Buka Application Map <Icon name="arrow" size={16} />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
 
-              {!activeJob ? (
+              {flowSource === 'zannora' && zannoraEvidence ? (
+                <ZannoraDiscovery evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
+              ) : !activeJob ? (
                 <Empty title="Tidak Ada Job Terpilih">Pilih project atau buat discovery baru.</Empty>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24 }}>
@@ -911,6 +1367,7 @@ export function App() {
                           { title: '3. Static Source Code Scan', desc: 'Scan controllers, route, form, komponen (PHP/JS/Vue/React)' },
                           { title: '4. Dynamic Playwright Crawl', desc: `Observasi DOM, login auth, selector — max ${activeJob.config?.rules?.maxPages ?? '?'} halaman` },
                           { title: '5. Flow Synthesis & Laporan', desc: activeJob.config?.executeFlows ? 'Generate + run Playwright spec.ts, buat laporan QA' : 'Generate flow skenario — siap untuk review queue' },
+                          ...(activeJob.config?.qualityAudit?.enabled !== false ? [{ title: '6. Quality Audit & Evidence', desc: `${activeJob.config?.qualityAudit?.browsers?.join(', ') || 'browser default'} · ${activeJob.config?.qualityAudit?.viewports?.join(', ') || 'viewport default'} · screenshot & report` }] : []),
                         ];
 
                         const stages = isMobile ? mobileStages : webStages;
@@ -937,8 +1394,9 @@ export function App() {
                             </div>
 
                             {stages.map((stepItem, idx) => {
-                              const isDone = activeJob.status === 'COMPLETED' || activeJob.progress > (idx + 1) * 20;
-                              const isCurrent = activeJob.status === 'RUNNING' && activeJob.progress >= idx * 20 && activeJob.progress <= (idx + 1) * 20;
+                              const stepSize = 100 / stages.length;
+                              const isDone = activeJob.status === 'COMPLETED' || activeJob.progress > (idx + 1) * stepSize;
+                              const isCurrent = activeJob.status === 'RUNNING' && activeJob.progress >= idx * stepSize && activeJob.progress <= (idx + 1) * stepSize;
                               return (
                                 <div key={idx} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
                                   <div style={{
@@ -980,7 +1438,7 @@ export function App() {
                       </div>
 
                       <div style={{ display: 'flex', gap: 6 }}>
-                        {['all', 'system', 'database', 'browser', 'runner'].map(cat => (
+                        {['all', 'system', 'runtime', 'database', 'discovery', 'browser', 'flow-builder', 'runner', 'quality'].map(cat => (
                           <button
                             key={cat}
                             className={`quiet ${logFilter === cat ? 'primary' : ''}`}
@@ -1060,6 +1518,7 @@ export function App() {
                                     case 'EXECUTING_TESTS': return isMobile 
                                       ? 'Menjalankan skenario test di perangkat Android...' 
                                       : 'Menjalankan automated test di browser...';
+                                    case 'QUALITY_AUDIT': return 'Menjalankan Quality Audit: browser, viewport, rule UI, screenshot, dan report...';
                                     default: return 'Memproses langkah pengujian...';
                                   }
                                 })()}
@@ -1121,14 +1580,18 @@ export function App() {
                 </div>
               </div>
 
-              {!activeJob?.inventory ? (
+              {flowSource === 'zannora' && zannoraEvidence ? (
+                <ZannoraAppMap evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
+              ) : !activeJob?.inventory ? (
                 <Empty title="Belum Ada Inventaris">
                   Jalankan discovery terlebih dahulu untuk memetakan halaman dan elemen aplikasi.
                 </Empty>
               ) : (
-                <div className="split-view">
-                  {/* Left: Pages List */}
-                  <div className="list-pane">
+                <div>
+                  <CapabilityProfilePanel profile={activeJob.inventory.capabilities} />
+                  <div className="split-view">
+                    {/* Left: Pages List */}
+                    <div className="list-pane">
                     {mapViewMode === 'table' ? (
                       <div className="table-wrap">
                         <table>
@@ -1183,10 +1646,10 @@ export function App() {
                         ))}
                       </div>
                     )}
-                  </div>
+                    </div>
 
-                  {/* Right: Page Detail Drawer */}
-                  <div className="detail-pane">
+                    {/* Right: Page Detail Drawer */}
+                    <div className="detail-pane">
                     {selectedPage ? (
                       <>
                         <div>
@@ -1245,6 +1708,7 @@ export function App() {
                         Klik salah satu baris pada tabel untuk melihat screenshot halaman dan elemen interaktifnya.
                       </Empty>
                     )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1272,7 +1736,9 @@ export function App() {
                 </div>
               </div>
 
-              {!activeJob?.flows || activeJob.flows.length === 0 ? (
+              {flowSource === 'zannora' && zannoraEvidence ? (
+                <ZannoraTestDesign evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
+              ) : !activeJob?.flows || activeJob.flows.length === 0 ? (
                 <Empty title="Belum Ada Flow Skenario">
                   Jalankan discovery untuk menghasilkan flow atau buat skenario manual.
                 </Empty>
@@ -1357,7 +1823,9 @@ export function App() {
                 </button>
               </div>
 
-              {!activeJob?.results || activeJob.results.length === 0 ? (
+              {flowSource === 'zannora' && zannoraEvidence ? (
+                <ZannoraRuns evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
+              ) : !activeJob?.results || activeJob.results.length === 0 ? (
                 <Empty title="Belum Ada Hasil Uji">
                   Jalankan salah satu skenario flow untuk melihat hasil eksekusi nyata.
                 </Empty>
@@ -1401,6 +1869,49 @@ export function App() {
             </div>
           )}
 
+          {/* VIEW: FINDINGS & RETEST */}
+          {currentView === 'findings' && (
+            <div>
+              <div className="view-header">
+                <div><h1>Findings &amp; Retest</h1><p>Semua temuan dari milestone audit dikumpulkan di sini dan dapat dilacak sampai retest.</p></div>
+                <div className="header-actions"><button className="quiet" onClick={() => setCurrentView('process')}><Icon name="map" size={15} /> Back to Milestone Flow</button><button className="primary" onClick={() => setEvidenceFocus({ groupId: activeEvidence?.groups.find((group) => group.id === 'target-quality' || group.id === 'quality' || group.id === 'responsive')?.id || 'quality' })}><Icon name="reports" size={15} /> Inspect Evidence Inline</button></div>
+              </div>
+              {(() => {
+                const responsive = activeEvidence?.groups.find((group) => group.id === 'target-quality' || group.id === 'responsive');
+                const quality = activeEvidence?.groups.find((group) => group.id === 'quality');
+                const findings = activeOpenFindings.length;
+                return (
+                  <>
+                    <EvidenceInspector focus={evidenceFocus} evidence={activeEvidence} onClose={() => setEvidenceFocus(null)} onOpenAsset={(asset) => setFullScreenshot(asset.url)} />
+                    <div className="finding-summary-grid">
+                      <Panel title="Open Findings"><strong className="finding-number attention">{findings}</strong><small>responsive/layout findings</small></Panel>
+                      <Panel title="Retest Queue"><strong className="finding-number">{findings > 0 ? findings : 0}</strong><small>menunggu perbaikan UI</small></Panel>
+                      <Panel title="Current Branch"><strong className="finding-branch">{findings > 0 ? 'responsive-findings' : 'none'}</strong><small>branch milestone aktif</small></Panel>
+                    </div>
+                    <Panel title="Retest Workflow" description="Perbaiki temuan, jalankan retest, lalu milestone kembali menjadi clear.">
+                      <div className="finding-flow"><span className="finding-step active"><b>01</b>Open</span><i>→</i><span className="finding-step"><b>02</b>In Progress</span><i>→</i><span className="finding-step"><b>03</b>Ready for Retest</span><i>→</i><span className="finding-step"><b>04</b>Passed</span></div>
+                    </Panel>
+                    {findings > 0 ? <Panel title="Live Findings" description={responsive?.summary || 'Finding diambil langsung dari check report yang berstatus failed.'}>
+                      <div className="finding-list">{activeOpenFindings.map((item, index) => {
+                        const key = `${item.groupId || 'finding'}-${item.route || ''}-${item.name || ''}-${index}`;
+                        const expanded = expandedFindingKey === key;
+                        return <div className={`finding-item ${expanded ? 'expanded' : ''}`} key={key}>
+                          <button type="button" className="finding-row finding-row-toggle" aria-expanded={expanded} onClick={() => setExpandedFindingKey(expanded ? null : key)}>
+                            <span className="finding-severity">{(item.area || 'OPEN').replace(/-/g, ' ').toUpperCase()}</span>
+                            <span className="finding-row-copy"><strong>{item.name || 'Quality check failed'}</strong><small>{[item.route, item.viewport, item.browser].filter(Boolean).join(' · ') || 'Lokasi tidak tersedia'}</small></span>
+                            <span className="finding-row-status">OPEN</span>
+                            <span className="finding-expand-label">{expanded ? 'Tutup' : 'Lihat bukti'} <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={13} /></span>
+                          </button>
+                          {expanded && <FindingEvidenceDropdown finding={item} evidence={activeEvidence} />}
+                        </div>;
+                      })}</div>
+                    </Panel> : <Empty title="Tidak ada finding terbuka">Semua hasil audit visual sudah clear atau belum ada audit yang dijalankan.</Empty>}
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           {/* VIEW: REPORTS */}
           {currentView === 'reports' && (
             <div>
@@ -1435,7 +1946,9 @@ export function App() {
                 </div>
               </div>
 
-              {!activeJob ? (
+              {flowSource === 'zannora' && zannoraEvidence ? (
+                <ZannoraReport evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
+              ) : !activeJob ? (
                 <div className="inline-empty">Pilih proyek pada menu dropdown di atas untuk melihat laporan kualitas lengkap.</div>
               ) : (() => {
                 const allRawResults = activeJob.results || [];
@@ -1872,41 +2385,43 @@ export function App() {
               <div className="view-header">
                 <div>
                   <div className="evidence-title-row">
-                    <h1 style={{ margin: 0 }}>Zannora Evidence Center</h1>
+                    <h1 style={{ margin: 0 }}>{flowSource === 'zannora' ? 'Zannora Evidence Center' : `${activeJob?.name || 'Target'} Evidence Center`}</h1>
                     <span className="evidence-project-chip">LIVE ARTIFACT INDEX</span>
                   </div>
                   <p>Semua report, screenshot, dan video QC terbaru dikelompokkan berdasarkan bagian yang diuji.</p>
                 </div>
                 <div className="header-actions">
-                  <button className="tool-btn" onClick={() => void refreshZannoraEvidence()} disabled={evidenceLoading}>
+                  <button className="tool-btn" onClick={() => flowSource === 'zannora' ? void refreshZannoraEvidence() : void refreshTargetEvidence(activeJobId)} disabled={evidenceLoading}>
                     <Icon name="refresh" size={15} /> {evidenceLoading ? 'Memuat...' : 'Refresh Evidence'}
                   </button>
                 </div>
               </div>
 
               {evidenceError && <Notice error>{evidenceError}</Notice>}
-              {evidenceLoading && !zannoraEvidence && <div className="inline-empty">Membaca seluruh evidence Zannora dari folder QC...</div>}
-              {!evidenceLoading && !zannoraEvidence && !evidenceError && <div className="inline-empty">Evidence Zannora belum tersedia.</div>}
+              {evidenceLoading && !activeEvidence && <div className="inline-empty">Membaca seluruh evidence target dari folder QC...</div>}
+              {!evidenceLoading && !activeEvidence && !evidenceError && <div className="inline-empty">Evidence target belum tersedia.</div>}
 
-              {zannoraEvidence && (
+              {activeEvidence && (
                 <>
                   <div className="evidence-summary-grid">
-                    <div className="evidence-summary-card"><span>Bagian diuji</span><strong>{zannoraEvidence.totals.groups}</strong><small>{zannoraEvidence.totals.passed} lulus · {zannoraEvidence.totals.failed} perlu perhatian</small></div>
-                    <div className="evidence-summary-card"><span>Report JSON</span><strong>{zannoraEvidence.totals.reports}</strong><small>Report per kategori tersedia</small></div>
-                    <div className="evidence-summary-card"><span>Screenshot</span><strong>{zannoraEvidence.totals.screenshots}</strong><small>Bukti visual yang bisa diperbesar</small></div>
-                    <div className="evidence-summary-card"><span>Video</span><strong>{zannoraEvidence.totals.videos}</strong><small>Video flow dengan kontrol playback</small></div>
+                    <div className="evidence-summary-card"><span>Bagian diuji</span><strong>{activeEvidence.totals.groups}</strong><small>{activeEvidence.totals.passed} lulus · {activeEvidence.totals.failed} perlu perhatian</small></div>
+                    <div className="evidence-summary-card"><span>Report JSON</span><strong>{activeEvidence.totals.reports}</strong><small>Report per kategori tersedia</small></div>
+                    <div className="evidence-summary-card"><span>Screenshot</span><strong>{activeEvidence.totals.screenshots}</strong><small>Bukti visual yang bisa diperbesar</small></div>
+                    <div className="evidence-summary-card"><span>Video</span><strong>{activeEvidence.totals.videos}</strong><small>Video flow dengan kontrol playback</small></div>
                   </div>
 
                   <div className="evidence-filter-bar">
                     <span>LIHAT BAGIAN:</span>
-                    <button className={`tool-btn ${evidenceGroupFilter === 'all' ? 'active' : ''}`} onClick={() => setEvidenceGroupFilter('all')}>Semua ({zannoraEvidence.groups.length})</button>
-                    {[...new Set(zannoraEvidence.groups.map((group) => group.category))].map((category) => (
+                    <button className={`tool-btn ${evidenceGroupFilter === 'all' ? 'active' : ''}`} onClick={() => setEvidenceGroupFilter('all')}>Semua ({activeEvidence.groups.length})</button>
+                    {[...new Set(activeEvidence.groups.map((group) => group.category))].map((category) => (
                       <button key={category} className={`tool-btn ${evidenceGroupFilter === category ? 'active' : ''}`} onClick={() => setEvidenceGroupFilter(category)}>{category}</button>
                     ))}
                   </div>
 
+                  <EvidenceInspector focus={evidenceFocus} evidence={activeEvidence} onClose={() => setEvidenceFocus(null)} onOpenAsset={(asset) => setFullScreenshot(asset.url)} />
+
                   <div className="evidence-groups">
-                    {zannoraEvidence.groups.filter((group) => evidenceGroupFilter === 'all' || group.category === evidenceGroupFilter).map((group) => (
+                    {activeEvidence.groups.filter((group) => evidenceGroupFilter === 'all' || group.category === evidenceGroupFilter).map((group) => (
                       <Panel key={group.id} className="evidence-group-panel">
                         <div className="evidence-group-heading">
                           <div>
@@ -1914,7 +2429,7 @@ export function App() {
                             <h2>{group.title}</h2>
                             <p>{group.summary}</p>
                           </div>
-                          <Badge value={group.status} />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Badge value={group.status} /><button className="quiet evidence-inline-open-btn" onClick={() => setEvidenceFocus({ groupId: group.id })}>Inspect inline</button></div>
                         </div>
                         <div className="evidence-folder-row">
                           <span><Icon name="database" size={14} /> Folder evidence</span>
@@ -1928,7 +2443,7 @@ export function App() {
                             <div className="evidence-video-grid">
                               {group.videos.map((asset: EvidenceAsset) => (
                                 <div className="evidence-video-card" key={asset.relativePath}>
-                                  <video controls preload="metadata" src={asset.url} />
+                                  <video controls preload="metadata" src={asset.url} onClick={() => setEvidenceFocus({ groupId: group.id, asset })} />
                                   <div className="evidence-asset-footer"><div><strong>{asset.label}</strong><small>{asset.relativePath}</small></div><a href={asset.url} download>Download</a></div>
                                 </div>
                               ))}
@@ -1941,7 +2456,7 @@ export function App() {
                             <summary><span>SCREENSHOT CHECKPOINT</span><small>{group.screenshots.length} file · klik untuk buka semua</small></summary>
                             <div className="evidence-screenshot-grid">
                               {group.screenshots.map((asset: EvidenceAsset) => (
-                                <button className="evidence-screenshot-card" key={asset.relativePath} onClick={() => setFullScreenshot(asset.url)} title="Klik untuk memperbesar screenshot">
+                                  <button className={`evidence-screenshot-card ${evidenceFocus?.asset?.relativePath === asset.relativePath ? 'selected' : ''}`} key={asset.relativePath} onClick={() => { setEvidenceFocus({ groupId: group.id, asset }); setFullScreenshot(asset.url); }} title="Klik untuk melihat screenshot dan konteks temuan">
                                   <img src={asset.url} alt={asset.label} loading="lazy" />
                                   <span>{asset.name}</span>
                                 </button>
@@ -2018,7 +2533,7 @@ export function App() {
 
           {/* VIEW: LIVE VIEWPORT */}
           {currentView === 'live' && (
-            <LiveViewport job={activeJob} />
+            <LiveViewport job={flowSource === 'job' ? activeJob : null} evidence={flowSource === 'zannora' ? zannoraEvidence : null} />
           )}
         </main>
       </div>

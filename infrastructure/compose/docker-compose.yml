@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: qc
+      POSTGRES_PASSWORD: qc_dev_password
+      POSTGRES_DB: qc_maestro
+    ports: ["5432:5432"]
+    volumes: ["qc-postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qc -d qc_maestro"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes: ["qc-redis:/data"]
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: qcadmin
+      MINIO_ROOT_PASSWORD: qc_dev_minio_password
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["qc-minio:/data"]
+volumes:
+  qc-postgres:
+  qc-redis:
+  qc-minio:
