@@ -326,11 +326,55 @@ async function screenshotForTargetCheck(reportPath: string, check: Record<string
   return makeEvidenceAsset(candidatePath, 'screenshot', `${check.route || 'target'} · ${check.viewport || 'viewport'} · ${check.area || 'UI'}`);
 }
 
+async function readJsonIfExists(filePath: string): Promise<Record<string, any> | undefined> {
+  try {
+    return JSON.parse(await readFile(filePath, 'utf8')) as Record<string, any>;
+  } catch {
+    return undefined;
+  }
+}
+
+async function collectDiscoveryRunHistory(job: { id: string; name: string; workspace?: { projectPath?: string } }) {
+  const projectSlug = job.workspace?.projectPath?.split('/').filter(Boolean).pop();
+  if (!projectSlug) return [];
+  const runsRoot = path.join(artifactRoot, 'projects', projectSlug, 'runs');
+  let entries: Array<{ name: string; isDirectory(): boolean }> = [];
+  try { entries = await readdir(runsRoot, { withFileTypes: true }); } catch { return []; }
+  const history = [];
+  for (const entry of entries.filter((item) => item.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))) {
+    const runRoot = path.join(runsRoot, entry.name);
+    const run = await readJsonIfExists(path.join(runRoot, 'run.json'));
+    const progress = await readJsonIfExists(path.join(runRoot, 'progress.json'));
+    const report = await readJsonIfExists(path.join(runRoot, 'evidence', 'quality', 'report.json'))
+      ?? await readJsonIfExists(path.join(runRoot, 'quality', 'report.json'));
+    if (run?.jobId && run.jobId !== job.id) continue;
+    history.push({
+      runLabel: entry.name,
+      project: String(run?.project ?? job.name),
+      status: String(progress?.status ?? run?.status ?? 'UNKNOWN'),
+      phase: progress?.phase,
+      progress: Number(progress?.progress ?? 0),
+      createdAt: run?.createdAt,
+      updatedAt: progress?.updatedAt ?? run?.finishedAt,
+      quality: report ? {
+        status: report.status,
+        total: report.total,
+        passed: report.passed,
+        failed: report.failed,
+        notApplicable: report.notApplicable,
+        visualRegression: report.visualRegression,
+      } : undefined,
+    });
+  }
+  return history;
+}
+
 async function buildTargetQualityEvidence(job: { id: string; name: string }) {
   const reports = await collectTargetQualityReports(job);
   const findings: Array<Record<string, unknown>> = [];
   let passed = 0;
   let total = 0;
+  let notApplicable = 0;
   const routes = new Set<string>();
   const browsers = new Set<string>();
   const viewports = new Set<string>();
@@ -340,6 +384,7 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
     const checks = Array.isArray(item.report.checks) ? item.report.checks as Array<Record<string, any>> : [];
     total += Number(item.report.total ?? checks.length);
     passed += Number(item.report.passed ?? checks.filter((check) => check.passed !== false).length);
+    notApplicable += Number(item.report.notApplicable ?? checks.filter((check) => check.outcome === 'NOT_APPLICABLE').length);
     for (const route of item.report.scope?.routes ?? []) routes.add(String(route));
     for (const browser of item.report.scope?.browsers ?? []) browsers.add(String(browser));
     for (const viewport of item.report.scope?.viewports ?? []) viewports.add(String(viewport.name ?? viewport));
@@ -359,14 +404,14 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
     }
   }
 
-  const failed = findings.length || Math.max(0, total - passed);
+  const failed = findings.length || Math.max(0, total - passed - notApplicable);
   const latest = reports[0];
   const group = await makeEvidenceGroup({
     id: 'target-quality',
     title: `${job.name} · UI Quality Audit`,
     category: 'UI Quality',
-    status: failed > 0 ? 'FAILED' : reports.length ? 'PASSED' : 'READY',
-    summary: reports.length ? `${passed}/${total} pemeriksaan lulus; ${failed} finding UI perlu ditindaklanjuti.` : 'Belum ada report UI quality untuk job ini.',
+    status: failed > 0 ? 'FAILED' : notApplicable > 0 ? 'PASSED_WITH_LIMITATIONS' : reports.length ? 'PASSED' : 'READY',
+    summary: reports.length ? `${passed}/${total} pemeriksaan lulus; ${failed} finding UI; ${notApplicable} pemeriksaan belum applicable.` : 'Belum ada report UI quality untuk job ini.',
     folder: latest ? evidenceRelativePath(path.dirname(latest.reportPath)) : '',
     reportPath: latest?.reportPath,
     directories,
@@ -374,6 +419,7 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
       passed,
       total,
       failed,
+      notApplicable,
       routes: [...routes],
       browsers: [...browsers],
       viewports: [...viewports],
@@ -1007,9 +1053,9 @@ app.put<{ Params: { id: string; flowId: string }; Body: { source: string } }>('/
   }
 });
 
-app.post<{ Params: { id: string }; Body: { flowIds?: string[] } }>('/api/v1/discovery/jobs/:id/run', async (request, reply) => {
+app.post<{ Params: { id: string }; Body: { flowIds?: string[]; password?: string } }>('/api/v1/discovery/jobs/:id/run', async (request, reply) => {
   try {
-    const job = await discoveryService.runFlows(request.params.id, request.body?.flowIds);
+    const job = await discoveryService.runFlows(request.params.id, request.body?.flowIds, request.body?.password);
     return job;
   } catch (err) {
     return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -1097,6 +1143,21 @@ app.get<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/quality-evidence
   const job = discoveryService.getJob(request.params.id);
   if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
   return buildTargetQualityEvidence({ id: job.id, name: job.config.name });
+});
+
+app.patch<{ Params: { id: string }; Body: { findingKey?: string; status?: 'OPEN' | 'IN_PROGRESS' | 'READY_FOR_RETEST' | 'PASSED' } }>('/api/v1/discovery/jobs/:id/findings/status', async (request, reply) => {
+  try {
+    if (!request.body?.findingKey || !request.body.status) return reply.code(400).send({ error: 'findingKey dan status wajib diisi.' });
+    return discoveryService.updateFindingStatus(request.params.id, request.body.findingKey, request.body.status);
+  } catch (err) {
+    return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/history', async (request, reply) => {
+  const job = discoveryService.getJob(request.params.id);
+  if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
+  return { project: job.config.name, entries: await collectDiscoveryRunHistory({ id: job.id, name: job.config.name, workspace: job.workspace }) };
 });
 
 app.get<{ Params: { '*': string } }>('/api/v1/zannora-evidence/artifacts/*', async (request, reply) => {

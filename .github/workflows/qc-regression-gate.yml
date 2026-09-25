@@ -1,0 +1,35 @@
+name: QC Maestro Regression Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_path:
+        description: 'Path report.json hasil QC Maestro di workspace runner'
+        required: true
+        type: string
+      allowed_findings:
+        description: 'Jumlah finding yang masih ditoleransi'
+        required: false
+        default: '0'
+        type: string
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  typecheck-and-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: Run QC report gate when a report is supplied
+        env:
+          QC_REPORT_PATH: ${{ inputs.report_path || vars.QC_REPORT_PATH }}
+          QC_ALLOWED_FINDINGS: ${{ inputs.allowed_findings || vars.QC_ALLOWED_FINDINGS || '0' }}
+          QC_REQUIRE_REPORT: ${{ inputs.report_path != '' || vars.QC_REQUIRE_REPORT == 'true' }}
+        run: npm run qc:gate

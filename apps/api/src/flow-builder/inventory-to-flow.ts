@@ -356,5 +356,29 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
     });
   }
 
+  // CRUD coverage is generated as a safe, read-only baseline. Mutation checks
+  // are represented in the CRUD plan and remain REVIEW_REQUIRED until a
+  // resettable fixture contract is supplied by the target project.
+  for (const resource of inventory.crudPlan?.resources ?? []) {
+    const route = resource.routes.find((candidate) => !/\/create$|\/new$|\/edit$|\/\d+$/i.test(candidate)) ?? resource.routes[0];
+    if (!route || /\/api(?:\/|$)/i.test(route)) continue;
+    const resourceSlug = resource.id || `resource-${flows.length}`;
+    const steps: FlowStep[] = [...(route.startsWith('/') && loginSteps().length ? loginSteps() : [])];
+    steps.push(
+      { id: `crud-${resourceSlug}-list`, action: 'open', url: route },
+      { id: `crud-${resourceSlug}-url`, action: 'assertUrl', value: route },
+      { id: `crud-${resourceSlug}-body`, action: 'assertVisible', target: { selector: 'body' } },
+      { id: `crud-${resourceSlug}-screenshot`, action: 'screenshot', name: `crud-${resourceSlug}-list` },
+    );
+    flows.push({
+      id: `crud-read-${resourceSlug}`,
+      name: `${String(capabilityIndex++).padStart(2, '0')}. CRUD Read · ${resource.name}`,
+      source: toSource(`CRUD Read · ${resource.name}`, steps),
+      platform: 'web',
+      status: 'READY',
+      reason: `Safe read-only coverage. Create/update/delete/duplicate checks require fixture: ${resource.fixtureChecks.join(', ')}.`,
+    });
+  }
+
   return flows;
 }

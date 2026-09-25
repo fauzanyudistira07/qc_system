@@ -6,7 +6,7 @@ import type { NormalizedFlow } from '@qc/flow-schema';
 import { validateFlow } from '@qc/flow-schema';
 import { scanSource, type InventoryPage } from './source-scanner.ts';
 import { crawlUI } from './ui-crawler.ts';
-import type { DiscoveryConfig, DiscoveryJob, GeneratedFlow, Inventory, QualityAuditConfig, QualityAuditBrowser, QualityAuditViewport } from './types.ts';
+import type { DiscoveryConfig, DiscoveryJob, GeneratedFlow, Inventory, QualityAuditConfig, QualityAuditBrowser, QualityAuditViewport, FindingWorkflowStatus } from './types.ts';
 import { prepareDatabase, type PreparedDatabase } from '../database/database-manager.ts';
 import { buildFlows } from '../flow-builder/inventory-to-flow.ts';
 import { buildReport } from '../report/report-builder.ts';
@@ -15,6 +15,8 @@ import { executeWebFlow, type WebRunResult } from '../playwright-adapter.ts';
 import { compilePlaywrightFlow } from '../playwright-generator.ts';
 import { checkAndroid, executeAndroidFlow, executeAndroidRawFlow } from '../android/index.ts';
 import { detectCapabilities } from './capability-model.ts';
+import { buildCrudPlan } from './crud-planner.ts';
+import { buildRoleActionPlan } from './role-planner.ts';
 
 
 export class DiscoveryService {
@@ -38,7 +40,7 @@ export class DiscoveryService {
       const loadedJobs = JSON.parse(data) as DiscoveryJob[];
       let capabilityBackfill = false;
       for (const j of loadedJobs) {
-        if (j.inventory && !j.inventory.capabilities) {
+        if (j.inventory && (!j.inventory.capabilities || !j.inventory.capabilities.negativeScenarios)) {
           j.inventory.capabilities = detectCapabilities({ pages: j.inventory.pages, routes: j.inventory.routes, api: j.inventory.api });
           capabilityBackfill = true;
         }
@@ -79,6 +81,16 @@ export class DiscoveryService {
 
   public getJob(id: string): DiscoveryJob | undefined {
     return this.jobs.get(id);
+  }
+
+  public updateFindingStatus(id: string, findingKey: string, status: FindingWorkflowStatus): DiscoveryJob {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error('Job tidak ditemukan.');
+    if (!findingKey || findingKey.length > 240) throw new Error('Finding key tidak valid.');
+    if (!['OPEN', 'IN_PROGRESS', 'READY_FOR_RETEST', 'PASSED'].includes(status)) throw new Error('Status finding tidak valid.');
+    job.findingStatuses = { ...(job.findingStatuses ?? {}), [findingKey]: status };
+    void this.persist();
+    return job;
   }
 
   public saveUpload(filename: string, kind: 'sql' | 'env', content: string): { id: string; filename: string; size: number } {
@@ -174,16 +186,17 @@ export class DiscoveryService {
     const isFailed = job.status === 'FAILED' || hasFailedResults;
     const qualityRunning = active && /QUALITY/i.test(phase);
     const qualityFailed = job.qualityAudit?.status === 'FAILED' || job.qualityAudit?.status === 'ERROR';
+    const qualityLimited = job.qualityAudit?.status === 'PASSED_WITH_LIMITATIONS';
     const hasQualityReport = Boolean(job.qualityAudit?.reportPath);
     const statuses = [
       { folder: '01-start-analysis', title: 'Start & Analysis', status: active && /INITIALIZING/i.test(phase) ? 'RUNNING' : job.status === 'FAILED' ? 'ATTENTION' : 'CLEAR', output: ['project.json', 'input/config.json'] },
       { folder: '02-setup-environment', title: 'Setup Environment', status: active && /PREPAR|DATABASE|RUNTIME|BOOT|ENV|STARTING_DEMO/i.test(phase) ? 'RUNNING' : 'CLEAR', output: ['run.json'] },
-      { folder: '03-discovery-inventory', title: 'Discovery & Inventory', status: active && /DISCOVER|SCAN|CRAWL|INVENTORY/i.test(phase) ? 'RUNNING' : hasInventory ? 'CLEAR' : 'READY', output: hasInventory ? ['application-inventory.json', 'capability-profile.json'] : [] },
+      { folder: '03-discovery-inventory', title: 'Discovery & Inventory', status: active && /DISCOVER|SCAN|CRAWL|INVENTORY/i.test(phase) ? 'RUNNING' : hasInventory ? 'CLEAR' : 'READY', output: hasInventory ? ['application-inventory.json', 'capability-profile.json', 'crud-plan.json', 'role-action-plan.json'] : [] },
       { folder: '04-test-design', title: 'Test Design', status: active && /FLOW|DESIGN/i.test(phase) ? 'RUNNING' : hasFlows ? 'CLEAR' : 'READY', output: hasFlows ? ['generated flows'] : [] },
       { folder: '05-execution', title: 'Execution', status: active && /RUN|EXECUTE|PLAYWRIGHT|MAESTRO/i.test(phase) ? 'RUNNING' : hasResults ? (isFailed ? 'ATTENTION' : 'CLEAR') : 'READY', output: hasResults ? ['runtime-artifacts', 'results'] : [] },
-      { folder: '06-responsive-ui', title: 'Responsive & UI Quality', status: qualityRunning ? 'RUNNING' : qualityFailed ? 'ATTENTION' : job.qualityAudit?.status === 'PASSED' ? 'CLEAR' : 'READY', output: hasQualityReport ? ['quality/report.json', 'quality/screenshots'] : [] },
-      { folder: '07-evidence-retest', title: 'Evidence & Retest', status: hasQualityReport || hasResults ? (isFailed || qualityFailed || job.qualityAudit?.status === 'FAILED' ? 'RETEST' : 'CLEAR') : 'READY', output: ['evidence/screenshots', 'evidence/videos', 'evidence/reports'] },
-      { folder: '08-final-report', title: 'Defect & Final Report', status: job.finishedAt ? (isFailed || qualityFailed ? 'ATTENTION' : 'CLEAR') : 'READY', output: ['final-report'] }
+      { folder: '06-responsive-ui', title: 'Responsive & UI Quality', status: qualityRunning ? 'RUNNING' : qualityFailed || qualityLimited ? 'ATTENTION' : job.qualityAudit?.status === 'PASSED' ? 'CLEAR' : 'READY', output: hasQualityReport ? ['quality/report.json', 'quality/screenshots'] : [] },
+      { folder: '07-evidence-retest', title: 'Evidence & Retest', status: hasQualityReport || hasResults ? (isFailed || qualityFailed || qualityLimited ? 'RETEST' : 'CLEAR') : 'READY', output: ['evidence/screenshots', 'evidence/videos', 'evidence/reports'] },
+      { folder: '08-final-report', title: 'Defect & Final Report', status: job.finishedAt ? (isFailed || qualityFailed || qualityLimited ? 'ATTENTION' : 'CLEAR') : 'READY', output: ['final-report'] }
     ];
     await mkdir(runRoot, { recursive: true });
     await writeFile(path.join(runRoot, 'timeline.json'), JSON.stringify(job.logs, null, 2), 'utf8');
@@ -307,7 +320,7 @@ export class DiscoveryService {
     return true;
   }
 
-  public async runFlows(id: string, flowIds?: string[]): Promise<DiscoveryJob> {
+  public async runFlows(id: string, flowIds?: string[], runtimePassword?: string): Promise<DiscoveryJob> {
     const job = this.jobs.get(id);
     if (!job) throw new Error('Job tidak ditemukan.');
     const targetFlows = flowIds && flowIds.length > 0
@@ -387,6 +400,17 @@ export class DiscoveryService {
         continue;
       }
       const normalized = validation.normalized;
+      const runtimeAccount = job.config.accounts?.[0];
+      const executableFlow = normalized.target.platform === 'web' && (runtimeAccount?.email || runtimePassword)
+        ? {
+          ...normalized,
+          variables: {
+            ...normalized.variables,
+            ...(runtimeAccount?.email ? { QC_EMAIL: runtimeAccount.email } : {}),
+            ...(runtimePassword ? { QC_PASSWORD: runtimePassword } : {}),
+          },
+        }
+        : normalized;
       const runId = `run-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
       this.addLog(job, 'runner', `Menjalankan: ${flowItem.name} (${normalized.target.platform})`);
 
@@ -401,7 +425,7 @@ export class DiscoveryService {
           if (apkPath && shouldInstall) installedApks.add(apkPath);
         } else {
           runResult = await executeWebFlow(
-            normalized,
+            executableFlow,
             runId,
             job.config.baseUrl,
             jobArtifactDir,
@@ -687,6 +711,43 @@ export class DiscoveryService {
       maxRoutes: Math.min(1000, Math.max(0, Number(source.maxRoutes) || 0)),
       routeOffset: Math.max(0, Number(source.routeOffset) || 0),
       navigationTimeoutMs: Math.min(180000, Math.max(10000, Number(source.navigationTimeoutMs) || 60000)),
+      accessibility: source.accessibility !== false,
+      stateTesting: {
+        enabled: source.stateTesting?.enabled !== false,
+        hover: source.stateTesting?.hover !== false,
+        focus: source.stateTesting?.focus !== false,
+        disabled: source.stateTesting?.disabled !== false,
+        loading: source.stateTesting?.loading !== false,
+        empty: source.stateTesting?.empty !== false,
+        error: source.stateTesting?.error !== false,
+      },
+      screenReader: {
+        mode: source.screenReader?.mode === 'external' ? 'external' : 'semantic',
+        command: source.screenReader?.command,
+        timeoutMs: Math.min(60000, Math.max(1000, Number(source.screenReader?.timeoutMs ?? 10000) || 10000)),
+      },
+      visualRegression: {
+        mode: source.visualRegression?.mode === 'off' || source.visualRegression?.mode === 'capture' ? source.visualRegression.mode : 'required',
+        baselineDir: source.visualRegression?.baselineDir,
+        updateBaseline: source.visualRegression?.updateBaseline === true,
+        pixelThreshold: Math.min(1, Math.max(0, Number(source.visualRegression?.pixelThreshold ?? 0.1) || 0.1)),
+        allowedDiffPercent: Math.min(100, Math.max(0, Number(source.visualRegression?.allowedDiffPercent ?? 0.5) || 0.5)),
+      },
+      denseData: {
+        enabled: source.denseData?.enabled !== false,
+        syntheticRows: Math.min(1000, Math.max(20, Number(source.denseData?.syntheticRows) || 100)),
+        longTextLength: Math.min(2000, Math.max(40, Number(source.denseData?.longTextLength) || 240)),
+      },
+      negativeTesting: {
+        enabled: source.negativeTesting?.enabled !== false,
+        emptyFormValidation: source.negativeTesting?.emptyFormValidation !== false,
+        duplicateSubmissionGuard: source.negativeTesting?.duplicateSubmissionGuard !== false,
+        networkFailureHandling: source.negativeTesting?.networkFailureHandling !== false,
+        transactionalScenarios: source.negativeTesting?.transactionalScenarios !== false,
+        fixtureReportPath: source.negativeTesting?.fixtureReportPath,
+        mutationFixturePath: source.negativeTesting?.mutationFixturePath,
+        runMutations: source.negativeTesting?.runMutations === true,
+      },
     };
   }
 
@@ -738,16 +799,59 @@ export class DiscoveryService {
       QC_MAX_ROUTES: String(settings.maxRoutes),
       QC_ROUTE_OFFSET: String(settings.routeOffset),
       QC_NAV_TIMEOUT_MS: String(settings.navigationTimeoutMs),
+      QC_LOGIN_TIMEOUT_MS: String(Math.min(settings.navigationTimeoutMs, 10000)),
       QC_AUDIT_SESSION: `quality-${job.id}-${Date.now()}`,
+      QC_ACCESSIBILITY: String(settings.accessibility !== false),
+      QC_VISUAL_REGRESSION_MODE: settings.visualRegression?.mode || 'required',
+      QC_VISUAL_BASELINE_DIR: settings.visualRegression?.baselineDir || '',
+      QC_UPDATE_BASELINE: String(settings.visualRegression?.updateBaseline === true),
+      QC_PIXEL_THRESHOLD: String(settings.visualRegression?.pixelThreshold ?? 0.1),
+      QC_ALLOWED_DIFF_PERCENT: String(settings.visualRegression?.allowedDiffPercent ?? 0.5),
+      QC_DENSE_DATA: String(settings.denseData?.enabled !== false),
+      QC_SYNTHETIC_ROWS: String(settings.denseData?.syntheticRows ?? 100),
+      QC_LONG_TEXT_LENGTH: String(settings.denseData?.longTextLength ?? 240),
+      QC_NEGATIVE_TESTING: String(settings.negativeTesting?.enabled !== false),
+      QC_EMPTY_FORM_VALIDATION: String(settings.negativeTesting?.emptyFormValidation !== false),
+      QC_DUPLICATE_SUBMISSION_GUARD: String(settings.negativeTesting?.duplicateSubmissionGuard !== false),
+      QC_NETWORK_FAILURE_HANDLING: String(settings.negativeTesting?.networkFailureHandling !== false),
+      QC_STATE_TESTING: String(settings.stateTesting?.enabled !== false),
+      QC_STATE_HOVER: String(settings.stateTesting?.hover !== false),
+      QC_STATE_FOCUS: String(settings.stateTesting?.focus !== false),
+      QC_STATE_DISABLED: String(settings.stateTesting?.disabled !== false),
+      QC_STATE_LOADING: String(settings.stateTesting?.loading !== false),
+      QC_STATE_EMPTY: String(settings.stateTesting?.empty !== false),
+      QC_STATE_ERROR: String(settings.stateTesting?.error !== false),
+      QC_SCREEN_READER_MODE: settings.screenReader?.mode || 'semantic',
+      QC_SCREEN_READER_COMMAND: settings.screenReader?.command || '',
+      QC_SCREEN_READER_TIMEOUT_MS: String(settings.screenReader?.timeoutMs ?? 10000),
+      QC_TRANSACTIONAL_SCENARIOS: String(settings.negativeTesting?.transactionalScenarios !== false),
+      QC_FIXTURE_REPORT_PATH: settings.negativeTesting?.fixtureReportPath || '',
     };
 
     const routeBudgetLabel = settings.maxRoutes > 0 ? `${settings.routeOffset + 1}–${settings.routeOffset + settings.maxRoutes}` : `semua route unik mulai offset ${settings.routeOffset}`;
+    const mutationFixturePath = settings.negativeTesting?.mutationFixturePath;
+    const mutationReportPath = path.join(this.artifactRoot, 'jobs', job.id, 'quality', 'crud-mutations', 'report.json');
+    if (settings.negativeTesting?.runMutations === true && mutationFixturePath) {
+      this.addLog(job, 'quality', `Mutation CRUD aktif dengan fixture ${mutationFixturePath}.`);
+      await new Promise<void>((resolve) => {
+        const mutationScript = path.join(this.projectRoot, 'scripts', 'run-crud-mutations.cjs');
+        const mutationEnv: NodeJS.ProcessEnv = { ...env, QC_TARGET_EMAIL: config.accounts.find((account) => Boolean(account.email?.trim()))?.email || '', QC_MUTATION_FIXTURE_PATH: mutationFixturePath, QC_MUTATION_REPORT_PATH: mutationReportPath };
+        const child = spawn(process.argv[0], [mutationScript], { cwd: this.projectRoot, env: mutationEnv, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', (chunk: Buffer) => this.addLog(job, 'quality', chunk.toString().trim()));
+        child.stderr.on('data', (chunk: Buffer) => this.addLog(job, 'quality', `mutation: ${chunk.toString().trim()}`));
+        child.on('close', (code) => { this.addLog(job, 'quality', `Mutation CRUD selesai dengan exit code ${code ?? 1}.`); resolve(); });
+        child.on('error', (error) => { this.addLog(job, 'quality', `Mutation CRUD tidak dapat dijalankan: ${error.message}`); resolve(); });
+      });
+      env.QC_FIXTURE_REPORT_PATH = mutationReportPath;
+    }
     this.addLog(job, 'quality', `Target: ${config.baseUrl} | route budget: ${routeBudgetLabel} | timeout: ${settings.navigationTimeoutMs}ms.`);
     this.addLog(job, 'quality', 'Menyiapkan Playwright browser, akun audit, dan folder screenshot...');
+    job.qualityAudit!.status = 'RUNNING';
+    this.addLog(job, 'quality', 'Quality Audit runner aktif; dashboard sekarang menandai status sebagai RUNNING.');
 
     await new Promise<void>((resolve, reject) => {
       let output = '';
-      let finalResult: { status?: string; total?: number; passed?: number; failed?: number; runDir?: string } | undefined;
+      let finalResult: { status?: string; total?: number; passed?: number; failed?: number; notApplicable?: number; runDir?: string } | undefined;
       let settled = false;
       const child = spawn(process.argv[0], [scriptPath], { cwd: this.projectRoot, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       const consume = (chunk: Buffer, isError = false) => {
@@ -787,7 +891,15 @@ export class DiscoveryService {
           reject(new Error('Quality Audit dibatalkan oleh user.'));
           return;
         }
-        let report: { status?: string; total?: number; passed?: number; failed?: number } | undefined;
+        let report: {
+          status?: string;
+          total?: number;
+          passed?: number;
+          failed?: number;
+          notApplicable?: number;
+          categories?: Record<string, { total: number; passed: number; failed: number; notApplicable?: number }>;
+          visualRegression?: { mode?: any; baselinesCompared?: number; baselinesCaptured?: number; changed?: number; missing?: number };
+        } | undefined;
         if (finalResult?.runDir) {
           try {
             report = JSON.parse(await readFile(path.join(finalResult.runDir, 'report.json'), 'utf8'));
@@ -799,10 +911,15 @@ export class DiscoveryService {
           return;
         }
         const result = report ?? finalResult ?? {};
-        job.qualityAudit!.status = result.status === 'PASSED' ? 'PASSED' : 'FAILED';
+        job.qualityAudit!.status = result.status === 'PASSED_WITH_LIMITATIONS'
+          ? 'PASSED_WITH_LIMITATIONS'
+          : result.status === 'PASSED' ? 'PASSED' : 'FAILED';
         job.qualityAudit!.total = result.total;
         job.qualityAudit!.passed = result.passed;
         job.qualityAudit!.failed = result.failed;
+        job.qualityAudit!.notApplicable = result.notApplicable;
+        job.qualityAudit!.categories = report?.categories;
+        job.qualityAudit!.visualRegression = report?.visualRegression;
         job.qualityAudit!.finishedAt = new Date().toISOString();
         this.addLog(job, 'quality', `Quality Audit selesai: ${result.passed ?? 0}/${result.total ?? 0} check lulus, ${result.failed ?? 0} finding, status ${result.status ?? 'FAILED'}.`);
         resolve();
@@ -1032,6 +1149,8 @@ export class DiscoveryService {
       this.addLog(job, 'discovery', `📊 Total halaman/layar: ${observedPages.length} (${observedPages.filter(p => p.state === 'observed').length} sudah diobservasi)`);
       this.addLog(job, 'discovery', `📡 Route HTTP: ${routes.length} | Endpoint API: ${api.length} | File discan: ${filesScanned}`);
       const capabilities = detectCapabilities({ pages: observedPages, routes, api });
+      const crudPlan = buildCrudPlan({ pages: observedPages, routes, api });
+      const roleActionPlan = buildRoleActionPlan({ pages: observedPages, accounts: config.accounts });
       const inventory: Inventory = {
         pages: observedPages,
         routes,
@@ -1039,10 +1158,14 @@ export class DiscoveryService {
         filesScanned,
         warnings,
         generatedAt: new Date().toISOString(),
-        capabilities
+        capabilities,
+        crudPlan,
+        roleActionPlan
       };
       job.inventory = inventory;
       this.addLog(job, 'discovery', `Capability profile: ${capabilities.detectedCount}/${capabilities.totalCatalogCapabilities} kemampuan terdeteksi.`);
+      this.addLog(job, 'flow-builder', `CRUD matrix: ${crudPlan.totals.resources} resource, ${crudPlan.totals.available} operasi terobservasi, ${crudPlan.totals.requiresFixture} operasi membutuhkan fixture.`);
+      this.addLog(job, 'flow-builder', `Role/action matrix: ${roleActionPlan.totals.rows} kombinasi halaman-role, ${roleActionPlan.totals.runtime} perlu verifikasi runtime.`);
       this.addLog(job, 'discovery', `Domain hints: ${capabilities.domainHints.join(', ')}.`);
       capabilities.capabilities.slice(0, 12).forEach((capability) => {
         this.addLog(job, 'discovery', `  [${capability.status.toUpperCase()}] ${capability.label} (${Math.round(capability.confidence * 100)}%) — ${capability.evidence.routes.length} route, ${capability.evidence.apiRoutes.length} API evidence.`);
@@ -1058,6 +1181,16 @@ export class DiscoveryService {
       await writeFile(
         path.join(jobArtifactDir, 'capability-profile.json'),
         JSON.stringify(capabilities, null, 2),
+        'utf8'
+      );
+      await writeFile(
+        path.join(jobArtifactDir, 'crud-plan.json'),
+        JSON.stringify(crudPlan, null, 2),
+        'utf8'
+      );
+      await writeFile(
+        path.join(jobArtifactDir, 'role-action-plan.json'),
+        JSON.stringify(roleActionPlan, null, 2),
         'utf8'
       );
       this.addLog(job, 'discovery', '✓ Inventory tersimpan.');

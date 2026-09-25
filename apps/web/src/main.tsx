@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
-import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile } from './types';
+import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus } from './types';
 import { Icon, Badge, Panel, Metric, Progress, Notice, Empty } from './ui';
 import { Wizard } from './wizard';
 import { LiveViewport } from './live-viewport';
@@ -32,6 +32,12 @@ function CapabilityProfilePanel({ profile }: { profile?: CapabilityProfile }) {
         <Badge value={`${profile.detectedCount}/${profile.totalCatalogCapabilities} detected`} />
         {profile.domainHints.map((hint) => <span key={hint} className="tag" style={{ color: 'var(--cyan)' }}>{hint}</span>)}
       </div>
+      {profile.negativeScenarios && profile.negativeScenarios.length > 0 && <details className="capability-negative-plan" style={{ marginBottom: 14 }}>
+        <summary style={{ cursor: 'pointer', color: 'var(--yellow)' }}>Negative scenario plan · {profile.negativeScenarios.length} skenario</summary>
+        <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+          {profile.negativeScenarios.map((scenario) => <div key={scenario.id} className="tag" style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>{scenario.label}</span><small>{scenario.execution === 'safe-probe' ? 'safe probe' : 'requires fixture'}</small></div>)}
+        </div>
+      </details>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 8, maxHeight: 360, overflowY: 'auto' }}>
         {profile.capabilities.map((capability) => (
           <details key={capability.id} style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-panel-sub)' }}>
@@ -252,8 +258,15 @@ function findingDescription(finding: EvidenceFinding) {
     case 'typography': return `Ukuran atau dimensi kontrol/teks pada ${route} berada di luar baseline yang ditetapkan, atau teks tidak muat di dalam elemennya.`;
     case 'responsive': return `Ada elemen pada ${route} yang lebih lebar dari viewport ${finding.viewport || 'yang diuji'}, sehingga berpotensi keluar layar atau membutuhkan scroll horizontal.`;
     case 'accessibility': return `Ada kontrol interaktif pada ${route} yang belum memiliki label atau identitas aksesibel yang dapat dibaca assistive technology.`;
+    case 'accessibility-keyboard': return `Urutan keyboard atau focus indicator pada ${route} belum aman untuk pengguna keyboard. Detail menyebut kontrol yang focus-nya tidak terlihat atau struktur heading yang melompat.`;
+    case 'accessibility-screen-reader': return `Struktur semantik ${route} memiliki masalah yang dapat mengganggu screen reader, seperti duplicate id, referensi ARIA putus, atau kontrol di dalam aria-hidden.`;
     case 'http': return `Route ${route} tidak memberikan respons HTTP yang valid dalam batas audit.`;
     case 'dense-data': return `Tabel pada ${route} melebihi area tampil atau tidak aman saat menampilkan data padat.`;
+    case 'dense-data-stress': return `Tabel dan kontrol form pada ${route} diuji dengan data sintetis padat serta teks panjang dan ditemukan potensi overflow.`;
+    case 'negative-empty-form': return `Form pada ${route} menerima input kosong/invalid tanpa validasi yang dapat diamati. Engine menjalankan probe aman tanpa mengirim data ke target.`;
+    case 'negative-network': return `Saat request mutasi dipaksa gagal, ${route} belum menampilkan recovery/error state yang jelas.`;
+    case 'negative-duplicate': return `Double-submit probe pada ${route} menghasilkan lebih dari satu request mutasi atau tidak menunjukkan guard idempotensi.`;
+    case 'visual-regression': return `Screenshot ${route} berbeda dari baseline pixel-by-pixel atau baseline belum tersedia. Periksa evidence screenshot dan detail diff.`;
     case 'content-quality': return `Ada teks pada ${route} yang terpotong, bertumpuk, atau tidak terbaca dengan benar.`;
     default: return `Engine menandai pemeriksaan UI pada ${route} sebagai finding yang perlu ditinjau.`;
   }
@@ -278,12 +291,22 @@ function FindingEvidenceDropdown({ finding, evidence }: { finding: EvidenceFindi
 function evidenceMetric(group?: EvidenceGroup) {
   const metadata = group?.metadata;
   if (metadata && typeof metadata.passed === 'number' && typeof metadata.total === 'number') {
-    return { passed: metadata.passed, total: metadata.total, failed: metadata.failed ?? Math.max(0, metadata.total - metadata.passed) };
+    return { passed: metadata.passed, total: metadata.total, failed: metadata.failed ?? Math.max(0, metadata.total - metadata.passed - (metadata.notApplicable ?? 0)) };
   }
   const match = group?.summary.match(/(\d+)\s*\/\s*(\d+)/);
   const passed = match ? Number(match[1]) : group?.status === 'PASSED' ? 1 : 0;
   const total = match ? Number(match[2]) : group ? 1 : 0;
   return { passed, total, failed: Math.max(0, total - passed) };
+}
+
+function RunHistoryPanel({ history }: { history: RunHistoryEntry[] }) {
+  if (!history.length) return null;
+  return <Panel title="Run history & trend" description="Riwayat run berasal dari folder project/run. Status ini hanya membaca hasil engine; source target tidak diubah otomatis.">
+    <div className="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Quality</th><th>Updated</th></tr></thead><tbody>{history.map((entry) => {
+      const quality = entry.quality;
+      return <tr key={entry.runLabel}><td><strong>{entry.runLabel}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{entry.project}</small></td><td><Badge value={quality?.status || entry.status} /></td><td>{entry.progress ?? 0}%</td><td>{quality ? `${quality.passed ?? 0}/${quality.total ?? 0} passed · ${quality.failed ?? 0} failed · ${quality.notApplicable ?? 0} N/A` : 'Quality report belum ada'}</td><td>{date(entry.updatedAt || entry.createdAt)}</td></tr>;
+    })}</tbody></table></div>
+  </Panel>;
 }
 
 function zannoraRoutes(evidence: ZannoraEvidence | null) {
@@ -302,6 +325,10 @@ function zannoraFindings(evidence: ZannoraEvidence | null): EvidenceFinding[] {
     syntheticFindingSeen.add(key);
     return true;
   }) ?? [];
+}
+
+function findingKey(finding: EvidenceFinding, index: number) {
+  return `${finding.groupId || 'finding'}|${finding.route || ''}|${finding.viewport || ''}|${finding.browser || ''}|${finding.name || ''}|${index}`;
 }
 
 function ZannoraOverview({ evidence, onNavigate, onOpenEvidence }: { evidence: ZannoraEvidence; onNavigate: (view: View) => void; onOpenEvidence: (id: string) => void }) {
@@ -341,6 +368,27 @@ function ZannoraAppMap({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence
 function ZannoraTestDesign({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
   const groups = evidence.groups.filter((group) => ['API & CRUD', 'Web Flow'].includes(group.category));
   return <div><div className="view-header"><div><h1>Test Design · Zannora</h1><p>Suite nyata yang menjadi dasar test design: API, CRUD, role access, navigation, dan full flow.</p></div><button className="quiet" onClick={() => onOpenEvidence('api-e2e')}><Icon name="reports" size={15} /> Open source evidence</button></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>{groups.map((group) => { const metric = evidenceMetric(group); return <Panel key={group.id} title={group.title} description={group.summary} actions={<Badge value={group.status} />}><div className="evidence-inline-meta"><strong>{metric.passed}/{metric.total}</strong><span>{group.category}</span></div><div className="evidence-asset-count"><span>{group.assets.length} artifact</span><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Detail &amp; evidence <Icon name="arrow" size={12} /></button></div></Panel>; })}</div></div>;
+}
+
+function CrudCoveragePanel({ plan }: { plan?: import('./types').CrudPlan }) {
+  if (!plan) return <Panel title="CRUD coverage"><Empty title="CRUD matrix belum tersedia">Jalankan discovery ulang untuk menyusun resource dan operasi CRUD dari inventory.</Empty></Panel>;
+  const labels: Record<string, string> = { list: 'List', detail: 'Detail', create: 'Create', update: 'Update', delete: 'Delete', duplicate: 'Duplicate', 'delete-in-use': 'Delete in-use' };
+  const tone = (status: string) => status === 'AVAILABLE' ? 'var(--green)' : status === 'REQUIRES_FIXTURE' ? 'var(--yellow)' : status === 'PLANNED' ? 'var(--cyan)' : 'var(--text-dim)';
+  return <Panel title={`CRUD coverage · ${plan.totals.resources} resource`} description="Read-only checks dapat dijalankan otomatis; operasi mutasi menunggu fixture yang dapat di-reset.">
+    <div className="evidence-inline-meta" style={{ marginBottom: 12 }}><strong>{plan.totals.available}</strong><span>observed</span><strong>{plan.totals.planned}</strong><span>planned</span><strong>{plan.totals.requiresFixture}</strong><span>fixture required</span></div>
+    <div className="table-wrap"><table><thead><tr><th>Resource</th>{Object.values(labels).map((label) => <th key={label}>{label}</th>)}<th>Confidence</th></tr></thead><tbody>{plan.resources.map((resource) => <tr key={resource.id}><td><strong>{resource.name}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{resource.routes.slice(0, 2).join(' · ')}</small></td>{Object.keys(labels).map((operation) => <td key={operation}><span style={{ color: tone(resource.operations[operation as keyof typeof resource.operations]), fontSize: 10, fontWeight: 800 }}>{resource.operations[operation as keyof typeof resource.operations].replace('_', ' ')}</span></td>)}<td>{Math.round(resource.confidence * 100)}%</td></tr>)}</tbody></table></div>
+    <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 12 }}>{plan.limitations.join(' ')}</p>
+  </Panel>;
+}
+
+function RoleActionPanel({ plan }: { plan?: import('./types').RoleActionPlan }) {
+  if (!plan) return <Panel title="Role & action matrix"><Empty title="Role matrix belum tersedia">Discovery belum menghasilkan kombinasi role, halaman, dan action.</Empty></Panel>;
+  const tone = (status: string) => status === 'EXPECTED' ? 'var(--green)' : status === 'CANDIDATE' ? 'var(--yellow)' : 'var(--cyan)';
+  return <Panel title={`Role & action matrix · ${plan.roles.join(', ')}`} description="Static evidence menjadi baseline; direct URL, API permission, dan cross-role leakage wajib diverifikasi saat runtime.">
+    <div className="evidence-inline-meta" style={{ marginBottom: 12 }}><strong>{plan.totals.expected}</strong><span>expected</span><strong>{plan.totals.candidate}</strong><span>candidate</span><strong>{plan.totals.runtime}</strong><span>runtime required</span></div>
+    <div className="table-wrap"><table><thead><tr><th>Role</th><th>Page</th><th>Auth</th><th>Actions</th><th>Coverage</th></tr></thead><tbody>{plan.rows.slice(0, 80).map((row, index) => <tr key={`${row.role}-${row.page}-${index}`}><td><strong>{row.role}</strong></td><td><code>{row.page}</code></td><td>{row.authentication}</td><td style={{ maxWidth: 300, whiteSpace: 'normal' }}>{row.actions.join(' · ')}</td><td><span style={{ color: tone(row.expectation), fontSize: 10, fontWeight: 800 }}>{row.expectation.replace('_', ' ')}</span></td></tr>)}</tbody></table></div>
+    <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 12 }}>{plan.limitations.join(' ')}</p>
+  </Panel>;
 }
 
 function ZannoraRuns({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
@@ -400,11 +448,13 @@ export function App() {
   // Curated Zannora evidence state
   const [zannoraEvidence, setZannoraEvidence] = useState<ZannoraEvidence | null>(null);
   const [targetEvidence, setTargetEvidence] = useState<ZannoraEvidence | null>(null);
+  const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState('');
   const [evidenceGroupFilter, setEvidenceGroupFilter] = useState('all');
   const [evidenceFocus, setEvidenceFocus] = useState<EvidenceFocus>(null);
-  const [flowSource, setFlowSource] = useState<'zannora' | 'job'>('zannora');
+  const [flowSource, setFlowSource] = useState<'zannora' | 'job'>('job');
+  const [findingStatuses, setFindingStatuses] = useState<Record<string, FindingWorkflowStatus>>({});
 
   // Live WIB Clock
   const formatCurrentWIB = () => new Intl.DateTimeFormat('id-ID', {
@@ -431,6 +481,9 @@ export function App() {
       setJobs(data);
       if (data.length > 0 && !activeJobId) {
         setActiveJobId(data[0].id);
+        setFlowSource('job');
+      } else if (!data.length) {
+        setFlowSource('zannora');
       }
     } catch {
       // API may be booting
@@ -489,6 +542,19 @@ export function App() {
     }
   }, [activeJobId]);
 
+  const refreshRunHistory = useCallback(async (jobId: string | null = activeJobId) => {
+    if (!jobId) {
+      setRunHistory([]);
+      return;
+    }
+    try {
+      const result = await request<{ entries?: RunHistoryEntry[] }>(`/api/v1/discovery/jobs/${jobId}/history`);
+      setRunHistory(result.entries ?? []);
+    } catch {
+      setRunHistory([]);
+    }
+  }, [activeJobId]);
+
   useEffect(() => {
     void refreshZannoraEvidence();
   }, [refreshZannoraEvidence]);
@@ -496,7 +562,8 @@ export function App() {
   useEffect(() => {
     if (flowSource !== 'job') return;
     void refreshTargetEvidence(activeJobId);
-  }, [activeJobId, flowSource, refreshTargetEvidence]);
+    void refreshRunHistory(activeJobId);
+  }, [activeJobId, flowSource, refreshRunHistory, refreshTargetEvidence]);
 
   // Keep the selected evidence source live. Zannora is the default source, so its report-backed nav data refreshes too.
   useEffect(() => {
@@ -505,14 +572,15 @@ export function App() {
       return () => clearInterval(timer);
     }
     if (!activeJobId || !activeJob || (activeJob.status !== 'RUNNING' && activeJob.status !== 'QUEUED' && currentView !== 'findings')) return;
-    const timer = window.setInterval(() => void refreshTargetEvidence(activeJobId), 5000);
+    const timer = window.setInterval(() => { void refreshTargetEvidence(activeJobId); void refreshRunHistory(activeJobId); }, 5000);
     return () => clearInterval(timer);
-  }, [activeJob, activeJobId, currentView, flowSource, refreshTargetEvidence, refreshZannoraEvidence]);
+  }, [activeJob, activeJobId, currentView, flowSource, refreshRunHistory, refreshTargetEvidence, refreshZannoraEvidence]);
 
   // Poll active job details
   useEffect(() => {
     if (!activeJobId) {
       setActiveJob(null);
+      setFindingStatuses({});
       return;
     }
 
@@ -542,6 +610,10 @@ export function App() {
       if (timer) clearTimeout(timer);
     };
   }, [activeJobId, refreshJobs]);
+
+  useEffect(() => {
+    setFindingStatuses(activeJob?.findingStatuses ?? {});
+  }, [activeJob?.id, activeJob?.findingStatuses]);
 
   // Sync selected flow editor content
   useEffect(() => {
@@ -585,7 +657,7 @@ export function App() {
   const zannoraRouteCount = zannoraRoutes(zannoraEvidence).length;
   const zannoraOpenFindings = zannoraFindings(zannoraEvidence);
   const activeEvidence = flowSource === 'zannora' ? zannoraEvidence : targetEvidence;
-  const activeOpenFindings = zannoraFindings(activeEvidence);
+  const activeOpenFindings = zannoraFindings(activeEvidence).map((finding, index) => ({ ...finding, workflowStatus: flowSource === 'job' ? (findingStatuses[findingKey(finding, index)] || 'OPEN') : 'OPEN', findingIndex: index })).filter((finding) => finding.workflowStatus !== 'PASSED');
   const zannoraDesignGroups = zannoraEvidence?.groups.filter((group) => ['api-e2e', 'crud', 'roles'].includes(group.id)) ?? [];
   const zannoraExecutionGroups = zannoraEvidence?.groups.filter((group) => ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation'].includes(group.id)) ?? [];
   const zannoraExecutionTotal = zannoraExecutionGroups.reduce((total, group) => total + evidenceMetric(group).total, 0);
@@ -609,7 +681,7 @@ export function App() {
     const groupStatus = (id: string, fallback: MilestoneStatus = 'READY'): MilestoneStatus => {
       const group = groups.get(id);
       if (group?.status === 'PASSED') return 'CLEAR';
-      if (group?.status === 'FAILED') return 'ATTENTION';
+      if (group?.status === 'FAILED' || group?.status === 'PASSED_WITH_LIMITATIONS') return 'ATTENTION';
       return fallback;
     };
     const phaseMatches = (pattern: RegExp) => active && pattern.test(flowJob?.phase || '');
@@ -622,7 +694,7 @@ export function App() {
     const responsiveStatus = groupStatus('responsive', groupStatus('target-quality', 'READY'));
     const visualQualityStatus = groupStatus('quality', groupStatus('target-quality', 'READY'));
     const qualityStatus: MilestoneStatus = phaseMatches(/RESPONSIVE|LAYOUT|UI|QUALITY|ACCESSIBILITY|VISUAL/) ? 'RUNNING' : responsiveStatus === 'ATTENTION' || visualQualityStatus === 'ATTENTION' ? 'ATTENTION' : responsiveStatus === 'CLEAR' && visualQualityStatus === 'CLEAR' ? 'CLEAR' : flowEvidence ? 'READY' : 'READY';
-    const hasOpenRetest = groups.get('responsive')?.status === 'FAILED' || groups.get('quality')?.status === 'FAILED' || groups.get('target-quality')?.status === 'FAILED' || failedJob;
+    const hasOpenRetest = ['responsive', 'quality', 'target-quality'].some((id) => ['FAILED', 'PASSED_WITH_LIMITATIONS'].includes(groups.get(id)?.status || '')) || failedJob;
     const retestStatus: MilestoneStatus = phaseMatches(/RETEST|RETRY|EVIDENCE/) ? 'RUNNING' : hasOpenRetest ? 'RETEST' : flowEvidence && flowEvidence.totals.assets > 0 ? 'CLEAR' : flowJob?.results?.length && !failedJob ? 'CLEAR' : 'READY';
     const evidenceStatus: MilestoneStatus = flowEvidence && flowEvidence.totals.assets > 0 ? (flowEvidence.totals.failed > 0 ? 'ATTENTION' : 'CLEAR') : flowJob?.results?.length ? (failedJob ? 'ATTENTION' : 'CLEAR') : 'READY';
     const requiredEvidenceIds = flowSource === 'zannora' ? ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation', 'responsive', 'quality'] : ['target-quality'];
@@ -658,6 +730,23 @@ export function App() {
     setEvidenceFocus({ groupId });
     setSelectedMilestone(null);
     setCurrentView('evidence');
+  };
+
+  const updateFindingStatus = async (finding: EvidenceFinding & { findingIndex?: number }, status: FindingWorkflowStatus) => {
+    if (flowSource !== 'job' || !activeJobId) return;
+    const key = findingKey(finding, finding.findingIndex ?? 0);
+    setLoading(true);
+    setActionError('');
+    try {
+      const updated = await send<Job>(`/api/v1/discovery/jobs/${activeJobId}/findings/status`, { findingKey: key, status }, 'PATCH');
+      setActiveJob(updated);
+      setFindingStatuses(updated.findingStatuses ?? {});
+      setActionSuccess(`Finding dipindahkan ke ${status.replace('_', ' ')}.`);
+    } catch (error) {
+      setActionError(errorText(error));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Actions
@@ -921,7 +1010,7 @@ export function App() {
           <button className={`nav-item ${currentView === 'findings' ? 'active' : ''}`} onClick={() => setCurrentView('findings')}>
             <div className="nav-item-left"><Icon name="warning" size={18} /><span>Findings &amp; Retest</span></div><span className="nav-badge nav-badge-warning">{activeOpenFindings.length}</span>
           </button>
-          <button className={`nav-item ${currentView === 'evidence' ? 'active' : ''}`} onClick={() => { setCurrentView('evidence'); void refreshZannoraEvidence(); }}>
+          <button className={`nav-item ${currentView === 'evidence' ? 'active' : ''}`} onClick={() => { setCurrentView('evidence'); if (flowSource === 'zannora') void refreshZannoraEvidence(); else void refreshTargetEvidence(activeJobId); }}>
             <div className="nav-item-left"><Icon name="reports" size={18} /><span>Evidence Center</span></div><span className="nav-badge">{activeEvidence?.totals.assets ?? 0}</span>
           </button>
           <button className={`nav-item ${currentView === 'reports' ? 'active' : ''}`} onClick={() => setCurrentView('reports')}>
@@ -1807,6 +1896,7 @@ export function App() {
                   </div>
                 </div>
               )}
+              {flowSource === 'job' && activeJob && <div style={{ display: 'grid', gap: 18, marginTop: 18 }}><CrudCoveragePanel plan={activeJob.inventory?.crudPlan} /><RoleActionPanel plan={activeJob.inventory?.roleActionPlan} /></div>}
             </div>
           )}
 
@@ -1899,9 +1989,10 @@ export function App() {
                           <button type="button" className="finding-row finding-row-toggle" aria-expanded={expanded} onClick={() => setExpandedFindingKey(expanded ? null : key)}>
                             <span className="finding-severity">{(item.area || 'OPEN').replace(/-/g, ' ').toUpperCase()}</span>
                             <span className="finding-row-copy"><strong>{item.name || 'Quality check failed'}</strong><small>{[item.route, item.viewport, item.browser].filter(Boolean).join(' · ') || 'Lokasi tidak tersedia'}</small></span>
-                            <span className="finding-row-status">OPEN</span>
+                            <span className="finding-row-status">{item.workflowStatus.replace('_', ' ')}</span>
                             <span className="finding-expand-label">{expanded ? 'Tutup' : 'Lihat bukti'} <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={13} /></span>
                           </button>
+                          {flowSource === 'job' && <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 0 10px' }}><select aria-label={`Status finding ${item.name || key}`} value={item.workflowStatus} disabled={loading} onChange={(event) => void updateFindingStatus(item, event.target.value as FindingWorkflowStatus)}><option value="OPEN">Open</option><option value="IN_PROGRESS">In Progress</option><option value="READY_FOR_RETEST">Ready for Retest</option><option value="PASSED">Passed</option></select></div>}
                           {expanded && <FindingEvidenceDropdown finding={item} evidence={activeEvidence} />}
                         </div>;
                       })}</div>
@@ -1945,6 +2036,9 @@ export function App() {
                   </button>
                 </div>
               </div>
+
+              {flowSource === 'job' && <RunHistoryPanel history={runHistory} />}
+              {flowSource === 'job' && activeJob && <div style={{ marginBottom: 18 }}><CrudCoveragePanel plan={activeJob.inventory?.crudPlan} /></div>}
 
               {flowSource === 'zannora' && zannoraEvidence ? (
                 <ZannoraReport evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />

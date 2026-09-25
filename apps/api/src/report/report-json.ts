@@ -29,6 +29,22 @@ export interface StructuredJsonReport {
       finishedAt: string;
     };
     overallHealthScore: number;
+    crud?: {
+      resources: number;
+      available: number;
+      planned: number;
+      requiresFixture: number;
+      matrix: Array<{ resource: string; routes: string[]; operations: Record<string, string>; confidence: number }>;
+      limitations: string[];
+    };
+    roleAction?: {
+      roles: string[];
+      rows: number;
+      expected: number;
+      candidate: number;
+      runtime: number;
+      limitations: string[];
+    };
   };
   filterApplied?: {
     attempt?: string;
@@ -207,7 +223,22 @@ export function buildJsonReport(
     summary: {
       totalAttempts: attempts.length,
       latestAttempt: latestStats,
-      overallHealthScore: latest ? latest.metrics.passRate : 0
+      overallHealthScore: latest ? latest.metrics.passRate : 0,
+      crud: job.inventory?.crudPlan ? {
+        ...job.inventory.crudPlan.totals,
+        matrix: job.inventory.crudPlan.resources.map((resource) => ({
+          resource: resource.name,
+          routes: resource.routes,
+          operations: resource.operations,
+          confidence: resource.confidence,
+        })),
+        limitations: job.inventory.crudPlan.limitations,
+      } : undefined,
+      roleAction: job.inventory?.roleActionPlan ? {
+        roles: job.inventory.roleActionPlan.roles,
+        ...job.inventory.roleActionPlan.totals,
+        limitations: job.inventory.roleActionPlan.limitations,
+      } : undefined,
     },
     filterApplied: {
       attempt: options?.attempt || 'all',

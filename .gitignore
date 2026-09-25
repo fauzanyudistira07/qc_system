@@ -6,6 +6,8 @@ dist/
 .qc-artifacts/
 .qc-workspaces/
 .qc-*
+.playwright-cache/
+.temp-recovery/
 node_modules.*
 _deps-archive/
 coverage/

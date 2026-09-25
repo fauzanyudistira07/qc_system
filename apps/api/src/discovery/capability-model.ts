@@ -56,6 +56,14 @@ export type DetectedCapability = {
   recommendedChecks: string[];
 };
 
+export type NegativeScenarioPlan = {
+  id: string;
+  capability: CapabilityId;
+  label: string;
+  execution: 'safe-probe' | 'requires-fixture';
+  checks: string[];
+};
+
 export type CapabilityProfile = {
   version: '1.0';
   detectedAt: string;
@@ -63,6 +71,7 @@ export type CapabilityProfile = {
   totalCatalogCapabilities: number;
   detectedCount: number;
   capabilities: DetectedCapability[];
+  negativeScenarios: NegativeScenarioPlan[];
 };
 
 type CapabilityRule = {
@@ -122,6 +131,48 @@ const domainRules: Array<{ label: string; pattern: RegExp }> = [
 ];
 
 function unique(values: string[], limit = 12) { return [...new Set(values.filter(Boolean))].slice(0, limit); }
+
+const NEGATIVE_SCENARIO_CATALOG: Partial<Record<CapabilityId, NegativeScenarioPlan[]>> = {
+  authentication: [
+    { id: 'auth-wrong-credential', capability: 'authentication', label: 'Wrong credential and session boundary', execution: 'safe-probe', checks: ['invalid password is rejected', 'error is visible without credential leak', 'session is not created'] },
+  ],
+  forms: [
+    { id: 'form-empty-invalid', capability: 'forms', label: 'Empty, malformed, and boundary input', execution: 'safe-probe', checks: ['required validation', 'malformed format', 'long input containment'] },
+    { id: 'form-duplicate-submit', capability: 'forms', label: 'Duplicate form submission', execution: 'safe-probe', checks: ['double-click guard', 'loading/disabled state', 'idempotent response'] },
+  ],
+  crud: [
+    { id: 'crud-duplicate-record', capability: 'crud', label: 'Duplicate record creation', execution: 'requires-fixture', checks: ['unique constraint message', 'no duplicate row', 'form state recovery'] },
+    { id: 'crud-delete-in-use', capability: 'crud', label: 'Delete data yang masih dipakai', execution: 'requires-fixture', checks: ['dependency guard', 'safe error response', 'original record remains'] },
+  ],
+  payment: [
+    { id: 'payment-declined', capability: 'payment', label: 'Payment declined / failed', execution: 'requires-fixture', checks: ['failure state', 'order remains recoverable', 'no duplicate charge'] },
+    { id: 'payment-expired', capability: 'payment', label: 'Payment pending / expired', execution: 'requires-fixture', checks: ['expiry transition', 'seat/capacity release', 'retry path'] },
+    { id: 'payment-refund', capability: 'payment', label: 'Refund and cancellation', execution: 'requires-fixture', checks: ['refund status', 'amount consistency', 'audit trail'] },
+  ],
+  reservation: [
+    { id: 'reservation-expired', capability: 'reservation', label: 'Reservation hold expired', execution: 'requires-fixture', checks: ['hold timeout', 'capacity restored', 'expired action blocked'] },
+    { id: 'reservation-cancel', capability: 'reservation', label: 'Cancel pending/paid reservation', execution: 'requires-fixture', checks: ['allowed state transition', 'capacity restored', 'refund handoff'] },
+  ],
+  checkout: [
+    { id: 'checkout-double-submit', capability: 'checkout', label: 'Checkout double-submit', execution: 'safe-probe', checks: ['single order created', 'button loading state', 'retry remains safe'] },
+  ],
+  scheduling: [
+    { id: 'schedule-conflict', capability: 'scheduling', label: 'Schedule conflict and unavailable slot', execution: 'requires-fixture', checks: ['conflict blocked', 'timezone boundary', 'empty availability state'] },
+  ],
+  'search-filter': [
+    { id: 'search-empty-result', capability: 'search-filter', label: 'Search/filter returns no result', execution: 'safe-probe', checks: ['empty state', 'clear/reset filter', 'no stale result'] },
+  ],
+  pagination: [
+    { id: 'pagination-empty-page', capability: 'pagination', label: 'Empty and out-of-range page', execution: 'safe-probe', checks: ['last page state', 'empty state', 'previous navigation'] },
+  ],
+  authorization: [
+    { id: 'authorization-forbidden-action', capability: 'authorization', label: 'Forbidden direct action', execution: 'safe-probe', checks: ['UI action hidden/disabled', 'direct URL/API forbidden', 'no data leak'] },
+  ],
+};
+
+export function buildNegativeScenarioPlan(capabilities: DetectedCapability[]): NegativeScenarioPlan[] {
+  return capabilities.flatMap((capability) => NEGATIVE_SCENARIO_CATALOG[capability.id] || []).filter((scenario, index, list) => list.findIndex((item) => item.id === scenario.id) === index);
+}
 function searchablePages(pages: InventoryPage[]) {
   return pages.map((page) => ({
     route: page.path,
@@ -181,6 +232,7 @@ export function detectCapabilities(input: { pages: InventoryPage[]; routes: Arra
   }
 
   const domainHints = domainRules.filter((rule) => rule.pattern.test(allText)).map((rule) => rule.label);
+  const negativeScenarios = buildNegativeScenarioPlan(capabilities);
   return {
     version: '1.0',
     detectedAt: new Date().toISOString(),
@@ -188,6 +240,6 @@ export function detectCapabilities(input: { pages: InventoryPage[]; routes: Arra
     totalCatalogCapabilities: CAPABILITY_CATALOG.length,
     detectedCount: capabilities.length,
     capabilities: capabilities.sort((a, b) => b.confidence - a.confidence || a.label.localeCompare(b.label)),
+    negativeScenarios,
   };
 }
-

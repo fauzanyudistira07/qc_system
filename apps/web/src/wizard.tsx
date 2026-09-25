@@ -928,7 +928,7 @@ export function Wizard({
                           <Icon name="discovery" size={18} />
                           <h3>Quality Audit UI &amp; Evidence</h3>
                         </div>
-                        <p>Atur browser, viewport, batas route, timeout, dan screenshot yang dijalankan setelah Discovery selesai.</p>
+                        <p>Atur browser, viewport, accessibility, pixel baseline, dense-data stress, dan negative testing setelah Discovery selesai.</p>
                       </div>
                       <Badge value={config.qualityAudit?.enabled !== false ? 'Auto Run' : 'Manual'} />
                     </div>
@@ -948,6 +948,36 @@ export function Wizard({
                       <Field label="Navigation Timeout (ms)" hint="10.000–180.000 ms.">
                         <input type="number" min={10000} max={180000} step={1000} value={config.qualityAudit?.navigationTimeoutMs ?? 60000} onChange={e => quality({ navigationTimeoutMs: Number(e.target.value) })} />
                       </Field>
+                      <Field label="Visual Regression" hint="Required adalah standar: baseline wajib tersedia dan perubahan piksel menjadi finding. Capture hanya untuk membuat baseline terkontrol.">
+                        <select value={config.qualityAudit?.visualRegression?.mode ?? 'required'} onChange={e => quality({ visualRegression: { ...config.qualityAudit?.visualRegression, mode: e.target.value as 'off' | 'capture' | 'required' } })}>
+                          <option value="capture">Capture / compare</option>
+                          <option value="required">Required baseline</option>
+                          <option value="off">Off</option>
+                        </select>
+                      </Field>
+                      <Field label="Allowed pixel diff (%)" hint="Batas perbedaan piksel sebelum menjadi finding.">
+                        <input type="number" min={0} max={100} step={0.1} value={config.qualityAudit?.visualRegression?.allowedDiffPercent ?? 0.5} onChange={e => quality({ visualRegression: { ...config.qualityAudit?.visualRegression, allowedDiffPercent: Number(e.target.value) } })} />
+                      </Field>
+                    </div>
+
+                    <div className="form-grid" style={{ marginTop: 14 }}>
+                      <Field label="Mutation fixture contract" hint="Path JSON contract; wajib explicit allowMutations=true dan cleanup scenario.">
+                        <input value={config.qualityAudit?.negativeTesting?.mutationFixturePath || ''} placeholder=".qc-fixtures/crud.json" onChange={e => quality({ negativeTesting: { ...config.qualityAudit?.negativeTesting, mutationFixturePath: e.target.value } })} />
+                      </Field>
+                      <label className={`audit-option ${config.qualityAudit?.negativeTesting?.runMutations === true ? 'selected' : ''}`} style={{ alignSelf: 'end' }}><input type="checkbox" checked={config.qualityAudit?.negativeTesting?.runMutations === true} onChange={e => quality({ negativeTesting: { ...config.qualityAudit?.negativeTesting, runMutations: e.target.checked } })} /><span>Run mutation CRUD fixture</span></label>
+                    </div>
+
+                    <div className="audit-option-group">
+                      <span className="field-label">Rule tambahan</span>
+                      <div className="audit-option-list">
+                        <label className={`audit-option ${config.qualityAudit?.accessibility !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.accessibility !== false} onChange={e => quality({ accessibility: e.target.checked })} /><span>Keyboard + screen reader tree</span></label>
+                        <label className={`audit-option ${config.qualityAudit?.denseData?.enabled !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.denseData?.enabled !== false} onChange={e => quality({ denseData: { ...config.qualityAudit?.denseData, enabled: e.target.checked } })} /><span>Dense table/form stress</span></label>
+                        <label className={`audit-option ${config.qualityAudit?.negativeTesting?.enabled !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.negativeTesting?.enabled !== false} onChange={e => quality({ negativeTesting: { ...config.qualityAudit?.negativeTesting, enabled: e.target.checked } })} /><span>Negative testing aman</span></label>
+                        <label className={`audit-option ${config.qualityAudit?.stateTesting?.enabled !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.stateTesting?.enabled !== false} onChange={e => quality({ stateTesting: { ...config.qualityAudit?.stateTesting, enabled: e.target.checked } })} /><span>UI states: hover/focus/error</span></label>
+                        <label className={`audit-option ${config.qualityAudit?.negativeTesting?.transactionalScenarios !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.negativeTesting?.transactionalScenarios !== false} onChange={e => quality({ negativeTesting: { ...config.qualityAudit?.negativeTesting, transactionalScenarios: e.target.checked } })} /><span>Transactional scenarios</span></label>
+                        <label className={`audit-option ${config.qualityAudit?.screenReader?.mode === 'external' ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.screenReader?.mode === 'external'} onChange={e => quality({ screenReader: { ...config.qualityAudit?.screenReader, mode: e.target.checked ? 'external' : 'semantic' } })} /><span>External screen reader adapter</span></label>
+                        <label className={`audit-option ${config.qualityAudit?.visualRegression?.updateBaseline ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.visualRegression?.updateBaseline === true} onChange={e => quality({ visualRegression: { ...config.qualityAudit?.visualRegression, updateBaseline: e.target.checked } })} /><span>Update baseline</span></label>
+                      </div>
                     </div>
 
                     <div className="audit-option-group">

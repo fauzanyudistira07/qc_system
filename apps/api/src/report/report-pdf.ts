@@ -6,6 +6,21 @@ import { groupResultsIntoAttempts, type TestAttempt } from './attempt-grouper.ts
 
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
+async function withTimeout<T>(action: Promise<T>, timeoutMs = 10_000): Promise<T> {
+  return Promise.race<T>([
+    action,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`PDF operation timed out after ${timeoutMs}ms`)), timeoutMs)),
+  ]);
+}
+
+async function closeWithTimeout(action: Promise<void> | undefined, timeoutMs = 8_000): Promise<void> {
+  if (!action) return;
+  await Promise.race([
+    action.catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
 function formatWIB(value?: string | number | Date): string {
   if (!value) return '—';
   try {
@@ -567,11 +582,11 @@ export async function generatePdfReport(
       viewport: { width: 1280, height: 1024 }
     });
 
-    await page.setContent(html, {
+    await withTimeout(page.setContent(html, {
       waitUntil: 'load'
-    });
+    }));
 
-    const pdfBuffer = await page.pdf({
+    const pdfBuffer = await withTimeout<Buffer>(page.pdf({
       format: 'A4',
       printBackground: true,
       margin: {
@@ -587,10 +602,10 @@ export async function generatePdfReport(
           <span>QC Maestro · ${esc(job.name)} · Halaman <span class="pageNumber"></span> dari <span class="totalPages"></span></span>
         </div>
       `
-    });
+    }));
 
     return pdfBuffer;
   } finally {
-    await browser.close();
+    await closeWithTimeout(browser.close());
   }
 }

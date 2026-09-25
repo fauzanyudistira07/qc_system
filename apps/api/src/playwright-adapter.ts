@@ -24,6 +24,22 @@ export type WebRunResult = {
 type Target = { strategy: string; value: string; role?: string; name?: string; exact?: boolean };
 const activePages = new Map<string, Page>();
 
+async function closeWithTimeout(action: Promise<void> | undefined, timeoutMs = 8_000): Promise<void> {
+  if (!action) return;
+  await Promise.race([
+    action.catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
+async function resolveWithTimeout<T>(action: Promise<T> | undefined, timeoutMs = 8_000): Promise<T | undefined> {
+  if (!action) return undefined;
+  return Promise.race([
+    action.catch(() => undefined),
+    new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), timeoutMs)),
+  ]);
+}
+
 export type LivePreview = {
   dataUrl: string;
   url: string;
@@ -217,22 +233,28 @@ export async function executeWebFlow(flow: NormalizedFlow, runId: string, baseUr
         const safeRunId = runId.replace(/[^a-z0-9_-]+/gi, '-');
         const tempTracePath = path.join(tmpdir(), `qc-maestro-${safeRunId}-trace.zip`);
         try {
-          await context.tracing.stop({ path: tempTracePath });
-          await copyFile(tempTracePath, tracePath);
-          artifacts.push({ type: 'trace', path: tracePath });
+          const traceWritten = await resolveWithTimeout(
+            context.tracing.stop({ path: tempTracePath }).then(async () => {
+              await copyFile(tempTracePath, tracePath);
+              return true;
+            })
+          );
+          if (traceWritten) {
+            artifacts.push({ type: 'trace', path: tracePath });
+          }
         } finally {
           await rm(tempTracePath, { force: true });
         }
       } else {
-        await context.tracing.stop();
+        await resolveWithTimeout(context.tracing.stop());
       }
     }
     const video = page.video();
-    await context.close();
+    await closeWithTimeout(context.close());
     if (video) {
-      const recordedVideoPath = await video.path();
+      const recordedVideoPath = await resolveWithTimeout<string>(video.path());
       const shouldRetainVideo = flow.execution.video === 'on' || results.some((step) => step.status === 'FAILED');
-      if (shouldRetainVideo) {
+      if (shouldRetainVideo && recordedVideoPath) {
         const videoPath = path.join(runDir, 'video.webm');
         try {
           await normalizeVideo(recordedVideoPath, videoPath);
@@ -249,8 +271,8 @@ export async function executeWebFlow(flow: NormalizedFlow, runId: string, baseUr
     return { status: 'INFRA_ERROR', steps: results, artifacts: [...artifacts, { type: 'runner-log', path: String(error) }] };
   } finally {
     activePages.delete(runId);
-    await context?.close().catch(() => undefined);
+    await closeWithTimeout(context?.close());
     await rm(videoDir, { recursive: true, force: true }).catch(() => undefined);
-    await browser?.close();
+    await closeWithTimeout(browser?.close());
   }
 }
