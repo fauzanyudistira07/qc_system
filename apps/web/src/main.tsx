@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
-import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus } from './types';
+import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus, FeatureContractPlan } from './types';
 import { Icon, Badge, Panel, Metric, Progress, Notice, Empty } from './ui';
 import { Wizard } from './wizard';
 import { LiveViewport } from './live-viewport';
@@ -387,6 +387,17 @@ function RoleActionPanel({ plan }: { plan?: import('./types').RoleActionPlan }) 
   return <Panel title={`Role & action matrix · ${plan.roles.join(', ')}`} description="Static evidence menjadi baseline; direct URL, API permission, dan cross-role leakage wajib diverifikasi saat runtime.">
     <div className="evidence-inline-meta" style={{ marginBottom: 12 }}><strong>{plan.totals.expected}</strong><span>expected</span><strong>{plan.totals.candidate}</strong><span>candidate</span><strong>{plan.totals.runtime}</strong><span>runtime required</span></div>
     <div className="table-wrap"><table><thead><tr><th>Role</th><th>Page</th><th>Auth</th><th>Actions</th><th>Coverage</th></tr></thead><tbody>{plan.rows.slice(0, 80).map((row, index) => <tr key={`${row.role}-${row.page}-${index}`}><td><strong>{row.role}</strong></td><td><code>{row.page}</code></td><td>{row.authentication}</td><td style={{ maxWidth: 300, whiteSpace: 'normal' }}>{row.actions.join(' · ')}</td><td><span style={{ color: tone(row.expectation), fontSize: 10, fontWeight: 800 }}>{row.expectation.replace('_', ' ')}</span></td></tr>)}</tbody></table></div>
+    <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 12 }}>{plan.limitations.join(' ')}</p>
+  </Panel>;
+}
+
+function FeatureContractPanel({ plan }: { plan?: FeatureContractPlan }) {
+  if (!plan) return <Panel title="Feature test contract"><Empty title="Feature contract belum tersedia">Jalankan discovery ulang untuk memetakan expected UI, API, data, dan skenario per fitur.</Empty></Panel>;
+  const scenarioKinds = ['happy', 'negative', 'boundary', 'permission', 'recovery', 'integrity'] as const;
+  const tone = (status: string) => status === 'READY_FOR_REVIEW' ? 'var(--green)' : status === 'CANDIDATE' ? 'var(--yellow)' : 'var(--cyan)';
+  return <Panel title={`Feature test contract · ${plan.total} fitur`} description="Contract ini memisahkan fitur yang terdeteksi dari fitur yang benar-benar memiliki expected result dan skenario review." actions={<Badge value={`${plan.readyForReview} ready · ${plan.requiresReview} review`} />}>
+    <div className="evidence-inline-meta" style={{ marginBottom: 12 }}><strong>{plan.scenarioTotals.happy}</strong><span>happy</span><strong>{plan.scenarioTotals.negative}</strong><span>negative</span><strong>{plan.scenarioTotals.boundary}</strong><span>boundary</span><strong>{plan.scenarioTotals.integrity}</strong><span>integrity</span></div>
+    <div className="table-wrap"><table><thead><tr><th>Feature</th><th>Status</th><th>Actors</th><th>Evidence</th><th>Scenarios</th></tr></thead><tbody>{plan.contracts.map((contract) => <tr key={contract.id}><td><strong>{contract.label}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{contract.category} · {Math.round(contract.confidence * 100)}%</small></td><td><span style={{ color: tone(contract.status), fontSize: 10, fontWeight: 800 }}>{contract.status.replace(/_/g, ' ')}</span></td><td>{contract.actors.slice(0, 3).join(' · ')}</td><td>{contract.routes.length} route · {contract.apiRoutes.length} API</td><td>{scenarioKinds.map((kind) => <span key={kind} className="tag" style={{ marginRight: 4 }}>{kind}: {contract.scenarios.filter((scenario) => scenario.kind === kind).length}</span>)}</td></tr>)}</tbody></table></div>
     <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 12 }}>{plan.limitations.join(' ')}</p>
   </Panel>;
 }
@@ -1896,7 +1907,7 @@ export function App() {
                   </div>
                 </div>
               )}
-              {flowSource === 'job' && activeJob && <div style={{ display: 'grid', gap: 18, marginTop: 18 }}><CrudCoveragePanel plan={activeJob.inventory?.crudPlan} /><RoleActionPanel plan={activeJob.inventory?.roleActionPlan} /></div>}
+              {flowSource === 'job' && activeJob && <div style={{ display: 'grid', gap: 18, marginTop: 18 }}><FeatureContractPanel plan={activeJob.inventory?.featureContractPlan} /><CrudCoveragePanel plan={activeJob.inventory?.crudPlan} /><RoleActionPanel plan={activeJob.inventory?.roleActionPlan} /></div>}
             </div>
           )}
 
@@ -2038,7 +2049,7 @@ export function App() {
               </div>
 
               {flowSource === 'job' && <RunHistoryPanel history={runHistory} />}
-              {flowSource === 'job' && activeJob && <div style={{ marginBottom: 18 }}><CrudCoveragePanel plan={activeJob.inventory?.crudPlan} /></div>}
+              {flowSource === 'job' && activeJob && <div style={{ display: 'grid', gap: 18, marginBottom: 18 }}><FeatureContractPanel plan={activeJob.inventory?.featureContractPlan} /><CrudCoveragePanel plan={activeJob.inventory?.crudPlan} /></div>}
 
               {flowSource === 'zannora' && zannoraEvidence ? (
                 <ZannoraReport evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />

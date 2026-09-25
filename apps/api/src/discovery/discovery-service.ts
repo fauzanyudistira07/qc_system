@@ -17,6 +17,7 @@ import { checkAndroid, executeAndroidFlow, executeAndroidRawFlow } from '../andr
 import { detectCapabilities } from './capability-model.ts';
 import { buildCrudPlan } from './crud-planner.ts';
 import { buildRoleActionPlan } from './role-planner.ts';
+import { buildFeatureContractPlan } from './feature-contract.ts';
 
 
 export class DiscoveryService {
@@ -42,6 +43,10 @@ export class DiscoveryService {
       for (const j of loadedJobs) {
         if (j.inventory && (!j.inventory.capabilities || !j.inventory.capabilities.negativeScenarios)) {
           j.inventory.capabilities = detectCapabilities({ pages: j.inventory.pages, routes: j.inventory.routes, api: j.inventory.api });
+          capabilityBackfill = true;
+        }
+        if (j.inventory && !j.inventory.featureContractPlan && j.inventory.capabilities) {
+          j.inventory.featureContractPlan = buildFeatureContractPlan({ pages: j.inventory.pages, capabilities: j.inventory.capabilities.capabilities, crudPlan: j.inventory.crudPlan, roleActionPlan: j.inventory.roleActionPlan });
           capabilityBackfill = true;
         }
         this.jobs.set(j.id, j);
@@ -191,7 +196,7 @@ export class DiscoveryService {
     const statuses = [
       { folder: '01-start-analysis', title: 'Start & Analysis', status: active && /INITIALIZING/i.test(phase) ? 'RUNNING' : job.status === 'FAILED' ? 'ATTENTION' : 'CLEAR', output: ['project.json', 'input/config.json'] },
       { folder: '02-setup-environment', title: 'Setup Environment', status: active && /PREPAR|DATABASE|RUNTIME|BOOT|ENV|STARTING_DEMO/i.test(phase) ? 'RUNNING' : 'CLEAR', output: ['run.json'] },
-      { folder: '03-discovery-inventory', title: 'Discovery & Inventory', status: active && /DISCOVER|SCAN|CRAWL|INVENTORY/i.test(phase) ? 'RUNNING' : hasInventory ? 'CLEAR' : 'READY', output: hasInventory ? ['application-inventory.json', 'capability-profile.json', 'crud-plan.json', 'role-action-plan.json'] : [] },
+      { folder: '03-discovery-inventory', title: 'Discovery & Inventory', status: active && /DISCOVER|SCAN|CRAWL|INVENTORY/i.test(phase) ? 'RUNNING' : hasInventory ? 'CLEAR' : 'READY', output: hasInventory ? ['application-inventory.json', 'capability-profile.json', 'crud-plan.json', 'role-action-plan.json', 'feature-contract-plan.json'] : [] },
       { folder: '04-test-design', title: 'Test Design', status: active && /FLOW|DESIGN/i.test(phase) ? 'RUNNING' : hasFlows ? 'CLEAR' : 'READY', output: hasFlows ? ['generated flows'] : [] },
       { folder: '05-execution', title: 'Execution', status: active && /RUN|EXECUTE|PLAYWRIGHT|MAESTRO/i.test(phase) ? 'RUNNING' : hasResults ? (isFailed ? 'ATTENTION' : 'CLEAR') : 'READY', output: hasResults ? ['runtime-artifacts', 'results'] : [] },
       { folder: '06-responsive-ui', title: 'Responsive & UI Quality', status: qualityRunning ? 'RUNNING' : qualityFailed || qualityLimited ? 'ATTENTION' : job.qualityAudit?.status === 'PASSED' ? 'CLEAR' : 'READY', output: hasQualityReport ? ['quality/report.json', 'quality/screenshots'] : [] },
@@ -208,6 +213,10 @@ export class DiscoveryService {
     await writeFile(path.join(milestoneRoot, '03-discovery-inventory', 'job.json'), JSON.stringify({ inventory: job.inventory ?? null }, null, 2), 'utf8');
     if (job.inventory?.capabilities) {
       await writeFile(path.join(milestoneRoot, '03-discovery-inventory', 'capability-profile.json'), JSON.stringify(job.inventory.capabilities, null, 2), 'utf8');
+    }
+    if (job.inventory?.featureContractPlan) {
+      await writeFile(path.join(milestoneRoot, '03-discovery-inventory', 'feature-contract-plan.json'), JSON.stringify(job.inventory.featureContractPlan, null, 2), 'utf8');
+      await writeFile(path.join(milestoneRoot, '04-test-design', 'feature-contract-plan.json'), JSON.stringify(job.inventory.featureContractPlan, null, 2), 'utf8');
     }
     await writeFile(path.join(milestoneRoot, '04-test-design', 'flows.json'), JSON.stringify(job.flows ?? [], null, 2), 'utf8');
     await writeFile(path.join(milestoneRoot, '05-execution', 'results.json'), JSON.stringify(job.results ?? [], null, 2), 'utf8');
@@ -1151,6 +1160,7 @@ export class DiscoveryService {
       const capabilities = detectCapabilities({ pages: observedPages, routes, api });
       const crudPlan = buildCrudPlan({ pages: observedPages, routes, api });
       const roleActionPlan = buildRoleActionPlan({ pages: observedPages, accounts: config.accounts });
+      const featureContractPlan = buildFeatureContractPlan({ pages: observedPages, capabilities: capabilities.capabilities, crudPlan, roleActionPlan });
       const inventory: Inventory = {
         pages: observedPages,
         routes,
@@ -1160,12 +1170,14 @@ export class DiscoveryService {
         generatedAt: new Date().toISOString(),
         capabilities,
         crudPlan,
-        roleActionPlan
+        roleActionPlan,
+        featureContractPlan
       };
       job.inventory = inventory;
       this.addLog(job, 'discovery', `Capability profile: ${capabilities.detectedCount}/${capabilities.totalCatalogCapabilities} kemampuan terdeteksi.`);
       this.addLog(job, 'flow-builder', `CRUD matrix: ${crudPlan.totals.resources} resource, ${crudPlan.totals.available} operasi terobservasi, ${crudPlan.totals.requiresFixture} operasi membutuhkan fixture.`);
       this.addLog(job, 'flow-builder', `Role/action matrix: ${roleActionPlan.totals.rows} kombinasi halaman-role, ${roleActionPlan.totals.runtime} perlu verifikasi runtime.`);
+      this.addLog(job, 'flow-builder', `Feature contract: ${featureContractPlan.total} fitur, ${featureContractPlan.readyForReview} siap direview, ${featureContractPlan.requiresReview} perlu review, ${featureContractPlan.scenarioTotals.happy + featureContractPlan.scenarioTotals.negative + featureContractPlan.scenarioTotals.boundary + featureContractPlan.scenarioTotals.permission + featureContractPlan.scenarioTotals.recovery + featureContractPlan.scenarioTotals.integrity} skenario.`);
       this.addLog(job, 'discovery', `Domain hints: ${capabilities.domainHints.join(', ')}.`);
       capabilities.capabilities.slice(0, 12).forEach((capability) => {
         this.addLog(job, 'discovery', `  [${capability.status.toUpperCase()}] ${capability.label} (${Math.round(capability.confidence * 100)}%) — ${capability.evidence.routes.length} route, ${capability.evidence.apiRoutes.length} API evidence.`);
@@ -1191,6 +1203,11 @@ export class DiscoveryService {
       await writeFile(
         path.join(jobArtifactDir, 'role-action-plan.json'),
         JSON.stringify(roleActionPlan, null, 2),
+        'utf8'
+      );
+      await writeFile(
+        path.join(jobArtifactDir, 'feature-contract-plan.json'),
+        JSON.stringify(featureContractPlan, null, 2),
         'utf8'
       );
       this.addLog(job, 'discovery', '✓ Inventory tersimpan.');

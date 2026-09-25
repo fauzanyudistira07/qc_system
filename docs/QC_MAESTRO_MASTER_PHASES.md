@@ -62,7 +62,7 @@ Exit criteria:
 
 ## Phase 2 - Feature model dan test contract
 
-Status: **NEXT PRIORITY**
+Status: **DONE / HARDENING**
 
 Cakupan:
 

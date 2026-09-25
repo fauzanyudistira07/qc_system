@@ -4,6 +4,7 @@ import type { WebRunResult } from '../playwright-adapter.ts';
 import type { CapabilityProfile } from './capability-model.ts';
 import type { CrudPlan } from './crud-planner.ts';
 import type { RoleActionPlan } from './role-planner.ts';
+import type { FeatureContractPlan } from './feature-contract.ts';
 
 export type QualityAuditBrowser = 'chromium' | 'firefox' | 'webkit';
 export type QualityAuditViewport = 'desktop' | 'tablet' | 'mobile';
@@ -80,7 +81,7 @@ export type DiscoveryConfig = {
   platform: 'web' | 'android'; appId?: string; deviceId?: string; executeFlows: boolean; qualityAudit?: QualityAuditConfig;
   apkUploadId?: string; apkFilename?: string; apkPackageId?: string;
 };
-export type Inventory = { pages: InventoryPage[]; routes: Array<{ path: string; method: string; source: string }>; api: Array<{ path: string; method: string; source: string }>; filesScanned: number; warnings: string[]; generatedAt: string; capabilities?: CapabilityProfile; crudPlan?: CrudPlan; roleActionPlan?: RoleActionPlan };
+export type Inventory = { pages: InventoryPage[]; routes: Array<{ path: string; method: string; source: string }>; api: Array<{ path: string; method: string; source: string }>; filesScanned: number; warnings: string[]; generatedAt: string; capabilities?: CapabilityProfile; crudPlan?: CrudPlan; roleActionPlan?: RoleActionPlan; featureContractPlan?: FeatureContractPlan };
 export type GeneratedFlow = { id: string; name: string; source: string; platform: 'web' | 'android'; status: 'READY' | 'REVIEW_REQUIRED' | 'PASSED' | 'FAILED' | 'INFRA_ERROR'; reason?: string; pageId?: string };
 export type DiscoveryJob = {
   id: string; name: string; status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'INTERRUPTED';

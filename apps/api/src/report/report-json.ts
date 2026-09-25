@@ -45,6 +45,15 @@ export interface StructuredJsonReport {
       runtime: number;
       limitations: string[];
     };
+    featureContracts?: {
+      total: number;
+      readyForReview: number;
+      requiresReview: number;
+      candidate: number;
+      scenarioTotals: Record<string, number>;
+      contracts: Array<{ id: string; capabilityId: string; label: string; status: string; confidence: number; routes: string[]; apiRoutes: string[]; scenarioCount: number; limitations: string[] }>;
+      limitations: string[];
+    };
   };
   filterApplied?: {
     attempt?: string;
@@ -238,6 +247,25 @@ export function buildJsonReport(
         roles: job.inventory.roleActionPlan.roles,
         ...job.inventory.roleActionPlan.totals,
         limitations: job.inventory.roleActionPlan.limitations,
+      } : undefined,
+      featureContracts: job.inventory?.featureContractPlan ? {
+        total: job.inventory.featureContractPlan.total,
+        readyForReview: job.inventory.featureContractPlan.readyForReview,
+        requiresReview: job.inventory.featureContractPlan.requiresReview,
+        candidate: job.inventory.featureContractPlan.candidate,
+        scenarioTotals: job.inventory.featureContractPlan.scenarioTotals,
+        contracts: job.inventory.featureContractPlan.contracts.map((contract) => ({
+          id: contract.id,
+          capabilityId: contract.capabilityId,
+          label: contract.label,
+          status: contract.status,
+          confidence: contract.confidence,
+          routes: contract.routes,
+          apiRoutes: contract.apiRoutes,
+          scenarioCount: contract.scenarios.length,
+          limitations: contract.limitations,
+        })),
+        limitations: job.inventory.featureContractPlan.limitations,
       } : undefined,
     },
     filterApplied: {
