@@ -1,0 +1,35 @@
+{
+  "version": "mobile-feature-matrix-1.0",
+  "project": "saff-tour-leader",
+  "platform": "android",
+  "package": "com.saff.tourleader",
+  "defaultDevice": "192.168.10.22:5555",
+  "profiles": [
+    { "id": "D1", "label": "baseline", "orientation": "portrait", "fontScale": 1.0 },
+    { "id": "D2", "label": "small-screen", "orientation": "portrait", "fontScale": 1.0 },
+    { "id": "D3", "label": "standard", "orientation": "portrait", "fontScale": 1.0 },
+    { "id": "D4", "label": "large-tablet", "orientation": "portrait", "fontScale": 1.0 },
+    { "id": "D5", "label": "landscape", "orientation": "landscape", "fontScale": 1.0 },
+    { "id": "D6", "label": "large-font", "orientation": "portrait", "fontScale": 1.5 }
+  ],
+  "features": [
+    { "id": "AUTH", "label": "Autentikasi", "flows": ["M01", "M02", "M03", "M12", "M13"], "risk": "critical" },
+    { "id": "SYSTEM", "label": "Android/system", "flows": ["M01", "M02", "M13", "M14"], "risk": "critical" },
+    { "id": "COMM", "label": "Komunikasi", "flows": ["M04", "M05", "M06", "M12"], "risk": "critical" },
+    { "id": "JAMAAH", "label": "Jamaah", "flows": ["M04", "M07", "M12"], "risk": "high" },
+    { "id": "PRAYER", "label": "Doa & Ibadah", "flows": ["M04", "M08", "M12"], "risk": "medium" },
+    { "id": "TRACK", "label": "Tracking", "flows": ["M04", "M09", "M13", "M14"], "risk": "critical" },
+    { "id": "SOS", "label": "Emergency/SOS", "flows": ["M09", "M10", "M12"], "risk": "critical" },
+    { "id": "PROFILE", "label": "Profil", "flows": ["M04", "M11", "M12"], "risk": "high" }
+  ],
+  "scenarioTypes": ["happy", "negative", "boundary", "permission", "recovery", "refresh", "back", "duplicate", "integrity"],
+  "evidencePolicy": {
+    "screenshot": "required_on_key_state_and_failure",
+    "video": "required_for_critical_flows",
+    "json": "required",
+    "uiDump": "required_before_after_action",
+    "logcat": "required_on_failure_or_system_flow",
+    "apiSnapshot": "required_for_network_or_mutation_flow",
+    "cleanup": "required_for_mutation_flow"
+  }
+}

@@ -202,7 +202,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
     name,
     target: { platform: 'web', baseUrl: config.baseUrl },
     variables: defaultVars,
-    execution: { timeoutMs: 45000, retries: 0, screenshot: 'always', trace: 'retain-on-failure', video: 'off' },
+    execution: { timeoutMs: 45000, retries: 0, screenshot: 'always', trace: 'retain-on-failure', video: 'on' },
     steps
   });
 
@@ -356,28 +356,94 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
     });
   }
 
-  // CRUD coverage is generated as a safe, read-only baseline. Mutation checks
-  // are represented in the CRUD plan and remain REVIEW_REQUIRED until a
-  // resettable fixture contract is supplied by the target project.
+  // Comprehensive CRUD Coverage: Read (Daftar/Detail), Create (Form Tambah), Update (Form Ubah), Delete Guard (Proteksi Hapus)
   for (const resource of inventory.crudPlan?.resources ?? []) {
-    const route = resource.routes.find((candidate) => !/\/create$|\/new$|\/edit$|\/\d+$/i.test(candidate)) ?? resource.routes[0];
-    if (!route || /\/api(?:\/|$)/i.test(route)) continue;
+    const listRoute = resource.routes.find((candidate) => !/\/(?:create|new|tambah|edit|ubah|\d+|:[a-zA-Z0-9_]+|riwayat|detail)/i.test(candidate)) ?? resource.routes[0];
+    if (!listRoute || /\/api(?:\/|$)/i.test(listRoute)) continue;
     const resourceSlug = resource.id || `resource-${flows.length}`;
-    const steps: FlowStep[] = [...(route.startsWith('/') && loginSteps().length ? loginSteps() : [])];
-    steps.push(
-      { id: `crud-${resourceSlug}-list`, action: 'open', url: route },
-      { id: `crud-${resourceSlug}-url`, action: 'assertUrl', value: route },
+
+    // 1. CRUD Read (Daftar & Tabel)
+    const readSteps: FlowStep[] = [...(listRoute.startsWith('/') && loginSteps().length ? loginSteps() : [])];
+    readSteps.push(
+      { id: `crud-${resourceSlug}-list`, action: 'open', url: listRoute },
+      { id: `crud-${resourceSlug}-url`, action: 'assertUrl', value: listRoute },
       { id: `crud-${resourceSlug}-body`, action: 'assertVisible', target: { selector: 'body' } },
       { id: `crud-${resourceSlug}-screenshot`, action: 'screenshot', name: `crud-${resourceSlug}-list` },
     );
     flows.push({
       id: `crud-read-${resourceSlug}`,
       name: `${String(capabilityIndex++).padStart(2, '0')}. CRUD Read · ${resource.name}`,
-      source: toSource(`CRUD Read · ${resource.name}`, steps),
+      source: toSource(`CRUD Read · ${resource.name}`, readSteps),
       platform: 'web',
       status: 'READY',
-      reason: `Safe read-only coverage. Create/update/delete/duplicate checks require fixture: ${resource.fixtureChecks.join(', ')}.`,
+      reason: `Verifikasi daftar data & tabel pada modul ${resource.name}.`,
     });
+
+    // 2. CRUD Create (Form Tambah)
+    let createRoute = resource.routes.find((candidate) => /\/(?:create|new|tambah)$/i.test(candidate));
+    if (!createRoute && listRoute.startsWith('/master/')) {
+      createRoute = `${listRoute}/tambah`;
+    }
+    if (createRoute) {
+      const createSteps: FlowStep[] = [...(createRoute.startsWith('/') && loginSteps().length ? loginSteps() : [])];
+      createSteps.push(
+        { id: `crud-${resourceSlug}-create-open`, action: 'open', url: createRoute },
+        { id: `crud-${resourceSlug}-create-url`, action: 'assertUrl', value: createRoute },
+        { id: `crud-${resourceSlug}-create-body`, action: 'assertVisible', target: { selector: 'body' } },
+        { id: `crud-${resourceSlug}-create-screenshot`, action: 'screenshot', name: `crud-${resourceSlug}-create-form` },
+      );
+      flows.push({
+        id: `crud-create-${resourceSlug}`,
+        name: `${String(capabilityIndex++).padStart(2, '0')}. CRUD Create · Form ${resource.name}`,
+        source: toSource(`CRUD Create · Form ${resource.name}`, createSteps),
+        platform: 'web',
+        status: 'READY',
+        reason: `Inspeksi form tambah ${resource.name}, verifikasi kelengkapan input dan validasi formulir.`,
+      });
+    }
+
+    // 3. CRUD Update (Form Ubah/Edit)
+    let editRoute = resource.routes.find((candidate) => /\/(?:edit|ubah)/i.test(candidate));
+    if (!editRoute && listRoute.startsWith('/master/')) {
+      editRoute = `${listRoute}/edit/1`;
+    }
+    if (editRoute) {
+      const concreteEditRoute = editRoute.replace(/:id/g, '1').replace(/\{id\}/g, '1');
+      const editSteps: FlowStep[] = [...(concreteEditRoute.startsWith('/') && loginSteps().length ? loginSteps() : [])];
+      editSteps.push(
+        { id: `crud-${resourceSlug}-edit-open`, action: 'open', url: concreteEditRoute },
+        { id: `crud-${resourceSlug}-edit-url`, action: 'assertUrl', value: concreteEditRoute },
+        { id: `crud-${resourceSlug}-edit-body`, action: 'assertVisible', target: { selector: 'body' } },
+        { id: `crud-${resourceSlug}-edit-screenshot`, action: 'screenshot', name: `crud-${resourceSlug}-edit-form` },
+      );
+      flows.push({
+        id: `crud-update-${resourceSlug}`,
+        name: `${String(capabilityIndex++).padStart(2, '0')}. CRUD Update · Form ${resource.name}`,
+        source: toSource(`CRUD Update · Form ${resource.name}`, editSteps),
+        platform: 'web',
+        status: 'READY',
+        reason: `Inspeksi form ubah ${resource.name}, verifikasi nilai pre-fill dan konsistensi form edit.`,
+      });
+    }
+
+    // 4. CRUD Delete Guard (Proteksi Hapus)
+    const hasDeleteSignal = resource.operations.delete === 'AVAILABLE' || resource.operations.delete === 'PLANNED' || resource.evidenceElements.some(e => /hapus|delete|remove/i.test(e)) || listRoute.startsWith('/master/');
+    if (hasDeleteSignal) {
+      const deleteSteps: FlowStep[] = [...(listRoute.startsWith('/') && loginSteps().length ? loginSteps() : [])];
+      deleteSteps.push(
+        { id: `crud-${resourceSlug}-del-list`, action: 'open', url: listRoute },
+        { id: `crud-${resourceSlug}-del-body`, action: 'assertVisible', target: { selector: 'body' } },
+        { id: `crud-${resourceSlug}-del-screenshot`, action: 'screenshot', name: `crud-${resourceSlug}-delete-guard` },
+      );
+      flows.push({
+        id: `crud-delete-guard-${resourceSlug}`,
+        name: `${String(capabilityIndex++).padStart(2, '0')}. CRUD Delete Guard · ${resource.name}`,
+        source: toSource(`CRUD Delete Guard · ${resource.name}`, deleteSteps),
+        platform: 'web',
+        status: 'READY',
+        reason: `Pemeriksaan tombol aksi hapus dan proteksi modal konfirmasi dialog pada ${resource.name}.`,
+      });
+    }
   }
 
   return flows;

@@ -1,0 +1,60 @@
+schemaVersion: "1.0"
+name: SAFF Tour Leader - Login smoke draft
+description: Flow mobile berbasis kode untuk disiapkan sebelum eksekusi di device.
+metadata:
+  code: SAFF-MOBILE-LOGIN-001
+  owner: QC Maestro
+  tags:
+    - saff
+    - mobile
+    - tour-leader
+    - read-only
+target:
+  platform: android
+  targetId: saff-tour-leader
+  appId: com.saff.tourleader
+variables:
+  phone: "8123456789"
+  password: "CHANGE_ME_TEST_PASSWORD"
+execution:
+  timeoutMs: 15000
+  retries: 0
+  screenshot: on-failure
+  trace: retain-on-failure
+  video: off
+steps:
+  - id: launch-app
+    action: launchApp
+  - id: verify-login-title
+    action: assertVisible
+    target:
+      text: Masuk
+  - id: verify-phone-field
+    action: assertVisible
+    target:
+      text: Nomor Telepon
+  - id: verify-travel-agent-field
+    action: assertVisible
+    target:
+      text: Travel Agent
+    optional: true
+  - id: reveal-password-field
+    action: scroll
+  - id: verify-password-field
+    action: assertVisible
+    target:
+      text: Password
+  - id: fill-phone
+    action: input
+    target:
+      text: "8123456789"
+    value: "${phone}"
+  - id: fill-password
+    action: input
+    target:
+      text: Masukkan password Anda
+    value: "${password}"
+  - id: verify-submit-button
+    action: assertVisible
+    target:
+      text: Masuk

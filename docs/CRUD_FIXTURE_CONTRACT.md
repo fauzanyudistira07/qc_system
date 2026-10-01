@@ -34,4 +34,6 @@ Mutation CRUD hanya dijalankan jika konfigurasi quality audit menunjuk ke file i
 
 Supported actions: `open`, `click`, `input`, `clear`, `assertVisible`, `assertNotVisible`, `assertText`, `assertUrl`, `reload`, dan `wait`.
 
-Gunakan scenario id seperti `crud-duplicate-record` dan `crud-delete-in-use` agar hasilnya otomatis dipetakan ke negative testing capability plan. `cleanup` wajib disediakan untuk setiap scenario yang membuat atau mengubah data.
+Gunakan scenario id seperti `crud-duplicate-record` dan `crud-delete-in-use` agar hasilnya otomatis dipetakan ke negative testing capability plan. `cleanup` wajib disediakan untuk setiap scenario yang membuat atau mengubah data. Mutation runner akan menggagalkan report jika cleanup tidak ada atau cleanup gagal.
+
+Untuk CI, gunakan `npm run qc:ci` dengan `QC_REPORT_PATH` dan `QC_ALLOWED_FINDINGS`. Artifact lama dapat dibersihkan dengan `npm run qc:retain`; atur `QC_RETENTION_DAYS` dan `QC_RETENTION_KEEP_RUNS` sesuai kebijakan. Cleanup hanya menghapus run di bawah artifact root.

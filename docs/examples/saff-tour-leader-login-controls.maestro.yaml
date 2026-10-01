@@ -1,0 +1,19 @@
+appId: com.saff.tourleader
+name: SAFF Tour Leader - Login controls smoke
+---
+- assertVisible: "Masuk"
+- assertVisible: "Nomor Telepon"
+- assertVisible: "Kata Sandi"
+- assertVisible: "Syarat & Ketentuan"
+- assertVisible: "Kebijakan Privasi"
+- tapOn: "Syarat & Ketentuan"
+- assertVisible: "Syarat & Ketentuan"
+- pressKey: BACK
+- tapOn: "Kebijakan Privasi"
+- assertVisible: "Kebijakan Privasi"
+- pressKey: BACK
+- tapOn: "Nomor Telepon"
+- inputText: "8123456789"
+- tapOn: "Masukan kata sandi anda"
+- inputText: "invalid-qc-password"
+- assertVisible: "Masuk"

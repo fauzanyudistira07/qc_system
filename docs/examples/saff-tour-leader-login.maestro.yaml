@@ -1,0 +1,16 @@
+appId: com.saff.tourleader
+name: SAFF Tour Leader - Login smoke
+env:
+  phone: "8123456789"
+  password: "CHANGE_ME_TEST_PASSWORD"
+---
+- launchApp
+- assertVisible: "Masuk"
+- assertVisible: "Nomor Telepon"
+- scroll
+- assertVisible: "Password"
+- tapOn: "8123456789"
+- inputText: ${phone}
+- tapOn: "Masukkan password Anda"
+- inputText: ${password}
+- assertVisible: "Masuk"

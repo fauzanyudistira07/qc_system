@@ -1,0 +1,6 @@
+appId: com.saff.tourleader
+name: SAFF Tour Leader - Launch smoke
+---
+- launchApp
+- assertVisible: "Masuk"
+- assertVisible: "Nomor Telepon"

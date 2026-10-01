@@ -1,12 +1,12 @@
 import { chromium } from 'playwright';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { DiscoveryJob } from '../discovery/types.ts';
 import { groupResultsIntoAttempts, type TestAttempt } from './attempt-grouper.ts';
 
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
-async function withTimeout<T>(action: Promise<T>, timeoutMs = 10_000): Promise<T> {
+async function withTimeout<T>(action: Promise<T>, timeoutMs = 60_000): Promise<T> {
   return Promise.race<T>([
     action,
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`PDF operation timed out after ${timeoutMs}ms`)), timeoutMs)),
@@ -45,11 +45,103 @@ async function fileToBase64(filePath: string): Promise<string | null> {
   try {
     const buffer = await readFile(filePath);
     const ext = path.extname(filePath).toLowerCase();
-    const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'application/octet-stream';
+    const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'application/octet-stream';
     return `data:${mime};base64,${buffer.toString('base64')}`;
   } catch {
     return null;
   }
+}
+
+type QualityCheck = {
+  area?: string;
+  name?: string;
+  detail?: string;
+  passed?: boolean;
+  outcome?: string;
+  applicable?: boolean;
+  route?: string;
+  browser?: string;
+  viewport?: string;
+  screenshots?: Array<string | { path?: string; name?: string }>;
+  screenshot?: string;
+};
+
+type QualityFindingGroup = {
+  route: string;
+  browser: string;
+  viewport: string;
+  checks: QualityCheck[];
+  screenshots: Array<{ name: string; base64: string }>;
+};
+
+async function readQualityReport(job: DiscoveryJob, artifactRoot: string) {
+  const reportPath = job.qualityAudit?.reportPath;
+  if (!reportPath) return null;
+  const absoluteRoot = path.resolve(artifactRoot);
+  const absoluteReport = path.resolve(absoluteRoot, reportPath.replace(/[\\/]+/g, path.sep));
+  const relative = path.relative(absoluteRoot, absoluteReport);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  try {
+    const report = JSON.parse(await readFile(absoluteReport, 'utf8'));
+    return { report, directory: path.dirname(absoluteReport) };
+  } catch {
+    return null;
+  }
+}
+
+async function buildQualityFindingGroups(checks: QualityCheck[], reportDirectory: string): Promise<QualityFindingGroup[]> {
+  const failedChecks = checks.filter((check) => check.outcome === 'FAILED' || (check.passed === false && check.outcome !== 'NOT_APPLICABLE'));
+  const screenshotRoot = path.resolve(reportDirectory, 'screenshots');
+  const groups = new Map<string, QualityFindingGroup>();
+  const evidenceChecks = checks.filter((check) => check.area === 'visual-evidence');
+  const imageCache = new Map<string, string | null>();
+
+  const addScreenshot = async (group: QualityFindingGroup, reference: string | { path?: string; name?: string }) => {
+    const value = typeof reference === 'string' ? reference : reference.path || reference.name || '';
+    if (!value) return;
+    const filename = value.replace(/[?#].*$/, '').replace(/\\/g, '/').split('/').pop() || '';
+    if (!/\.(png|jpe?g|webp)$/i.test(filename) || group.screenshots.some((image) => image.name === filename)) return;
+    const candidates = [path.resolve(screenshotRoot, filename)];
+    if (!path.isAbsolute(value)) {
+      const relativeCandidate = path.resolve(reportDirectory, value);
+      const relative = path.relative(reportDirectory, relativeCandidate);
+      if (!relative.startsWith('..') && !path.isAbsolute(relative)) candidates.push(relativeCandidate);
+    }
+    for (const candidate of candidates) {
+      let image = imageCache.get(candidate);
+      if (image === undefined) {
+        image = await fileToBase64(candidate);
+        imageCache.set(candidate, image);
+      }
+      if (image) {
+        group.screenshots.push({ name: filename, base64: image });
+        return;
+      }
+    }
+  };
+
+  for (const check of failedChecks) {
+    const route = check.route || 'Route tidak dicatat';
+    const browser = check.browser || 'Browser tidak dicatat';
+    const viewport = check.viewport || 'Viewport tidak dicatat';
+    const key = [route, browser, viewport].join('|');
+    let group = groups.get(key);
+    if (!group) {
+      group = { route, browser, viewport, checks: [], screenshots: [] };
+      groups.set(key, group);
+    }
+    group.checks.push(check);
+
+    const evidence = evidenceChecks.find((item) => item.route === check.route && item.browser === check.browser && item.viewport === check.viewport);
+    const refs = [
+      ...(Array.isArray(check.screenshots) ? check.screenshots : []),
+      ...(check.screenshot ? [check.screenshot] : []),
+      ...(evidence?.detail ? [evidence.detail] : []),
+    ];
+    for (const reference of refs) await addScreenshot(group, reference);
+  }
+
+  return [...groups.values()];
 }
 
 export async function buildPdfHtml(
@@ -81,7 +173,31 @@ export async function buildPdfHtml(
   const passedCount = (selectedAttempt?.results || []).filter(r => r.status === 'PASSED').length;
   const failedCount = (selectedAttempt?.results || []).filter(r => r.status !== 'PASSED').length;
   const totalCount = (selectedAttempt?.results || []).length;
-  const healthScore = totalCount > 0 ? Math.round((passedCount / totalCount) * 100) : 100;
+  const healthScore = totalCount > 0 ? Math.round((passedCount / totalCount) * 100) : null;
+
+  const qualityData = await readQualityReport(job, artifactRoot);
+  const qualityReport = qualityData?.report;
+  const qualityChecks: QualityCheck[] = Array.isArray(qualityReport?.checks) ? qualityReport.checks : [];
+  const qualityFindings = qualityData ? await buildQualityFindingGroups(qualityChecks, qualityData.directory) : [];
+  const checkFailureCount = qualityChecks.filter((check) => check.outcome === 'FAILED' || (check.passed === false && check.outcome !== 'NOT_APPLICABLE')).length;
+  const qualityFailedCount = qualityChecks.length ? checkFailureCount : Number(qualityReport?.failed ?? job.qualityAudit?.failed ?? 0);
+  const qualityPassedCount = Number(qualityReport?.passed ?? job.qualityAudit?.passed ?? 0);
+  const qualityTotalCount = Number(qualityReport?.total ?? job.qualityAudit?.total ?? 0);
+  const auditStatus = job.qualityAudit?.status || 'NOT_RUN';
+  const auditLabel = auditStatus === 'PASSED'
+    ? 'QUALITY AUDIT LULUS'
+    : auditStatus === 'PASSED_WITH_LIMITATIONS'
+      ? 'LULUS DENGAN BATASAN'
+      : auditStatus === 'FAILED'
+        ? 'ADA TEMUAN · PERLU PERBAIKAN'
+        : auditStatus === 'RUNNING' || auditStatus === 'QUEUED'
+          ? 'AUDIT BELUM SELESAI'
+          : auditStatus === 'SKIPPED'
+            ? 'QUALITY AUDIT DILEWATI'
+            : auditStatus === 'ERROR'
+              ? 'QUALITY AUDIT ERROR'
+              : 'BELUM DIAUDIT';
+  const auditColor = auditStatus === 'PASSED' ? '#047857' : auditStatus === 'PASSED_WITH_LIMITATIONS' ? '#a16207' : '#be123c';
 
   // Baca screenshot ke Base64 untuk setiap flow
   const jobDir = path.join(artifactRoot, 'jobs', job.id);
@@ -121,6 +237,48 @@ export async function buildPdfHtml(
       };
     })
   );
+
+  const qualityCategoryRows = Object.entries(qualityReport?.categories || {}).map(([category, metrics]: [string, any]) => `
+    <tr><td>${esc(category)}</td><td>${Number(metrics.total || 0)}</td><td style="color:#047857">${Number(metrics.passed || 0)}</td><td style="color:${Number(metrics.failed || 0) ? '#be123c' : '#64748b'}">${Number(metrics.failed || 0)}</td><td>${Number(metrics.notApplicable || 0)}</td></tr>
+  `).join('');
+  const qualitySectionHtml = job.qualityAudit || qualityData ? `
+    <div class="section-title">UI Quality Audit</div>
+    <div class="quality-summary">
+      <div><span>Status</span><strong style="color:${auditColor}">${esc(auditLabel)}</strong></div>
+      <div><span>Total pemeriksaan</span><strong>${qualityTotalCount}</strong></div>
+      <div><span>Lulus</span><strong style="color:#047857">${qualityPassedCount}</strong></div>
+      <div><span>Temuan gagal</span><strong style="color:${qualityFailedCount ? '#be123c' : '#047857'}">${qualityFailedCount}</strong></div>
+      <div><span>Tidak berlaku</span><strong>${Number(qualityReport?.notApplicable ?? job.qualityAudit?.notApplicable ?? 0)}</strong></div>
+    </div>
+    ${qualityCategoryRows ? `<table class="data-table quality-categories"><thead><tr><th>Kategori</th><th>Total</th><th>Lulus</th><th>Temuan</th><th>N/A</th></tr></thead><tbody>${qualityCategoryRows}</tbody></table>` : ''}
+    ${qualityFindings.length > 0 ? `
+      <div class="quality-finding-list">
+        ${qualityFindings.map((group, index) => `
+          <article class="quality-finding-group">
+            <div class="quality-finding-heading"><strong>${index + 1}. ${esc(group.route)}</strong><span>${esc(group.browser)} · ${esc(group.viewport)}</span></div>
+            <ul>${group.checks.map((check) => `<li><strong>${esc(check.area || 'quality')}</strong> — ${esc(check.name || 'UI check gagal')}<small>${esc(check.detail || 'Tidak ada detail yang dilaporkan.')}</small></li>`).join('')}</ul>
+            ${group.screenshots.length ? `<div class="quality-evidence-grid">${group.screenshots.map((image) => `<figure><img data-report-evidence src="${image.base64}" alt="Screenshot ${esc(image.name)}"><figcaption>${esc(image.name)} · ${esc(group.route)} · ${esc(group.browser)} / ${esc(group.viewport)}</figcaption></figure>`).join('')}</div>` : '<p class="quality-no-image">Screenshot checkpoint tidak ditemukan pada artifact run ini.</p>'}
+          </article>
+        `).join('')}
+      </div>
+    ` : qualityData && qualityFailedCount > 0
+      ? `<p class="quality-empty">${qualityFailedCount} pemeriksaan gagal dilaporkan, tetapi detail checks tidak tersedia dalam file report.</p>`
+      : qualityData
+        ? '<p class="quality-empty">Tidak ada pemeriksaan UI/quality berstatus gagal pada report ini.</p>'
+      : `<p class="quality-empty">${qualityFailedCount ? `Report detail tidak tersedia; ${qualityFailedCount} temuan tercatat, tetapi detail dan screenshot tidak dapat dimuat.` : 'Detail pemeriksaan dan screenshot belum tersedia untuk sesi ini.'}</p>`}
+    ${job.qualityAudit?.message ? `<p class="quality-empty">Catatan audit: ${esc(job.qualityAudit.message)}</p>` : ''}
+  ` : `
+    <div class="section-title">UI Quality Audit</div>
+    <p class="quality-empty">Quality Audit UI belum dijalankan. PDF ini tidak menyimpulkan bahwa UI sudah lulus.</p>
+  `;
+
+  const releaseLabel = qualityFailedCount > 0 || failedCount > 0
+    ? `Perlu perbaikan · ${qualityFailedCount + failedCount} temuan / kegagalan`
+    : auditStatus === 'PASSED' && totalCount > 0
+      ? 'Lulus pemeriksaan yang dijalankan · bukan jaminan siap produksi'
+      : auditStatus === 'PASSED'
+        ? 'UI Quality lulus · skenario flow tidak dijalankan'
+        : 'Belum dinilai untuk kesiapan rilis';
 
   return `<!doctype html>
 <html lang="id">
@@ -379,6 +537,25 @@ export async function buildPdfHtml(
       white-space: nowrap;
     }
 
+    .report-badge-status { display:inline-block; max-width:250px; padding:7px 12px; border:1.5px solid ${auditColor}; border-radius:6px; color:${auditColor}; background:#fff; font-size:9pt; font-weight:800; text-align:center; }
+    .quality-summary { display:grid; grid-template-columns:repeat(5,1fr); gap:7px; margin:8px 0 12px; }
+    .quality-summary > div { padding:9px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; }
+    .quality-summary span,.quality-summary strong { display:block; }
+    .quality-summary span { color:#64748b; font-size:7pt; text-transform:uppercase; }
+    .quality-summary strong { margin-top:4px; font-size:10pt; }
+    .quality-categories { margin-top:8px; }
+    .quality-finding-group { margin:12px 0; padding:11px; border:1px solid #fecdd3; border-left:4px solid #e11d48; border-radius:6px; break-inside:avoid; page-break-inside:avoid; }
+    .quality-finding-heading { display:flex; justify-content:space-between; gap:10px; margin-bottom:7px; font-size:9pt; }
+    .quality-finding-heading span { color:#64748b; font-size:8pt; }
+    .quality-finding-group ul { padding-left:18px; }
+    .quality-finding-group li { margin:5px 0; font-size:8.5pt; }
+    .quality-finding-group li small { display:block; margin-top:2px; color:#475569; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .quality-evidence-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:8px; margin-top:9px; }
+    .quality-evidence-grid figure { margin:0; padding:4px; border:1px solid #cbd5e1; border-radius:5px; break-inside:avoid; page-break-inside:avoid; }
+    .quality-evidence-grid img { display:block; width:100%; max-height:300px; object-fit:contain; background:#111827; }
+    .quality-evidence-grid figcaption { padding:4px 2px; color:#475569; font-size:7pt; overflow-wrap:anywhere; }
+    .quality-empty { margin:8px 0 14px; padding:10px; border:1px solid #cbd5e1; border-radius:6px; color:#475569; background:#f8fafc; font-size:9pt; }
+
     /* FOOTER */
     .audit-footer {
       margin-top: 24px;
@@ -409,9 +586,7 @@ export async function buildPdfHtml(
         <div class="brand-title">${esc(job.name)}</div>
       </td>
       <td style="text-align: right;">
-        <div class="report-badge-passed">
-          ✓ STATUS: 100% LULUS
-        </div>
+        <div class="report-badge-status">${esc(auditLabel)}</div>
       </td>
     </tr>
   </table>
@@ -428,8 +603,8 @@ export async function buildPdfHtml(
         <div class="meta-cell">🆔 <strong>Job ID:</strong> <code>${esc(job.id.slice(0, 8))}</code></div>
       </div>
       <div class="meta-row">
-        <div class="meta-cell">🔧 <strong>Perangkat Pengujian:</strong> TECNO CM5 (${esc(job.config.deviceId || 'Android Physical Device')})</div>
-        <div class="meta-cell">📐 <strong>Resolusi Layar:</strong> 1080 x 2436 Pixel</div>
+        <div class="meta-cell">🔧 <strong>Browser audit:</strong> ${esc(job.qualityAudit?.browsers?.join(', ') || 'Tidak tersedia')}</div>
+        <div class="meta-cell">📐 <strong>Viewport audit:</strong> ${esc(job.qualityAudit?.viewports?.join(', ') || 'Tidak tersedia')}</div>
       </div>
     </div>
   </div>
@@ -438,8 +613,8 @@ export async function buildPdfHtml(
   <div class="kpi-container">
     <div class="kpi-cell">
       <div class="kpi-card kpi-highlight">
-        <div class="kpi-val val-passed">${healthScore}%</div>
-        <div class="kpi-label">QA Health Score</div>
+        <div class="kpi-val ${healthScore !== null && healthScore === 100 ? 'val-passed' : ''}" style="color:${healthScore === null ? '#64748b' : healthScore === 100 ? '#059669' : '#e11d48'}">${healthScore === null ? '—' : `${healthScore}%`}</div>
+        <div class="kpi-label">Flow Pass Rate</div>
       </div>
     </div>
     <div class="kpi-cell">
@@ -495,6 +670,8 @@ export async function buildPdfHtml(
       }).join('')}
     </tbody>
   </table>
+
+  ${qualitySectionHtml}
 
   <!-- DETAIL SKENARIO -->
   <div class="section-title">Rincian Skenario Terverifikasi (${esc(selectedAttempt?.name || '')})</div>
@@ -554,10 +731,10 @@ export async function buildPdfHtml(
   <!-- AUDIT FOOTER -->
   <div class="audit-footer">
     <div class="audit-footer-left">
-      Dokumen ini diverifikasi secara deterministik oleh QC Maestro Autonomous Engine pada perangkat fisik.
+      Ringkasan ini hanya mencakup pemeriksaan dan bukti yang benar-benar tersedia pada sesi QC ini.
     </div>
     <div class="audit-footer-right">
-      Kesiapan Produksi: SIAP RILIS (PRODUCTION-READY)
+      ${esc(releaseLabel)}
     </div>
   </div>
 
@@ -571,10 +748,14 @@ export async function generatePdfReport(
   options?: { attempt?: string; status?: string }
 ): Promise<Buffer> {
   const html = await buildPdfHtml(job, artifactRoot, options);
+  const tempDir = path.resolve(artifactRoot, 'temp');
+  await mkdir(tempDir, { recursive: true });
+  const tempFile = path.resolve(tempDir, `pdf-render-${job.id.slice(0, 8)}-${Date.now()}.html`);
+  await writeFile(tempFile, html, 'utf8');
 
   const browser = await chromium.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
   });
 
   try {
@@ -582,9 +763,11 @@ export async function generatePdfReport(
       viewport: { width: 1280, height: 1024 }
     });
 
-    await withTimeout(page.setContent(html, {
-      waitUntil: 'load'
-    }));
+    const fileUrl = `file://${tempFile.replace(/\\/g, '/')}`;
+    await withTimeout(page.goto(fileUrl, { waitUntil: 'load', timeout: 60_000 }), 60_000);
+    await withTimeout(page.evaluate(async () => {
+      await Promise.all(Array.from(document.querySelectorAll<HTMLImageElement>('img')).map((image) => image.decode().catch(() => undefined)));
+    }), 25_000);
 
     const pdfBuffer = await withTimeout<Buffer>(page.pdf({
       format: 'A4',
@@ -602,10 +785,11 @@ export async function generatePdfReport(
           <span>QC Maestro · ${esc(job.name)} · Halaman <span class="pageNumber"></span> dari <span class="totalPages"></span></span>
         </div>
       `
-    }));
+    }), 60_000);
 
     return pdfBuffer;
   } finally {
     await closeWithTimeout(browser.close());
+    await unlink(tempFile).catch(() => undefined);
   }
 }

@@ -67,6 +67,11 @@ async function main() {
     await fs.writeFile(outputPath, JSON.stringify(report, null, 2));
     return;
   }
+  for (const scenario of scenarios) {
+    if (!scenario.id || !scenario.operation) throw new Error('Setiap fixture scenario wajib memiliki id dan operation.');
+    if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) throw new Error(`Scenario ${scenario.id} wajib memiliki steps.`);
+    if (!Array.isArray(scenario.cleanup) || scenario.cleanup.length === 0) throw new Error(`Scenario ${scenario.id} wajib memiliki cleanup yang dapat diverifikasi.`);
+  }
   if (!baseUrl || !email || !password) throw new Error('Target URL dan akun audit wajib tersedia untuk mutation runner.');
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
@@ -92,6 +97,12 @@ async function main() {
       } finally {
         for (const [index, step] of (scenario.cleanup || []).entries()) {
           try { await perform(page, step, screenshotDir, 1000 + index); } catch (error) { result.cleanupError = error instanceof Error ? error.message : String(error); }
+        }
+        if (result.cleanupError) {
+          result.passed = false;
+          result.outcome = 'FAILED';
+          result.detail = `${result.detail || 'Scenario selesai.'} Cleanup gagal: ${result.cleanupError}`;
+          report.status = 'FAILED';
         }
       }
       report.scenarios.push(result);

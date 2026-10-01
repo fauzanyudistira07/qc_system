@@ -1,5 +1,6 @@
 import type { DiscoveryJob } from '../discovery/types.ts';
 import { groupResultsIntoAttempts, type TestAttempt } from './attempt-grouper.ts';
+import type { BusinessFlowMap } from '../discovery/business-flow.ts';
 
 export interface StructuredJsonReport {
   reportVersion: string;
@@ -54,6 +55,7 @@ export interface StructuredJsonReport {
       contracts: Array<{ id: string; capabilityId: string; label: string; status: string; confidence: number; routes: string[]; apiRoutes: string[]; scenarioCount: number; limitations: string[] }>;
       limitations: string[];
     };
+    businessFlows?: Pick<BusinessFlowMap, 'version' | 'generatedAt' | 'status' | 'productProfile' | 'summary' | 'limitations'> & { flows: BusinessFlowMap['flows'] };
   };
   filterApplied?: {
     attempt?: string;
@@ -267,6 +269,7 @@ export function buildJsonReport(
         })),
         limitations: job.inventory.featureContractPlan.limitations,
       } : undefined,
+      businessFlows: job.businessFlowMap,
     },
     filterApplied: {
       attempt: options?.attempt || 'all',

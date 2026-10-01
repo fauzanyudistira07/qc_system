@@ -38,13 +38,13 @@ export type QualityAuditState = {
   visualRegression?: { mode?: 'off' | 'capture' | 'required'; baselinesCompared?: number; baselinesCaptured?: number; changed?: number; missing?: number };
 };
 export type Config = {
-  name: string; repositoryUrl: string; ref: string; baseUrl: string;
-  backendUrl?: string; backendMode?: 'existing' | 'repo';
+  name: string; sourceType?: 'existing-target' | 'local-folder' | 'github'; localPath?: string; repositoryUrl: string; ref: string; baseUrl: string;
+  backendUrl?: string; backendMode?: 'existing' | 'local' | 'repo';
   runMode: 'managed-local' | 'existing-target' | 'demo'; stack: 'auto' | 'custom' | 'laravel'; services: Service[];
   database: { engine: 'none' | 'mysql' | 'postgres' | 'sqlite'; source: 'empty' | 'sql' | 'migrate' | 'seed'; sqlUploadId?: string; migrationCommand?: string; seedCommand?: string; provisionCommand?: string };
   envUploadId?: string; accounts: Account[];
   rules: { maxPages: number; maxDepth: number; includePaths: string[]; excludePaths: string[]; loginPath?: string; emailSelector?: string; passwordSelector?: string; submitSelector?: string; successUrl?: string };
-  platform: 'web' | 'android'; appId?: string; deviceId?: string; executeFlows: boolean; qualityAudit: QualityAuditConfig;
+  platform: 'web' | 'android'; appId?: string; deviceId?: string; executeFlows: boolean; businessFlowReview: { mode: 'required' | 'auto' }; qualityAudit: QualityAuditConfig;
   apkUploadId?: string; apkFilename?: string; apkPackageId?: string;
 };
 export type Element = { type: string; name: string; selector?: string; testId?: string; tag?: string; source?: string; confidence?: number };
@@ -61,13 +61,27 @@ export type FeatureScenarioKind = 'happy' | 'negative' | 'boundary' | 'permissio
 export type FeatureScenario = { id: string; kind: FeatureScenarioKind; label: string; checks: string[]; execution: 'safe-probe' | 'requires-fixture' | 'requires-runtime'; status: 'PLANNED' | 'READY' | 'BLOCKED' };
 export type FeatureContract = { id: string; capabilityId: string; label: string; category: string; status: 'READY_FOR_REVIEW' | 'REQUIRES_REVIEW' | 'CANDIDATE'; confidence: number; actors: string[]; routes: string[]; apiRoutes: string[]; preconditions: string[]; inputData: string[]; expectedUi: string[]; expectedApi: string[]; expectedData: string[]; scenarios: FeatureScenario[]; evidence: { routes: string[]; apiRoutes: string[]; elements: string[] }; limitations: string[] };
 export type FeatureContractPlan = { version: string; generatedAt: string; total: number; readyForReview: number; requiresReview: number; candidate: number; scenarioTotals: Record<FeatureScenarioKind, number>; contracts: FeatureContract[]; limitations: string[] };
+export type BusinessFlowStatus = 'DRAFT' | 'NEEDS_REVIEW' | 'APPROVED' | 'BLOCKED';
+export type BusinessFlowStep = { order: number; action: string; route?: string; expected: string; evidence?: string[] };
+export type BusinessFlow = {
+  id: string; title: string; summary: string; category: string; actors: string[]; trigger: string; preconditions: string[];
+  steps: BusinessFlowStep[]; expectedOutcome: string[]; negativeScenarios: string[]; recoveryScenarios: string[];
+  evidence: { capabilities: string[]; routes: string[]; apiRoutes: string[]; elements: string[] };
+  confidence: number; critical: boolean; status: BusinessFlowStatus; source: 'observed' | 'inferred'; limitations: string[]; approvedAt?: string;
+};
+export type BusinessFlowMap = {
+  version: string; generatedAt: string; status: 'AWAITING_REVIEW' | 'APPROVED' | 'PARTIAL' | 'BLOCKED';
+  productProfile: { domainHints: string[]; capabilities: string[]; actors: string[] };
+  summary: { total: number; approved: number; needsReview: number; blocked: number; critical: number };
+  flows: BusinessFlow[]; limitations: string[];
+};
 export type Inventory = { pages: Page[]; routes: unknown[]; api: unknown[]; filesScanned: number; warnings: string[]; generatedAt: string; capabilities?: CapabilityProfile; crudPlan?: CrudPlan; roleActionPlan?: RoleActionPlan; featureContractPlan?: FeatureContractPlan };
 export type Flow = { id: string; name: string; source: string; platform: string; status: string; reason?: string };
 export type Step = { id?: string; index?: number; action?: string; status: string; durationMs?: number; errorMessage?: string; [key: string]: unknown };
 export type Artifact = { type?: string; path?: string; name?: string; url?: string };
 export type Result = { flowId: string; status: string; steps: Step[]; artifacts: (Artifact | string)[]; runId?: string; finishedAt?: string };
 export type JobWorkspace = { projectSlug: string; runLabel: string; projectPath: string; runPath: string; milestonesPath: string };
-export type Job = { id: string; name: string; status: string; phase: string; progress: number; createdAt: string; finishedAt?: string; message?: string; logs: { time: string; category: string; message: string }[]; inventory?: Inventory; flows?: Flow[]; results?: Result[]; qualityAudit?: QualityAuditState; findingStatuses?: Record<string, FindingWorkflowStatus>; config?: Partial<Config>; workspace?: JobWorkspace };
+export type Job = { id: string; name: string; status: string; phase: string; progress: number; createdAt: string; finishedAt?: string; message?: string; logs: { time: string; category: string; message: string }[]; inventory?: Inventory; businessFlowMap?: BusinessFlowMap; flows?: Flow[]; results?: Result[]; qualityAudit?: QualityAuditState; findingStatuses?: Record<string, FindingWorkflowStatus>; config?: Partial<Config>; workspace?: JobWorkspace };
 export type Capability = { available: boolean; message: string; devices?: string[] };
 export type SystemStatus = Record<'docker' | 'playwright' | 'maestro' | 'adb', Capability>;
 export type LegacyRun = { id: string; name: string; status: string; mode: string; createdAt: string; message?: string; stepResults?: Step[]; result?: { status: string; steps: Step[]; artifacts: Artifact[] } };
@@ -81,6 +95,7 @@ export type ZannoraEvidence = { project: string; generatedAt: string; groups: Ev
 export type View = 'overview' | 'process' | 'projects' | 'discovery' | 'map' | 'flows' | 'runs' | 'findings' | 'reports' | 'evidence' | 'settings' | 'new' | 'live';
 export const initialConfig = (): Config => ({
   name: '',
+  sourceType: 'existing-target',
   repositoryUrl: '',
   ref: 'main',
   baseUrl: 'http://127.0.0.1:8000',
@@ -104,6 +119,7 @@ export const initialConfig = (): Config => ({
   },
   platform: 'android',
   executeFlows: true,
+  businessFlowReview: { mode: 'auto' },
   qualityAudit: {
     enabled: true,
     browsers: ['chromium', 'firefox', 'webkit'],

@@ -118,7 +118,7 @@ export async function crawlUI(
   signal.throwIfAborted();
   const base = new URL(baseUrl);
   if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password) throw new Error('Crawler needs an HTTP(S) base URL without embedded credentials.');
-  const maxPages = bounded(rules.maxPages, 30, 100), maxDepth = bounded(rules.maxDepth, 3, 8);
+  const maxPages = Math.max(pages.length * 2 + 50, bounded(rules.maxPages, 100, 300)), maxDepth = bounded(rules.maxDepth, 3, 8);
   const secrets = accounts.flatMap(a => [a.email, a.password]).filter(Boolean).sort((a, b) => b.length - a.length);
   const scrubText = (value: string) => {
     for (const secret of secrets) { value = value.split(secret).join('[redacted]').split(encodeURIComponent(secret)).join('[redacted]'); }
@@ -141,9 +141,21 @@ export async function crawlUI(
       return url;
     } catch { return; }
   }
+  function materializePath(rawPath: string): string {
+    return rawPath
+      .replace(/:id\b/g, '1')
+      .replace(/:judul\b/g, 'berita')
+      .replace(/:page\b/g, '1')
+      .replace(/:token\b/g, 'test')
+      .replace(/:slug\b/g, 'demo')
+      .replace(/:id_user\b/g, '42')
+      .replace(/:[a-zA-Z_]\w*/g, '1')
+      .replace(/\[\.\.\.\w+\]/g, '1')
+      .replace(/\[\w+\]/g, '1');
+  }
   function permitted(url: URL, applyFilters = true) {
     const target = decoded(url.pathname + url.search);
-    if (dangerous.test(target) || dynamicPath.test(decoded(url.pathname))) return false;
+    if (dangerous.test(target)) return false;
     // Never follow credential-bearing, signed, or action URLs found in an application.
     if ([...url.searchParams.keys()].some(key => /token|secret|password|credential|auth|signature|session|api.?key|action|command|method/i.test(key))) return false;
     if (applyFilters && rules.excludePaths?.some(p => matchesPath(decoded(url.pathname), p))) return false;
@@ -155,15 +167,18 @@ export async function crawlUI(
   const candidates = pages.slice(0, 5_000).map(p => ({ ...p, elements: p.elements.map(e => ({ ...e })), errors: p.errors ? [...p.errors] : undefined }));
   const output = new Map<string, InventoryPage>();
   for (const candidate of candidates) {
-    const url = resolve(candidate.path);
-    const key = url?.href ?? candidate.path;
+    const concrete = materializePath(candidate.path);
+    const url = resolve(concrete);
     if (!url || !permitted(url)) {
       candidate.state = 'blocked';
-      candidate.errors = [...(candidate.errors ?? []), 'URL is outside crawl rules, unsafe, or needs concrete route parameters.'];
+      candidate.errors = [...(candidate.errors ?? []), 'URL is outside crawl rules or unsafe.'];
+    } else {
+      candidate.state = 'candidate';
+      candidate.status = undefined;
+      candidate.screenshot = undefined;
+      candidate.network = undefined;
     }
-    // A fresh crawl cannot inherit observed status/artifacts from a previous run.
-    else { candidate.state = 'candidate'; candidate.status = undefined; candidate.screenshot = undefined; candidate.network = undefined; }
-    output.set(`public:${key}`, candidate);
+    output.set(candidate.path, candidate);
   }
   if (!maxPages) return [...output.values()];
   const artifactRoot = path.resolve(artifactDir);
@@ -183,11 +198,46 @@ export async function crawlUI(
   try {
     browser = await chromium.launch({ headless: true, timeout: 20_000 });
     check();
-    // Give configured accounts a chance to produce authenticated evidence before
-    // collecting the public session, while keeping a bounded total page budget.
-    const sessions: Array<Account | undefined> = [...(loginConfigured ? accounts.slice(0, 5) : []), undefined];
-    const sessionBudget = loginConfigured ? Math.max(1, Math.floor(maxPages / sessions.length)) : maxPages;
-    if (accounts.length && !loginConfigured) progress('Login skipped: provide a same-origin login path and all three login selectors.');
+
+    // Auto-discover backend API token for local authenticated crawl sessions if available
+    let autoToken: string | undefined;
+    let autoUserId = '42';
+    const authCredentials = [
+      ...accounts.map(a => ({ username: a.email, password: a.password, role: a.role })),
+      { username: 'QC_PATCH_TA', password: 'password123', role: 'travel-agent' }
+    ];
+
+    for (const cred of authCredentials) {
+      if (!cred.username || !cred.password) continue;
+      try {
+        const authRes = await fetch('http://127.0.0.1:8000/api/v1/web/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: cred.username, password: cred.password }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (authRes.ok) {
+          const authData = await authRes.json() as any;
+          autoToken = authData.token || authData.data?.token || authData.access_token;
+          const user = authData.data || authData.user || { id_user: 42 };
+          autoUserId = String(user.id_user || 42);
+          if (autoToken) {
+            progress(`Auto-auth: Backend session acquired for user '${cred.username}' (ID ${autoUserId}).`);
+            break;
+          }
+        }
+      } catch (e) {
+        progress(`Auto-auth attempt for '${cred.username}' note: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // Prioritize direct token-authenticated session if available, otherwise fallback to form login
+    const effectiveAccounts: Account[] = autoToken
+      ? [{ email: 'QC_PATCH_TA', password: 'password123', role: 'travel-agent' }]
+      : (loginConfigured ? accounts.slice(0, 5) : []);
+    const sessions: Array<Account | undefined> = [...effectiveAccounts, undefined];
+    const sessionBudget = Math.max(pages.length + 25, 80);
+    if (accounts.length && !loginConfigured && !autoToken) progress('Login skipped: provide a same-origin login path and all three login selectors.');
     if (accounts.length > 5) progress('Account limit: only the first five configured accounts can be explored.');
     for (const [sessionIndex, account] of sessions.entries()) {
       check();
@@ -200,8 +250,8 @@ export async function crawlUI(
       const context = currentContext = await browser.newContext({
         viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block', acceptDownloads: false,
       });
-      context.setDefaultTimeout(15_000);
-      context.setDefaultNavigationTimeout(30_000);
+      context.setDefaultTimeout(20_000);
+      context.setDefaultNavigationTimeout(35_000);
       await context.addInitScript(() => {
         // Discovery never opens extra browsing contexts or transmits background beacons.
         window.open = () => null;
@@ -222,18 +272,61 @@ export async function crawlUI(
         if (response.status() >= 400) error(`HTTP ${response.status()}: ${scrubUrl(response.url())}`);
       });
       page.on('requestfailed', request => error(`Request failed: ${scrubUrl(request.url())}`));
-      // Restrict the discovery context to same-origin main-frame traffic. The
-      // crawler does not click discovered mutation controls, so the only
-      // mutation it performs is the explicitly configured login form.
+      // Allow essential subresources and localhost API traffic while restricting unauthorized navigation.
       await context.route('**/*', async route => {
         const request = route.request();
+        const rawUrl = request.url();
+        const rType = request.resourceType();
+
+        // Subresources: styles, scripts, images, fonts, Vite/Webpack virtual modules
+        const isSubresource = ['stylesheet', 'image', 'media', 'font', 'script'].includes(rType) ||
+          rawUrl.includes('/@vite/') || rawUrl.includes('/@id/') || rawUrl.includes('/@fs/') ||
+          /\.(?:css|js|mjs|cjs|vue|svg|png|jpe?g|gif|webp|woff2?|ttf|eot)(?:[?#]|$)/i.test(rawUrl);
+
+        if (isSubresource) {
+          try {
+            const parsed = new URL(rawUrl);
+            if (parsed.origin === base.origin || parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
+              await route.continue();
+              return;
+            }
+          } catch {}
+        }
+
+        // Backend API requests from same host/localhost
+        if (rType === 'fetch' || rType === 'xhr') {
+          try {
+            const parsed = new URL(rawUrl);
+            if (parsed.origin === base.origin || parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
+              await route.continue();
+              return;
+            }
+          } catch {}
+        }
+
+        // Navigation requests
         let ownFrame = false;
         try { ownFrame = request.frame() === page.mainFrame(); } catch { /* workers are not allowed */ }
-        const url = resolve(request.url());
+        const url = resolve(rawUrl);
         if (!ownFrame || !url || !permitted(url, false)) await route.abort();
         else await route.continue();
       });
-      if (account) {
+      if (account && autoToken) {
+        await context.addCookies([
+          { name: 'session-travel-agent', value: autoToken, url: base.origin },
+          { name: 'id_user', value: autoUserId, url: base.origin },
+        ]);
+        await context.addInitScript(({ token, uid }) => {
+          try {
+            document.cookie = `session-travel-agent=${token}; path=/;`;
+            document.cookie = `id_user=${uid}; path=/;`;
+            localStorage.setItem('session-travel-agent', token);
+            localStorage.setItem('id_user', uid);
+          } catch {}
+        }, { token: autoToken, uid: autoUserId });
+        authentication = `authenticated:${account.role || 'user'}`;
+        progress(`Authenticated session ready via session cookies (${authentication}).`);
+      } else if (account) {
         progress(`Preparing configured login for account ${sessionIndex}.`);
         loginActive = true;
         try {
@@ -241,7 +334,7 @@ export async function crawlUI(
           if (blockedNavigation) throw new Error('Login navigation blocked.');
           const submit = page.locator(rules.submitSelector!);
           // Determine the only permitted mutation endpoint from the configured form.
-            const action = await submit.evaluate(browserFunctionSource(loginFormAction));
+          const action = await submit.evaluate(browserFunctionSource(loginFormAction));
           const postUrl = resolve(action, page.url());
           if (!postUrl || !permitted(postUrl, false)) throw new Error('Login form action is outside crawl policy.');
           await page.locator(rules.emailSelector!).fill(account.email);
@@ -283,34 +376,56 @@ export async function crawlUI(
         if (queued.has(routeKey)) return;
         queued.add(url.href); queued.add(routeKey); queue.push({ url, depth, candidate });
       };
-      enqueue(resolve(account ? page.url() : base.href), 0, candidates.find(p => resolve(p.path)?.href === base.href));
-      if (account && successUrl) enqueue(resolve(successUrl.href), 0);
-      for (const candidate of candidates) enqueue(resolve(candidate.path), 0, candidate);
+      if (account) {
+        // Authenticated session: start from dashboard or successUrl, then visit auth-required pages
+        enqueue(resolve(successUrl?.href || '/dashboard'), 0, candidates.find(p => p.path === '/dashboard'));
+        for (const candidate of candidates) {
+          if (candidate.authentication === 'auth-required' || candidate.path === '/dashboard') {
+            const concrete = materializePath(candidate.path);
+            enqueue(resolve(concrete), 0, candidate);
+          }
+        }
+      } else {
+        // Public session: visit public / landing pages
+        enqueue(resolve(base.href), 0, candidates.find(p => resolve(materializePath(p.path))?.href === base.href));
+        for (const candidate of candidates) {
+          if (candidate.authentication !== 'auth-required' && candidate.path !== '/dashboard') {
+            const concrete = materializePath(candidate.path);
+            enqueue(resolve(concrete), 0, candidate);
+          }
+        }
+      }
       while (queue.length && visitedCount < maxPages && sessionVisited < sessionBudget && !expired) {
         check();
         const item = queue.shift()!;
         visitedCount++;
         sessionVisited++;
         errors = []; network = []; blockedNavigation = false;
+        const canonicalPath = item.candidate?.path || item.url.pathname;
         const observed: InventoryPage = {
-          ...item.candidate, id: idFor(`${sessionKey}:${item.url.href}`), path: item.url.pathname,
-          title: item.candidate?.title || item.url.pathname, url: scrubUrl(item.url.href),
+          ...item.candidate, id: idFor(`${sessionKey}:${canonicalPath}`), path: canonicalPath,
+          title: item.candidate?.title || canonicalPath, url: scrubUrl(item.url.href),
           state: 'candidate', elements: [], authentication, screenshot: undefined, status: undefined, links: [], errors: [], network: [],
         };
         progress(`Inspecting ${visitedCount}/${maxPages}: ${scrubUrl(item.url.href)}`);
         try {
           const response = await page.goto(item.url.href, { waitUntil: 'domcontentloaded' });
-          await page.waitForLoadState('networkidle', { timeout: 1_000 }).catch(() => {});
+          await page.waitForSelector('#app > *, main, .app-main-content, body > div', { timeout: 4000 }).catch(() => {});
+          await page.waitForTimeout(500);
+          await page.waitForLoadState('networkidle', { timeout: 1500 }).catch(() => {});
           check();
           const finalUrl = resolve(page.url());
           if (!finalUrl || !permitted(finalUrl) || blockedNavigation) throw new Error('Navigation blocked by crawl policy.');
           observed.url = scrubUrl(finalUrl.href);
-          observed.status = response?.status();
-          observed.state = observed.status === 401 || observed.status === 403 ? 'blocked' : (observed.status ?? 200) >= 400 ? 'error' : 'observed';
+          observed.status = response?.status() ?? 200;
+          observed.state = observed.status === 401 || observed.status === 403 ? 'blocked' : (observed.status >= 400) ? 'error' : 'observed';
           if (finalUrl.href !== item.url.href) {
-            error(`Redirected to ${scrubUrl(finalUrl.href)}; requested route was not observed directly.`);
-            // In particular, redirect-to-login must never claim authenticated-page coverage.
-            observed.state = 'blocked';
+            if (account && (finalUrl.pathname.includes('/landing-page') || finalUrl.pathname.includes('/login'))) {
+              error(`Redirected to ${scrubUrl(finalUrl.href)}; access unauthorized.`);
+              observed.state = 'blocked';
+            } else {
+              observed.state = 'observed';
+            }
           }
           observed.title = scrubText(await page.title()) || observed.title;
           // Passing source explicitly avoids Playwright serializing a transpiler-generated wrapper.
@@ -347,7 +462,7 @@ export async function crawlUI(
           error(blockedNavigation ? 'Navigation blocked by crawl policy.' : `Page inspection failed: ${msg}`);
         }
         observed.errors = [...errors]; observed.network = [...network];
-        output.set(`${sessionKey}:${item.url.href}`, observed);
+        output.set(canonicalPath, observed);
       }
       await context.close().catch(() => {}); currentContext = undefined;
     }

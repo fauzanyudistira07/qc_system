@@ -67,7 +67,7 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Sediakan jalur eksekusi Android menggunakan Maestro/ADB ketika CLI dan device/emulator tersedia.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P1-03 — Implementasikan managed-local runner
 
@@ -105,7 +105,7 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Dukung engine database, connection setting, SQL dump, migration, seed, fixture, reset, dan cleanup.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P2-03 — Tambahkan konfigurasi browser dan viewport
 
@@ -123,7 +123,7 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Reset database atau fixture ke kondisi awal dan membersihkan data sementara setelah run selesai tanpa mengubah source target.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ## Phase 3 — Discovery dan inventory
 
@@ -181,7 +181,7 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Petakan role, permission, visible action, enabled action, dan pembatasan akses pada setiap halaman/fitur.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P4-05 — Generate negative scenario plan
 
@@ -193,7 +193,7 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Sediakan fixture/API contract aman untuk skenario yang membutuhkan data nyata seperti duplicate record, delete dependency, payment, refund, expiry, dan cancellation.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ## Phase 5 — Dashboard dan milestone
 
@@ -213,25 +213,25 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Status, progress, jumlah output, dan milestone aktif harus berubah mengikuti job yang sedang berjalan.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P5-04 — Tampilkan detail milestone sebagai floating card
 
 **Description:** Klik milestone membuka detail substep, branch, output, log, evidence, dan status tanpa memindahkan user ke halaman yang tidak relevan.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P5-05 — Tambahkan animasi flow yang informatif
 
 **Description:** Gunakan connector line yang bergerak hanya pada jalur aktif, node completed/active/blocked/queued yang jelas, dan dukungan reduced-motion.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P5-06 — Hilangkan dekorasi animasi yang membingungkan
 
 **Description:** Hapus lingkaran berulang, node duplikat, overlap, dan milestone latar belakang yang tidak mewakili status pekerjaan.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ## Phase 6 — Execution dan evidence
 
@@ -269,13 +269,13 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Gabungkan potongan video per flow menjadi video lengkap dengan urutan checkpoint dan marker timeline.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P6-07 — Tampilkan evidence inline di Findings & Retest
 
 **Description:** Klik `Lihat bukti` membuka dropdown/inline panel berisi screenshot, route, viewport, browser, diagnosis, dan file terkait tanpa pindah halaman.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ## Phase 7 — Quality audit
 
@@ -313,25 +313,25 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Lengkapi heuristic dengan pengujian NVDA/VoiceOver/TalkBack pada environment yang mendukung.
 
-**Status:** `TO DO`
+**Status:** `IN PROGRESS`
 
 ### P7-07 — Audit visual regression pixel-by-pixel
 
 **Description:** Capture baseline PNG, bandingkan pixel, hitung diff, laporkan baseline hilang/berubah/lulus, dan simpan screenshot diff.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P7-08 — Jadikan visual baseline required
 
 **Description:** Setelah baseline stabil, ubah mode dari `capture` menjadi `required` agar baseline yang hilang menjadi finding.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ### P7-09 — Audit state interaktif
 
 **Description:** Periksa hover, focus, disabled, loading, empty, error, success, validation, modal, tooltip, dan skeleton state secara interaktif.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ### P7-10 — Audit dense data
 
@@ -369,31 +369,31 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Uji penolakan atau penanganan data duplikat dengan fixture yang dapat di-reset.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ### P8-05 — Jalankan delete data terpakai test
 
 **Description:** Uji penghapusan record yang masih dipakai record lain dan periksa pesan/error dependency.
 
-**Status:** `TO DO`
+**Status:** `IN PROGRESS`
 
 ### P8-06 — Jalankan payment failure, expiry, dan refund test
 
 **Description:** Uji pembayaran gagal, timeout/expired, refund, status transisi, dan pesan kepada user menggunakan sandbox/fixture.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ### P8-07 — Jalankan cancellation dan capacity restore test
 
 **Description:** Uji pembatalan pending/paid, pengembalian kapasitas/seat, dan konsistensi status setelah cancellation.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ### P8-08 — Implementasikan Findings & Retest workflow
 
 **Description:** Kelola status finding `Open → In Progress → Ready for Retest → Passed` dengan evidence sebelum dan sesudah retest.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ## Phase 9 — Reporting dan CI/CD
 
@@ -425,19 +425,19 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Sediakan cara menjalankan audit repository lain melalui artifact/config tanpa mengubah source target secara otomatis.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ### P9-06 — Buat history dan trend antar-run
 
 **Description:** Tampilkan perubahan pass rate, jumlah finding, severity, coverage, dan waktu eksekusi antar run.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P9-07 — Buat retention dan cleanup policy
 
 **Description:** Atur masa simpan screenshot, video, trace, report, dan log serta cleanup yang aman berdasarkan project/run.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ## Phase 10 — Audit target saat ini
 
@@ -457,19 +457,19 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Description:** Pastikan selector project, milestone, findings, evidence, video, report, dan runtime log Cakrawala tidak menampilkan artifact Zannora.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P10-04 — Kelompokkan finding Cakrawala berdasarkan lokasi
 
 **Description:** Setiap finding harus menampilkan judul, deskripsi kesalahan, area, route, viewport, browser, severity, screenshot, dan video terkait.
 
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ### P10-05 — Jadikan Cakrawala sebagai regression baseline
 
 **Description:** Simpan baseline visual dan quality report Cakrawala agar run berikutnya dapat dibandingkan secara konsisten.
 
-**Status:** `TO DO`
+**Status:** `DONE`
 
 ## Kondisi runtime saat ini
 

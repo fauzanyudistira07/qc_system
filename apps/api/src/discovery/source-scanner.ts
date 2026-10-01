@@ -39,8 +39,8 @@ function titleFor(route: string) { return route === '/' ? 'Home' : route.split('
 function attr(attributes: string, name: string): string | undefined {
   return new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(attributes)?.slice(1).find(v => v !== undefined);
 }
-type PrefixSpan = { start: number; end: number; prefix: string };
-function matchingBrace(content: string, opening: number): number {
+type PrefixSpan = { start: number; end: number; prefix: string; auth?: string };
+function matchingBracket(content: string, opening: number, openChar = '{', closeChar = '}'): number {
   let depth = 0, quote = '', escaped = false;
   for (let index = opening; index < content.length; index++) {
     const char = content[index];
@@ -50,11 +50,14 @@ function matchingBrace(content: string, opening: number): number {
       else if (char === quote) quote = '';
       continue;
     }
-    if (char === '"' || char === "'") { quote = char; continue; }
-    if (char === '{') depth++;
-    else if (char === '}' && --depth === 0) return index;
+    if (char === '"' || char === "'" || char === '`') { quote = char; continue; }
+    if (char === openChar) depth++;
+    else if (char === closeChar && --depth === 0) return index;
   }
   return content.length;
+}
+function matchingBrace(content: string, opening: number): number {
+  return matchingBracket(content, opening, '{', '}');
 }
 function laravelPrefixSpans(content: string): PrefixSpan[] {
   const spans: PrefixSpan[] = [];
@@ -62,6 +65,23 @@ function laravelPrefixSpans(content: string): PrefixSpan[] {
   for (const match of content.matchAll(pattern)) {
     const opening = (match.index ?? 0) + match[0].length - 1;
     spans.push({ start: opening, end: matchingBrace(content, opening), prefix: '/' + match[1].replace(/^\/+|\/+$/g, '') });
+  }
+  return spans;
+}
+function jsRoutePrefixSpans(content: string): PrefixSpan[] {
+  const spans: PrefixSpan[] = [];
+  const childRegex = /\bchildren\s*:\s*\[/g;
+  for (const match of content.matchAll(childRegex)) {
+    const opening = (match.index ?? 0) + match[0].length - 1;
+    const end = matchingBracket(content, opening, '[', ']');
+    const before = content.slice(Math.max(0, (match.index ?? 0) - 800), match.index ?? 0);
+    const pathMatch = [...before.matchAll(/\bpath\s*:\s*['"]([^'"]+)['"]/g)].pop();
+    const hasAuth = /(?:requiresAuth\s*:\s*true|auth\s*:\s*true)/i.test(before);
+    if (pathMatch && pathMatch[1]) {
+      const parentRaw = pathMatch[1].trim();
+      const parentPrefix = parentRaw === '/' ? '' : ('/' + parentRaw.replace(/^\/+|\/+$/g, ''));
+      spans.push({ start: opening, end, prefix: parentPrefix, auth: hasAuth ? 'auth-required' : undefined });
+    }
   }
   return spans;
 }
@@ -216,7 +236,25 @@ export async function scanSource(sourceDir: string): Promise<{
       addRoute(m[2] || '/', 'GET', source, [], auth, isApiFile);
     }
     // React Router and Vue route records.
-    for (const m of code.matchAll(/<Route\b[^>]*\bpath\s*=\s*(?:\{\s*)?['"]([^'"]+)['"]|\bpath\s*:\s*['"]([^'"]+)['"]/g)) addRoute(m[1] || m[2], 'GET', source, [], auth);
+    const jsSpans = jsRoutePrefixSpans(code);
+    for (const m of code.matchAll(/<Route\b[^>]*\bpath\s*=\s*(?:\{\s*)?['"]([^'"]+)['"]|\bpath\s*:\s*['"]([^'"]+)['"]/g)) {
+      const raw = m[1] || m[2];
+      const pos = m.index ?? 0;
+      let finalPath = raw;
+      const activeSpan = jsSpans.filter(s => pos >= s.start && pos <= s.end).pop();
+      if (!raw.startsWith('/')) {
+        if (activeSpan && activeSpan.prefix) {
+          finalPath = activeSpan.prefix + '/' + raw.replace(/^\/+/, '');
+        } else {
+          finalPath = '/' + raw.replace(/^\/+/, '');
+        }
+      }
+      const nearbyCode = code.slice(pos, Math.min(code.length, pos + 300));
+      const routeAuth = /(?:requiresAuth\s*:\s*true|auth\s*:\s*true)/i.test(nearbyCode)
+        ? 'auth-required'
+        : (activeSpan?.auth || (finalPath.startsWith('/landing-page') || finalPath.startsWith('/kebijakan') || finalPath.startsWith('/syarat') ? 'public' : auth));
+      addRoute(finalPath, 'GET', source, [], routeAuth);
+    }
     // Next app router: route groups and parallel slots do not contribute URL segments.
     const app = /(?:^|\/)app\/(.*?)\/(page|route)\.[jt]sx?$/.exec(source) || /(?:^|\/)app\/(page|route)\.[jt]sx?$/.exec(source)?.map((v, i) => i === 1 ? '' : v);
     const appFile = /(?:^|\/)app\/(.*?)(?:\/)?(page|route)\.[jt]sx?$/.exec(source);

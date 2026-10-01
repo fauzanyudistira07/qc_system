@@ -1,0 +1,233 @@
+{
+  "schemaVersion": "qc-project-plan/next-draft",
+  "executable": false,
+  "purpose": "design-template-not-execution-result",
+  "projectId": "replace-with-project-id",
+  "statusModel": {
+    "discovery": [
+      "CANDIDATE",
+      "OBSERVED",
+      "CONTRACTED",
+      "UNRESOLVED"
+    ],
+    "outcome": [
+      "PASSED",
+      "FAILED",
+      "BLOCKED",
+      "NOT_RUN",
+      "SKIPPED",
+      "NOT_APPLICABLE",
+      "CANCELLED"
+    ],
+    "evidence": [
+      "COMPLETE",
+      "PARTIAL",
+      "MISSING"
+    ],
+    "gate": [
+      "PASSED",
+      "FAILED",
+      "INCOMPLETE"
+    ]
+  },
+  "suite": {
+    "mode": "full-documentation",
+    "scenarioKinds": [
+      "happy",
+      "negative",
+      "boundary",
+      "permission",
+      "recovery",
+      "lifecycle",
+      "concurrency",
+      "integrity"
+    ],
+    "requiredCoverageRule": "all-required-execution-cells"
+  },
+  "design": {
+    "expectedSources": [
+      "approved-tokens",
+      "approved-baselines",
+      "component-contract"
+    ],
+    "heuristicLabelRequired": true,
+    "checks": [
+      "color-state",
+      "contrast",
+      "typography",
+      "spacing",
+      "alignment",
+      "clipping",
+      "overlap",
+      "overflow",
+      "layering",
+      "media-ratio",
+      "focus",
+      "motion"
+    ]
+  },
+  "evidence": {
+    "screenshot": "key-states-and-failure",
+    "video": "each-ui-scenario",
+    "json": "all-assertions-findings-evidence-and-cleanup",
+    "artifactOwnership": [
+      "projectId",
+      "runId",
+      "attemptId",
+      "stepId"
+    ],
+    "originalAspectRatio": true
+  },
+  "report": {
+    "formats": [
+      "json",
+      "html",
+      "pdf",
+      "zip"
+    ],
+    "views": [
+      "overview",
+      "features-controls",
+      "deep-crud",
+      "colors-design",
+      "layout-responsive",
+      "accessibility",
+      "api-data",
+      "evidence",
+      "findings-retest",
+      "cleanup-limitations"
+    ]
+  },
+  "resourceTemplates": [
+    {
+      "resourceId": "example-resource",
+      "bindingStatus": "REQUIRES_PROJECT_MAPPING",
+      "fields": {
+        "code": {
+          "type": "string",
+          "required": true,
+          "unique": true,
+          "normalization": "project-defined"
+        },
+        "amount": {
+          "type": "decimal",
+          "precision": "project-defined",
+          "scale": "project-defined"
+        },
+        "parentId": {
+          "type": "reference",
+          "targetResource": "example-parent"
+        },
+        "version": {
+          "type": "integer",
+          "managedBy": "server"
+        }
+      },
+      "operations": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "restore",
+        "bulk"
+      ],
+      "applicability": "determine-each-operation-from-project-contract",
+      "requiredInvariants": [
+        "valid-write-persists",
+        "invalid-write-does-not-change-committed-data",
+        "tenant-boundary-holds",
+        "relations-follow-configured-policy",
+        "retry-does-not-duplicate-business-effect",
+        "concurrent-update-follows-version-policy",
+        "cleanup-removes-only-owned-objects"
+      ],
+      "fixture": {
+        "ownership": [
+          "projectId",
+          "runId",
+          "objectIds"
+        ],
+        "setup": "project-adapter-required",
+        "observers": [
+          "ui",
+          "api-if-available",
+          "data-if-required"
+        ],
+        "cleanup": "reverse-dependency-order-with-readback"
+      }
+    }
+  ],
+  "gate": {
+    "criticalFailuresAllowed": 0,
+    "missingRequiredEvidenceAllowed": 0,
+    "unverifiedRequiredCellsAllowed": 0,
+    "cleanupMustPass": true
+  },
+  "platform": "mobile",
+  "target": {
+    "buildRef": "project-build-reference",
+    "appIdRef": "project-package-or-bundle-id"
+  },
+  "driver": {
+    "registry": [
+      "android",
+      "ios-worker",
+      "hybrid",
+      "custom-renderer"
+    ],
+    "selection": "capability-probe",
+    "iosStatus": "planned-requires-compatible-worker"
+  },
+  "matrix": {
+    "identity": "stable-device-id-not-IP-only",
+    "profiles": [
+      "compact-phone",
+      "standard-phone",
+      "large-phone",
+      "tablet-portrait",
+      "tablet-landscape",
+      "foldable",
+      "split-screen",
+      "large-font"
+    ],
+    "units": [
+      "physical-px",
+      "window-dp-or-pt"
+    ],
+    "orientations": [
+      "portrait",
+      "landscape"
+    ],
+    "environments": [
+      "emulator-simulator",
+      "physical-device"
+    ],
+    "osVersions": "project-support-policy",
+    "roles": "project-defined"
+  },
+  "suites": [
+    "preflight-device-lease",
+    "inventory-reconciliation",
+    "navigation-gestures",
+    "authentication-authorization",
+    "deep-crud",
+    "offline-sync",
+    "lifecycle-upgrade",
+    "permissions-hardware",
+    "visual-design",
+    "adaptive-tablet",
+    "accessibility",
+    "performance",
+    "evidence-validation",
+    "cleanup-device-restore"
+  ],
+  "video": {
+    "perUiScenario": true,
+    "segmentBy": "runtime-recorder-capability",
+    "stepTimeline": true,
+    "gapsMustBeReported": true,
+    "audioVerification": "separate-probe-when-required"
+  },
+  "status": "PLANNED"
+}
+

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { copyFile, mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { NormalizedFlow } from '@qc/flow-schema';
 import { executeWebFlow, type RunStepResult, type WebRunResult } from './playwright-adapter.ts';
@@ -18,12 +19,15 @@ export type ManagedService = {
 };
 
 export type ManagedProject = {
-  repositoryUrl: string;
+  sourceType?: 'github' | 'local-folder';
+  sourcePath?: string;
+  repositoryUrl?: string;
   ref: string;
   baseUrl: string;
   environment: string;
   stack?: 'laravel' | 'custom' | 'auto';
   envFilePath?: string;
+  retainClone?: boolean;
   services: ManagedService[];
 };
 
@@ -49,8 +53,38 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function copySourceDirectory(source: string, destination: string) {
+  await mkdir(destination, { recursive: true });
+  const entries = await readdir(source, { withFileTypes: true });
+  for (const entry of entries) {
+    if (['.git', 'node_modules', 'vendor', '.qc-artifacts'].includes(entry.name)) continue;
+    const from = path.join(source, entry.name);
+    const to = path.join(destination, entry.name);
+    if (entry.isDirectory()) await copySourceDirectory(from, to);
+    else if (entry.isFile()) await copyFile(from, to);
+  }
+}
+
 async function exists(file: string) {
   return Boolean(await stat(file).catch(() => undefined));
+}
+
+async function ensureDockerHostSpace() {
+  if (process.platform !== 'win32') return;
+  const { statfs } = await import('node:fs/promises') as unknown as { statfs: (path: string) => Promise<{ bavail: number | bigint; bsize: number | bigint }> };
+  const requiredBytes = 2 * 1024 ** 3;
+  const systemRoot = process.env.SystemRoot ?? process.cwd();
+  const systemDrive = path.parse(systemRoot).root;
+  const probePaths = [...new Set([systemDrive, tmpdir()])];
+  for (const probePath of probePaths) {
+    const filesystem = await statfs(probePath).catch(() => undefined);
+    if (!filesystem) continue;
+    const availableBytes = Number(filesystem.bavail) * Number(filesystem.bsize);
+    if (availableBytes < requiredBytes) {
+      const availableGb = (availableBytes / 1024 ** 3).toFixed(2);
+      throw new Error(`ruang disk host Docker tidak mencukupi pada ${path.parse(probePath).root || probePath}: tersisa ${availableGb} GiB, perlu minimal 2 GiB. Bebaskan ruang di drive tersebut lalu jalankan ulang QC.`);
+    }
+  }
 }
 
 async function secretValuesFromEnvFile(file: string) {
@@ -227,23 +261,34 @@ function commandError(command: string, code: number | null, output: string, secr
   return new Error(`${command} gagal${code == null ? '' : ` (exit ${code})`}${tail ? `: ${tail}` : ''}`);
 }
 
-function runProcess(file: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; commandLabel: string; timeoutMs?: number; onOutput?: (output: string) => void; secrets?: string[] }) {
+function runProcess(file: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; commandLabel: string; timeoutMs?: number; heartbeatMs?: number; onOutput?: (output: string) => void; onHeartbeat?: (elapsedMs: number, idleMs: number) => void; secrets?: string[] }) {
   return new Promise<void>((resolve, reject) => {
     const child = spawn(file, args, { cwd: options.cwd, env: options.env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const startedAt = Date.now();
+    let lastOutputAt = startedAt;
     let output = '';
     let settled = false;
     const timer = setTimeout(() => {
       void stopProcess(child).finally(() => {
-        if (!settled) { settled = true; reject(new Error(`${options.commandLabel} timeout setelah ${options.timeoutMs ?? 180_000}ms`)); }
+        if (!settled) {
+          settled = true;
+          clearInterval(heartbeat);
+          const tail = redact(output.trim(), options.secrets).split(/\r?\n/).filter(Boolean).slice(-6).join(' | ');
+          const silence = Date.now() - lastOutputAt;
+          reject(new Error(`${options.commandLabel} timeout setelah ${options.timeoutMs ?? 180_000}ms${tail ? `; output terakhir: ${tail}` : `; tidak ada output selama ${silence}ms`}`));
+        }
       });
     }, options.timeoutMs ?? 180_000);
+    const heartbeat = options.onHeartbeat ? setInterval(() => options.onHeartbeat?.(Date.now() - startedAt, Date.now() - lastOutputAt), options.heartbeatMs ?? 60_000) : undefined;
     const finish = (callback: () => void) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearInterval(heartbeat);
       callback();
     };
     const collect = (chunk: Buffer) => {
+      lastOutputAt = Date.now();
       const text = chunk.toString();
       output = `${output}${text}`.slice(-12_000);
       options.onOutput?.(redact(text, options.secrets).trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] ?? '');
@@ -424,10 +469,19 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
     await mkdir(workspace, { recursive: true });
     hooks.signal?.throwIfAborted();
     hooks.update({ phase: 'CLONING', progress: 5, message: 'Mengambil repository dari GitHub…' });
-    const repository = new URL(project.repositoryUrl);
-    if (!['http:', 'https:'].includes(repository.protocol)) throw new Error('repository URL harus memakai HTTP(S)');
-    if (repository.username || repository.password) throw new Error('repository URL tidak boleh menyimpan username/password; gunakan GITHUB_TOKEN di secret store lokal.');
-    await cloneRepository(project.repositoryUrl, project.ref, sourceDir, root, gitEnv, gitToken, (message) => hooks.update({ message: `Git: ${message}` }));
+    if (project.sourceType === 'local-folder' || (!project.sourceType && project.sourcePath)) {
+      const localPath = path.resolve(project.sourcePath ?? '');
+      const sourceInfo = await stat(localPath).catch(() => undefined);
+      if (!sourceInfo?.isDirectory()) throw new Error(`folder lokal tidak ditemukan: ${localPath}`);
+      hooks.update({ phase: 'COPYING_SOURCE', progress: 5, message: `Menyalin folder kerja ke workspace QC: ${localPath}` });
+      await copySourceDirectory(localPath, sourceDir);
+    } else {
+      if (!project.repositoryUrl?.trim()) throw new Error('repository GitHub wajib diisi untuk source github.');
+      const repository = new URL(project.repositoryUrl);
+      if (!['http:', 'https:'].includes(repository.protocol)) throw new Error('repository URL harus memakai HTTP(S)');
+      if (repository.username || repository.password) throw new Error('repository URL tidak boleh menyimpan username/password; gunakan GITHUB_TOKEN di secret store lokal.');
+      await cloneRepository(project.repositoryUrl, project.ref, sourceDir, root, gitEnv, gitToken, (message) => hooks.update({ message: `Git: ${message}` }));
+    }
     hooks.signal?.throwIfAborted();
     await hooks.onSource?.(sourceDir);
 
@@ -471,6 +525,7 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
 
     const unsupportedDockerCommand = ordered.find((service) => /\bdocker\s+(?:compose|build|run)\b/i.test(`${service.installCommand} ${service.startCommand}`));
     if (unsupportedDockerCommand) throw new Error(`service ${unsupportedDockerCommand.name} meminta Docker/Compose di dalam repo. Nested Docker belum diizinkan pada sandbox; isi image runtime dan command aplikasi biasa.`);
+    await ensureDockerHostSpace();
     const limits = sandboxLimits();
     networkCreated = true;
     await runProcess('docker', ['network', 'create', '--label', 'qc.managed=true', '--label', `qc.run_id=${runId}`, networkName], { cwd: root, env, commandLabel: 'membuat jaringan sandbox', timeoutMs: 60_000, secrets: projectSecrets });
@@ -505,6 +560,8 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
     hooks.update({ phase: 'RUNTIME_READY', progress: 20, message: `Sandbox Docker aktif dengan batas ${limits.cpus} CPU, ${limits.memory}, ${limits.pids} proses.` });
 
     const installTotal = ordered.filter((service) => service.installCommand.trim()).length;
+    const configuredInstallTimeout = Number(process.env.QC_INSTALL_TIMEOUT_MS ?? 900_000);
+    const installTimeoutMs = Number.isFinite(configuredInstallTimeout) ? Math.max(60_000, Math.min(3_600_000, Math.floor(configuredInstallTimeout))) : 900_000;
     let installed = 0;
     const installationResults = await Promise.allSettled(ordered.filter((service) => service.installCommand.trim()).map(async (service) => {
       updateService(service, 'INSTALLING');
@@ -512,7 +569,15 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
       const container = containerByService.get(service.id);
       if (!container) throw new Error(`sandbox service ${service.name} tidak tersedia.`);
       try {
-        await runProcess('docker', ['exec', '--workdir', container.workdir, '--env', `APP_ENV=${project.environment}`, '--env', 'COMPOSER_PROCESS_TIMEOUT=0', container.name, '/bin/sh', '-lc', service.installCommand], { cwd: root, env, commandLabel: `install dependency ${service.name}`, timeoutMs: 900_000, onOutput: (message) => hooks.update({ message: `${service.name}: ${message}` }), secrets: projectSecrets });
+        await runProcess('docker', ['exec', '--workdir', container.workdir, '--env', `APP_ENV=${project.environment}`, '--env', 'COMPOSER_PROCESS_TIMEOUT=0', container.name, '/bin/sh', '-lc', service.installCommand], {
+          cwd: root,
+          env,
+          commandLabel: `install dependency ${service.name}`,
+          timeoutMs: installTimeoutMs,
+          onOutput: (message) => hooks.update({ message: `${service.name}: ${message}` }),
+          onHeartbeat: (elapsedMs, idleMs) => hooks.update({ message: `${service.name}: install masih berjalan (${Math.floor(elapsedMs / 60_000)} menit; tanpa output ${Math.floor(idleMs / 1_000)} detik).` }),
+          secrets: projectSecrets
+        });
         installed += 1;
         updateService(service, 'PENDING');
       } catch (error) {
@@ -562,6 +627,14 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
     for (const containerName of containerNames) await runProcess('docker', ['rm', '-f', containerName], { cwd: root, env, commandLabel: `docker cleanup ${containerName}` }).catch(() => undefined);
     await hooks.cleanup?.();
     if (networkCreated) await runProcess('docker', ['network', 'rm', networkName], { cwd: root, env, commandLabel: 'docker network cleanup', timeoutMs: 30_000 }).catch(() => undefined);
-    await rm(workspace, { recursive: true, force: true });
+    if (project.retainClone && project.sourceType === 'github' && await exists(sourceDir)) {
+      const clonePath = path.join(artifactRoot, 'clones', runId);
+      await mkdir(path.dirname(clonePath), { recursive: true });
+      await rm(clonePath, { recursive: true, force: true });
+      await rename(sourceDir, clonePath);
+      await rm(workspace, { recursive: true, force: true });
+    } else {
+      await rm(workspace, { recursive: true, force: true });
+    }
   }
 }

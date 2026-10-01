@@ -24,6 +24,7 @@ export function Wizard({
         ...initialConfig(),
         ...cfg,
         name: initialJob.name || cfg.name || '',
+        sourceType: cfg.sourceType ?? (cfg.runMode === 'managed-local' ? (cfg.backendMode === 'local' ? 'local-folder' : 'github') : 'existing-target'),
         platform: cfg.platform ?? 'web',
         baseUrl: cfg.baseUrl ?? '',
         backendUrl: cfg.backendUrl || (cfg.platform === 'android' ? cfg.baseUrl : '') || '',
@@ -34,6 +35,7 @@ export function Wizard({
         accounts: (cfg.accounts && cfg.accounts.length > 0) ? cfg.accounts : initialConfig().accounts,
         database: cfg.database || initialConfig().database,
         rules: cfg.rules || initialConfig().rules,
+        businessFlowReview: { ...initialConfig().businessFlowReview, ...(cfg.businessFlowReview || {}) },
         qualityAudit: { ...initialConfig().qualityAudit, ...(cfg.qualityAudit || {}) },
       };
     }
@@ -49,6 +51,7 @@ export function Wizard({
     exclude: (initialJob?.config?.rules?.excludePaths ?? ['/logout', '/delete']).join('\n'),
   }));
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showQualityExpert, setShowQualityExpert] = useState(false);
 
   // Dropzone & file input refs
   const [dragOverApk, setDragOverApk] = useState(false);
@@ -72,6 +75,8 @@ export function Wizard({
   });
   const [installingApk, setInstallingApk] = useState(false);
   const [installStatus, setInstallStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
     if (initialJob?.config) {
@@ -80,6 +85,7 @@ export function Wizard({
         ...initialConfig(),
         ...cfg,
         name: initialJob.name || cfg.name || '',
+        sourceType: cfg.sourceType ?? (cfg.runMode === 'managed-local' ? (cfg.backendMode === 'local' ? 'local-folder' : 'github') : 'existing-target'),
         platform: cfg.platform ?? 'web',
         baseUrl: cfg.baseUrl ?? '',
         backendUrl: cfg.backendUrl || (cfg.platform === 'android' ? cfg.baseUrl : '') || '',
@@ -90,6 +96,7 @@ export function Wizard({
         accounts: (cfg.accounts && cfg.accounts.length > 0) ? cfg.accounts : initialConfig().accounts,
         database: cfg.database || initialConfig().database,
         rules: cfg.rules || initialConfig().rules,
+        businessFlowReview: { ...initialConfig().businessFlowReview, ...(cfg.businessFlowReview || {}) },
         qualityAudit: { ...initialConfig().qualityAudit, ...(cfg.qualityAudit || {}) },
       });
       setPaths({
@@ -117,6 +124,8 @@ export function Wizard({
     if (index === 0) {
       if (!config.name.trim()) return 'Beri nama project / pengujian terlebih dahulu.';
       if (config.platform === 'web' && !config.baseUrl.trim()) return 'Masukkan URL Website yang akan diuji.';
+      if (config.platform === 'web' && config.sourceType === 'local-folder' && !config.localPath?.trim()) return 'Masukkan folder kerja lokal yang akan dinyalakan.';
+      if (config.platform === 'web' && config.sourceType === 'github' && !config.repositoryUrl.trim()) return 'Masukkan URL repository GitHub.';
       if (config.platform === 'android' && !config.appId?.trim() && !config.apkUploadId) {
         return 'Unggah file .APK atau masukkan Android Application ID.';
       }
@@ -132,8 +141,8 @@ export function Wizard({
       if (config.database.engine !== 'none' && config.database.source === 'migrate' && !config.database.migrationCommand?.trim()) {
         return 'Isi migration command atau pilih sumber database lain.';
       }
-      if (config.database.engine !== 'none' && config.database.source === 'seed' && !config.database.seedCommand?.trim()) {
-        return 'Isi seed command atau pilih sumber database lain.';
+      if (config.database.engine !== 'none' && config.database.source === 'seed' && !config.database.seedCommand?.trim() && !seedResult?.success) {
+        return 'Isi seed command atau klik 1-Click Auto-Seed.';
       }
       if (config.platform === 'web' && config.qualityAudit?.enabled !== false) {
         if (!config.qualityAudit?.browsers?.length) return 'Pilih minimal satu browser untuk Quality Audit.';
@@ -512,7 +521,7 @@ export function Wizard({
                           onChange={e => patch({ appId: e.target.value })}
                         />
                       </Field>
-                      <Field label="Target Device / Emulator" hint="Device aktif dari Android ADB.">
+                      <Field label="Target Device / Emulator" hint="Serial ADB, emulator ID, atau IP Wi-Fi; port 5555 akan dilengkapi otomatis.">
                         {system?.adb?.devices && system.adb.devices.length > 0 ? (
                           <select
                             value={config.deviceId || ''}
@@ -526,7 +535,7 @@ export function Wizard({
                         ) : (
                           <input
                             value={config.deviceId || ''}
-                            placeholder="emulator-5554 atau kosongkan untuk default"
+                            placeholder="192.168.10.22, emulator-5554, atau kosongkan untuk default"
                             onChange={e => patch({ deviceId: e.target.value })}
                           />
                         )}
@@ -559,25 +568,33 @@ export function Wizard({
                       </div>
                       <p>Pastikan aplikasi terhubung dengan API backend yang melayani data login dan proses bisnis.</p>
                     </div>
-                    <Badge value={config.backendMode === 'existing' ? 'Live Backend' : 'Repo Backend'} />
+                    <Badge value={config.sourceType === 'existing-target' ? 'Live Target' : config.sourceType === 'local-folder' ? 'Folder Lokal' : 'GitHub Workspace'} />
                   </div>
 
                   <div className="backend-mode-row">
                     <button
                       type="button"
-                      className={`backend-pill ${config.backendMode !== 'repo' ? 'active' : ''}`}
-                      onClick={() => patch({ backendMode: 'existing', runMode: 'existing-target' })}
+                      className={`backend-pill ${config.backendMode === 'existing' ? 'active' : ''}`}
+                      onClick={() => patch({ backendMode: 'existing', sourceType: 'existing-target', runMode: 'existing-target' })}
                     >
                       <span className="status-dot active" />
                       <span>Backend Sedang Berjalan (Existing API)</span>
                     </button>
                     <button
                       type="button"
+                      className={`backend-pill ${config.backendMode === 'local' ? 'active' : ''}`}
+                      onClick={() => patch({ backendMode: 'local', sourceType: 'local-folder', runMode: 'managed-local' })}
+                    >
+                      <Icon name="projects" size={14} />
+                      <span>Folder Kerja Lokal</span>
+                    </button>
+                    <button
+                      type="button"
                       className={`backend-pill ${config.backendMode === 'repo' ? 'active' : ''}`}
-                      onClick={() => patch({ backendMode: 'repo', runMode: 'managed-local' })}
+                      onClick={() => patch({ backendMode: 'repo', sourceType: 'github', runMode: 'managed-local' })}
                     >
                       <Icon name="git" size={14} />
-                      <span>Source Code Backend (Repository)</span>
+                      <span>Clone dari GitHub</span>
                     </button>
                   </div>
 
@@ -658,9 +675,21 @@ export function Wizard({
                     </button>
                   </div>
 
+                  {(config.backendMode === 'local' || config.backendMode === 'existing') && (
+                    <div className="form-grid" style={{ marginTop: 14 }}>
+                      <Field label="Folder Kerja Lokal (Analisis Kode AST)" hint="Path folder project di komputer untuk mendeteksi rute dan form secara mendalam." wide>
+                        <input
+                          value={config.localPath || ''}
+                          onChange={e => patch({ localPath: e.target.value })}
+                          placeholder="E:\\projek\\jamaahku_website\\jamaahku_frontend\\jamaahku-travel-agent"
+                        />
+                      </Field>
+                    </div>
+                  )}
+
                   {config.backendMode === 'repo' && (
                     <div className="form-grid" style={{ marginTop: 14 }}>
-                      <Field label="Repository GitHub Backend" hint="Format: https://github.com/owner/backend-repo" wide>
+                      <Field label="Repository GitHub" hint="Repository akan di-clone ke workspace sementara QC, bukan ke Desktop." wide>
                         <input
                           type="url"
                           value={config.repositoryUrl}
@@ -775,60 +804,41 @@ export function Wizard({
                   </div>
 
                   <div className="form-grid" style={{ marginBottom: 14 }}>
-                    <Field label="Database Engine" hint="Engine ini dipakai managed-local runner.">
+                    <Field label="Database Engine" hint="Engine database yang digunakan runner atau container.">
                       <select
                         value={config.database.engine}
                         onChange={e => db({ engine: e.target.value as Config['database']['engine'] })}
                       >
-                        <option value="none">Tidak membuat container database</option>
-                        <option value="mysql">MySQL</option>
+                        <option value="none">Database Host / Aktif (Tanpa Container Khusus)</option>
+                        <option value="mysql">MySQL / MariaDB</option>
                         <option value="postgres">PostgreSQL</option>
                         <option value="sqlite">SQLite</option>
                       </select>
                     </Field>
-                    <Field label="Sumber / Bootstrap Data" hint="Cara engine menyiapkan schema dan data uji.">
-                      <select
-                        value={config.database.source}
-                        onChange={e => db({ source: e.target.value as Config['database']['source'] })}
-                      >
-                        <option value="empty">Database backend aktif / kosong</option>
-                        <option value="sql">Import SQL dump</option>
-                        <option value="migrate">Jalankan migration command</option>
-                        <option value="seed">Jalankan seed command</option>
-                      </select>
-                    </Field>
                   </div>
 
-                  {config.database.engine !== 'none' && config.database.source !== 'sql' && (
-                    <div className="form-grid" style={{ marginBottom: 14 }}>
-                      <Field label="Provision Command" hint="Opsional, dijalankan sebelum migration/seed.">
-                        <input value={config.database.provisionCommand || ''} placeholder="php artisan migrate:fresh" onChange={e => db({ provisionCommand: e.target.value })} />
-                      </Field>
-                      <Field label="Migration Command" hint="Wajib jika sumber = migration.">
-                        <input value={config.database.migrationCommand || ''} placeholder="php artisan migrate --force" onChange={e => db({ migrationCommand: e.target.value })} />
-                      </Field>
-                      <Field label="Seed Command" hint="Wajib jika sumber = seed.">
-                        <input value={config.database.seedCommand || ''} placeholder="php artisan db:seed --force" onChange={e => db({ seedCommand: e.target.value })} />
-                      </Field>
-                    </div>
-                  )}
+                  <label className="field-label" style={{ marginBottom: 8, display: 'block', fontWeight: 600 }}>
+                    Pilih Metode Pengisian Database:
+                  </label>
 
                   <div className="db-choice-grid">
+                    {/* OPSI 1: DATABASE BACKEND AKTIF */}
                     <button
                       type="button"
-                      className={`choice-card ${config.database.source !== 'sql' ? 'selected' : ''}`}
+                      className={`choice-card ${config.database.source === 'empty' ? 'selected' : ''}`}
                       onClick={() => db({ engine: 'none', source: 'empty', sqlUploadId: undefined })}
                     >
                       <div className="choice-card-icon">
                         <Icon name="database" size={24} />
                       </div>
                       <div className="choice-card-content">
-                        <strong>Gunakan Database Backend Aktif (Tanpa Reset)</strong>
-                        <p>Paling praktis: engine langsung memakai database yang saat ini terhubung ke backend server.</p>
+                        <strong>1. Database Backend Aktif</strong>
+                        <p>Langsung pakai database yang aktif di backend tanpa mereset atau mengubah schema.</p>
                       </div>
-                      {config.database.source !== 'sql' && <span className="choice-check"><Icon name="check" size={14} /></span>}
+                      {config.database.source === 'empty' && <span className="choice-check"><Icon name="check" size={14} /></span>}
                     </button>
 
+                    {/* OPSI 2: IMPORT SQL DUMP */}
                     <button
                       type="button"
                       className={`choice-card ${config.database.source === 'sql' ? 'selected' : ''}`}
@@ -841,12 +851,131 @@ export function Wizard({
                         <Icon name="download" size={24} />
                       </div>
                       <div className="choice-card-content">
-                        <strong>Import File SQL Dump (.sql)</strong>
-                        <p>Unggah file SQL dump jika ingin menginisialisasi schema atau data master khusus.</p>
+                        <strong>2. Upload File SQL Dump (.sql)</strong>
+                        <p>Unggah file dump .sql kustom untuk inisialisasi schema proyek baru.</p>
                       </div>
                       {config.database.source === 'sql' && <span className="choice-check"><Icon name="check" size={14} /></span>}
                     </button>
+
+                    {/* OPSI 3: AUTO-SEED / FRAMEWORK SEEDER */}
+                    <button
+                      type="button"
+                      className={`choice-card ${config.database.source === 'seed' || config.database.source === 'migrate' ? 'selected' : ''}`}
+                      onClick={() => db({
+                        engine: config.database.engine === 'none' ? 'mysql' : config.database.engine,
+                        source: 'seed',
+                        seedCommand: config.database.seedCommand || 'npm run seed:jamaahku'
+                      })}
+                    >
+                      <div className="choice-card-icon">
+                        <Icon name="zap" size={24} />
+                      </div>
+                      <div className="choice-card-content">
+                        <strong>3. Auto-Seed Dataset Lengkap</strong>
+                        <p>Injeksi otomatis data relasional lengkap (49 tabel) atau jalankan seeder framework.</p>
+                      </div>
+                      {(config.database.source === 'seed' || config.database.source === 'migrate') && <span className="choice-check"><Icon name="check" size={14} /></span>}
+                    </button>
                   </div>
+
+                  {/* DETAIL TAMPILAN OPSI 1: DATABASE BACKEND AKTIF */}
+                  {config.database.source === 'empty' && (
+                    <div style={{
+                      marginTop: 14,
+                      padding: '12px 16px',
+                      background: 'var(--bg-panel-sub)',
+                      borderRadius: 10,
+                      border: '1px solid var(--border)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12
+                    }}>
+                      <div style={{ color: 'var(--success)' }}><Icon name="check" size={20} /></div>
+                      <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
+                        <strong style={{ color: 'var(--text-main)', display: 'block', marginBottom: 2 }}>Mode Database Backend Aktif Terpilih</strong>
+                        QC Maestro langsung menggunakan database yang saat ini aktif terhubung ke backend server (misal MySQL di port 3306). Cocok jika data di database sudah ada atau dikelola manual.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* DETAIL TAMPILAN OPSI 3: AUTO-SEED PRESET & FRAMEWORK COMMAND */}
+                  {(config.database.source === 'seed' || config.database.source === 'migrate') && (
+                    <div style={{
+                      marginTop: 14,
+                      padding: '14px 18px',
+                      background: 'rgba(56, 189, 248, 0.08)',
+                      borderRadius: 10,
+                      border: '1px solid rgba(56, 189, 248, 0.25)'
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12
+                      }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '0.92rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Icon name="zap" size={16} /> Auto-Seed Dataset Lengkap (fixtures/sql/jamaahku_lengkap.sql)
+                          </div>
+                          <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: 3 }}>
+                            Injeksi langsung 49 tabel relasional lengkap (19 users, 12 jamaah, 2 batch, 4 hotel, 56 doa, 20 perangkat, 150 koordinat GPS).
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={seeding}
+                          onClick={async () => {
+                            setSeeding(true);
+                            setSeedResult(null);
+                            try {
+                              const res = await fetch('/api/v1/fixtures/seed/jamaahku', { method: 'POST' });
+                              const data = await res.json();
+                              if (data.success) {
+                                setSeedResult({
+                                  success: true,
+                                  message: `Database berhasil di-seed! 49 tabel siap untuk end-to-end full CRUD (${data.summary?.length || 11} kelompok data diverifikasi).`
+                                });
+                              } else {
+                                setSeedResult({ success: false, message: data.error || 'Gagal seeding database.' });
+                              }
+                            } catch (err: any) {
+                              setSeedResult({ success: false, message: err?.message || 'Gagal menghubungi server QC.' });
+                            } finally {
+                              setSeeding(false);
+                            }
+                          }}
+                          style={{ whiteSpace: 'nowrap', padding: '8px 18px', fontSize: '0.84rem', fontWeight: 600 }}
+                        >
+                          {seeding ? '⚡ Menyemai Database...' : '⚡ 1-Click Auto-Seed Sekarang'}
+                        </button>
+                      </div>
+                      {seedResult && (
+                        <div style={{
+                          marginTop: 10,
+                          fontSize: '0.82rem',
+                          padding: '8px 12px',
+                          borderRadius: 6,
+                          background: seedResult.success ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                          color: seedResult.success ? '#4ade80' : '#f87171',
+                          border: `1px solid ${seedResult.success ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                        }}>
+                          {seedResult.success ? '✓ ' : '✗ '}{seedResult.message}
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                        <Field label="Custom Seeder Command (Opsional untuk Proyek / Framework Lain)" hint="Contoh: php artisan db:seed --force, npx prisma db seed, atau python manage.py loaddata">
+                          <input
+                            value={config.database.seedCommand || ''}
+                            placeholder="npm run seed:jamaahku"
+                            onChange={e => db({ seedCommand: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
 
                   {/* SQL UPLOAD DROPZONE IF SELECTED */}
                   {config.database.source === 'sql' && (
@@ -925,84 +1054,216 @@ export function Wizard({
                     <div className="inline-heading">
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Icon name="discovery" size={18} />
+                          <Icon name="shield" size={18} />
                           <h3>Quality Audit UI &amp; Evidence</h3>
                         </div>
-                        <p>Atur browser, viewport, accessibility, pixel baseline, dense-data stress, dan negative testing setelah Discovery selesai.</p>
+                        <p>Pemeriksaan otomatis tampilan antarmuka, aksesibilitas WCAG, responsivitas, dan rekaman bukti audit.</p>
                       </div>
-                      <Badge value={config.qualityAudit?.enabled !== false ? 'Auto Run' : 'Manual'} />
+                      <Badge value={config.qualityAudit?.enabled !== false ? 'Aktif' : 'Manual'} />
                     </div>
 
                     <label className="toggle-row">
-                      <input type="checkbox" checked={config.qualityAudit?.enabled !== false} onChange={e => quality({ enabled: e.target.checked })} />
-                      <span><strong>Jalankan Quality Audit otomatis</strong><small>Memeriksa HTTP, contrast WCAG, typography, responsive overflow, accessibility, text quality, dense-data, dan screenshot evidence.</small></span>
+                      <input
+                        type="checkbox"
+                        checked={config.qualityAudit?.enabled !== false}
+                        onChange={e => quality({ enabled: e.target.checked })}
+                      />
+                      <span>
+                        <strong>Jalankan Quality Audit otomatis (Direkomendasikan)</strong>
+                        <small>Memeriksa status HTTP, kontras WCAG, responsivitas layar, broken links, dan tangkapan bukti visual.</small>
+                      </span>
                     </label>
 
-                    <div className="form-grid" style={{ marginTop: 14 }}>
-                      <Field label="Maksimum Route" hint="0 = semua route unik yang ditemukan; angka positif = batch terbatas.">
-                        <input type="number" min={0} max={1000} value={config.qualityAudit?.maxRoutes ?? 0} onChange={e => quality({ maxRoutes: Number(e.target.value) })} />
-                      </Field>
-                      <Field label="Route Offset" hint="Mulai dari route ke-N untuk batch audit.">
-                        <input type="number" min={0} value={config.qualityAudit?.routeOffset ?? 0} onChange={e => quality({ routeOffset: Number(e.target.value) })} />
-                      </Field>
-                      <Field label="Navigation Timeout (ms)" hint="10.000–180.000 ms.">
-                        <input type="number" min={10000} max={180000} step={1000} value={config.qualityAudit?.navigationTimeoutMs ?? 60000} onChange={e => quality({ navigationTimeoutMs: Number(e.target.value) })} />
-                      </Field>
-                      <Field label="Visual Regression" hint="Required adalah standar: baseline wajib tersedia dan perubahan piksel menjadi finding. Capture hanya untuk membuat baseline terkontrol.">
-                        <select value={config.qualityAudit?.visualRegression?.mode ?? 'required'} onChange={e => quality({ visualRegression: { ...config.qualityAudit?.visualRegression, mode: e.target.value as 'off' | 'capture' | 'required' } })}>
-                          <option value="capture">Capture / compare</option>
-                          <option value="required">Required baseline</option>
-                          <option value="off">Off</option>
-                        </select>
-                      </Field>
-                      <Field label="Allowed pixel diff (%)" hint="Batas perbedaan piksel sebelum menjadi finding.">
-                        <input type="number" min={0} max={100} step={0.1} value={config.qualityAudit?.visualRegression?.allowedDiffPercent ?? 0.5} onChange={e => quality({ visualRegression: { ...config.qualityAudit?.visualRegression, allowedDiffPercent: Number(e.target.value) } })} />
-                      </Field>
-                    </div>
+                    {config.qualityAudit?.enabled !== false && (
+                      <>
+                        {/* ALUR EKSEKUSI: AUTO-APPROVE / NON-STOP */}
+                        <div style={{ marginTop: 14, marginBottom: 14, padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                              🚀 Alur Eksekusi Pengujian:
+                            </span>
+                            <span className="badge" style={{ fontSize: 11, background: config.businessFlowReview?.mode === 'auto' ? 'rgba(53, 208, 186, 0.2)' : 'rgba(255, 179, 0, 0.2)', color: config.businessFlowReview?.mode === 'auto' ? 'var(--cyan)' : '#ffb300' }}>
+                              {config.businessFlowReview?.mode === 'auto' ? '⚡ Otomatis Non-Stop' : '⏸️ Jeda Review Manual'}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            <button
+                              type="button"
+                              className={`backend-pill ${config.businessFlowReview?.mode === 'auto' ? 'active' : ''}`}
+                              onClick={() => patch({ businessFlowReview: { mode: 'auto' } })}
+                              style={{ flex: 1, padding: '9px 12px', justifyContent: 'center' }}
+                            >
+                              <span className="status-dot active" />
+                              <span>⚡ Langsung Jalankan Non-Stop</span>
+                            </button>
+                            <button
+                              type="button"
+                              className={`backend-pill ${config.businessFlowReview?.mode === 'required' ? 'active' : ''}`}
+                              onClick={() => patch({ businessFlowReview: { mode: 'required' } })}
+                              style={{ flex: 1, padding: '9px 12px', justifyContent: 'center' }}
+                            >
+                              <Icon name="clock" size={14} />
+                              <span>⏸️ Jeda Review Alur Manual</span>
+                            </button>
+                          </div>
+                          <small style={{ display: 'block', marginTop: 6, color: 'var(--text-dim)', fontSize: 12 }}>
+                            {config.businessFlowReview?.mode === 'auto'
+                              ? 'Direkomendasikan: Engine langsung mengeksekusi seluruh pengujian Playwright secara otomatis setelah alur disintesis, tanpa butuh klik konfirmasi manual.'
+                              : 'Engine akan berhenti sejenak di status WAITING_REVIEW agar reviewer dapat menyetujui peta alur bisnis terlebih dahulu sebelum pengujian dimulai.'}
+                          </small>
+                        </div>
 
-                    <div className="form-grid" style={{ marginTop: 14 }}>
-                      <Field label="Mutation fixture contract" hint="Path JSON contract; wajib explicit allowMutations=true dan cleanup scenario.">
-                        <input value={config.qualityAudit?.negativeTesting?.mutationFixturePath || ''} placeholder=".qc-fixtures/crud.json" onChange={e => quality({ negativeTesting: { ...config.qualityAudit?.negativeTesting, mutationFixturePath: e.target.value } })} />
-                      </Field>
-                      <label className={`audit-option ${config.qualityAudit?.negativeTesting?.runMutations === true ? 'selected' : ''}`} style={{ alignSelf: 'end' }}><input type="checkbox" checked={config.qualityAudit?.negativeTesting?.runMutations === true} onChange={e => quality({ negativeTesting: { ...config.qualityAudit?.negativeTesting, runMutations: e.target.checked } })} /><span>Run mutation CRUD fixture</span></label>
-                    </div>
+                        {/* PRESET KEDALAMAN AUDIT */}
+                        <div className="qa-preset-grid">
+                          <div
+                            className={`qa-preset-card ${config.qualityAudit?.denseData?.enabled !== false ? 'active' : ''}`}
+                            onClick={() => quality({
+                              maxRoutes: 0,
+                              accessibility: true,
+                              denseData: { enabled: true },
+                              negativeTesting: { ...config.qualityAudit?.negativeTesting, enabled: true, transactionalScenarios: true },
+                              stateTesting: { ...config.qualityAudit?.stateTesting, enabled: true },
+                              viewports: ['desktop', 'tablet', 'mobile'],
+                            })}
+                          >
+                            <div className="qa-preset-card-header">
+                              <strong>🛡️ Mendalam &amp; Komprehensif</strong>
+                              <span className="badge" style={{ background: 'rgba(53, 208, 186, 0.2)', color: 'var(--cyan)' }}>REKOMENDASI</span>
+                            </div>
+                            <p>Semua rute dipetakan, simulasi interaksi form &amp; hover/focus, uji multi-perangkat (Desktop, Tablet, Mobile), dan bukti visual lengkap.</p>
+                          </div>
 
-                    <div className="audit-option-group">
-                      <span className="field-label">Rule tambahan</span>
-                      <div className="audit-option-list">
-                        <label className={`audit-option ${config.qualityAudit?.accessibility !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.accessibility !== false} onChange={e => quality({ accessibility: e.target.checked })} /><span>Keyboard + screen reader tree</span></label>
-                        <label className={`audit-option ${config.qualityAudit?.denseData?.enabled !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.denseData?.enabled !== false} onChange={e => quality({ denseData: { ...config.qualityAudit?.denseData, enabled: e.target.checked } })} /><span>Dense table/form stress</span></label>
-                        <label className={`audit-option ${config.qualityAudit?.negativeTesting?.enabled !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.negativeTesting?.enabled !== false} onChange={e => quality({ negativeTesting: { ...config.qualityAudit?.negativeTesting, enabled: e.target.checked } })} /><span>Negative testing aman</span></label>
-                        <label className={`audit-option ${config.qualityAudit?.stateTesting?.enabled !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.stateTesting?.enabled !== false} onChange={e => quality({ stateTesting: { ...config.qualityAudit?.stateTesting, enabled: e.target.checked } })} /><span>UI states: hover/focus/error</span></label>
-                        <label className={`audit-option ${config.qualityAudit?.negativeTesting?.transactionalScenarios !== false ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.negativeTesting?.transactionalScenarios !== false} onChange={e => quality({ negativeTesting: { ...config.qualityAudit?.negativeTesting, transactionalScenarios: e.target.checked } })} /><span>Transactional scenarios</span></label>
-                        <label className={`audit-option ${config.qualityAudit?.screenReader?.mode === 'external' ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.screenReader?.mode === 'external'} onChange={e => quality({ screenReader: { ...config.qualityAudit?.screenReader, mode: e.target.checked ? 'external' : 'semantic' } })} /><span>External screen reader adapter</span></label>
-                        <label className={`audit-option ${config.qualityAudit?.visualRegression?.updateBaseline ? 'selected' : ''}`}><input type="checkbox" checked={config.qualityAudit?.visualRegression?.updateBaseline === true} onChange={e => quality({ visualRegression: { ...config.qualityAudit?.visualRegression, updateBaseline: e.target.checked } })} /><span>Update baseline</span></label>
-                      </div>
-                    </div>
+                          <div
+                            className={`qa-preset-card ${config.qualityAudit?.denseData?.enabled === false ? 'active' : ''}`}
+                            onClick={() => quality({
+                              maxRoutes: 20,
+                              accessibility: true,
+                              denseData: { enabled: false },
+                              negativeTesting: { ...config.qualityAudit?.negativeTesting, enabled: false, transactionalScenarios: false },
+                              stateTesting: { ...config.qualityAudit?.stateTesting, enabled: false },
+                              viewports: ['desktop'],
+                            })}
+                          >
+                            <div className="qa-preset-card-header">
+                              <strong>⚡ Cepat &amp; Esensial</strong>
+                              <span className="badge">RINGAN</span>
+                            </div>
+                            <p>Fokus pada verifikasi HTTP 200/400/500, deteksi rute error, dan screenshot desktop dengan durasi cepat.</p>
+                          </div>
+                        </div>
 
-                    <div className="audit-option-group">
-                      <span className="field-label">Browser yang dijalankan</span>
-                      <div className="audit-option-list">
-                        {(['chromium', 'firefox', 'webkit'] as const).map(browser => {
-                          const selected = config.qualityAudit?.browsers?.includes(browser) ?? false;
-                          return <label key={browser} className={`audit-option ${selected ? 'selected' : ''}`}><input type="checkbox" checked={selected} onChange={e => { const current = config.qualityAudit?.browsers ?? []; quality({ browsers: e.target.checked ? [...new Set([...current, browser])] : current.filter(item => item !== browser) }); }} /><span>{browser}</span></label>;
-                        })}
-                      </div>
-                    </div>
+                        {/* DEVICE & BROWSER PILLS */}
+                        <div className="qa-pill-section">
+                          <div className="qa-pill-row">
+                            <span className="qa-pill-label">📱 Perangkat Layar:</span>
+                            <div className="qa-pill-group">
+                              {([
+                                { id: 'desktop', label: '🖥️ Desktop (1440px)' },
+                                { id: 'tablet', label: '📱 Tablet (768px)' },
+                                { id: 'mobile', label: '📲 Mobile (375px)' },
+                              ] as const).map(item => {
+                                const selected = config.qualityAudit?.viewports?.includes(item.id) ?? false;
+                                return (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    className={`qa-pill-btn ${selected ? 'active' : ''}`}
+                                    onClick={() => {
+                                      const current = config.qualityAudit?.viewports ?? [];
+                                      quality({
+                                        viewports: selected
+                                          ? current.filter(v => v !== item.id)
+                                          : [...new Set([...current, item.id])]
+                                      });
+                                    }}
+                                  >
+                                    {selected ? '✓ ' : ''}{item.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
 
-                    <div className="audit-option-group">
-                      <span className="field-label">Viewport yang dijalankan</span>
-                      <div className="audit-option-list">
-                        {(['desktop', 'tablet', 'mobile'] as const).map(viewport => {
-                          const selected = config.qualityAudit?.viewports?.includes(viewport) ?? false;
-                          return <label key={viewport} className={`audit-option ${selected ? 'selected' : ''}`}><input type="checkbox" checked={selected} onChange={e => { const current = config.qualityAudit?.viewports ?? []; quality({ viewports: e.target.checked ? [...new Set([...current, viewport])] : current.filter(item => item !== viewport) }); }} /><span>{viewport}</span></label>;
-                        })}
-                      </div>
-                    </div>
+                          <div className="qa-pill-row">
+                            <span className="qa-pill-label">🌐 Mesin Browser:</span>
+                            <div className="qa-pill-group">
+                              {([
+                                { id: 'chromium', label: 'Chromium (Chrome / Edge)' },
+                                { id: 'firefox', label: 'Firefox' },
+                                { id: 'webkit', label: 'WebKit (Safari)' },
+                              ] as const).map(item => {
+                                const selected = config.qualityAudit?.browsers?.includes(item.id) ?? false;
+                                return (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    className={`qa-pill-btn ${selected ? 'active' : ''}`}
+                                    onClick={() => {
+                                      const current = config.qualityAudit?.browsers ?? [];
+                                      quality({
+                                        browsers: selected
+                                          ? current.filter(b => b !== item.id)
+                                          : [...new Set([...current, item.id])]
+                                      });
+                                    }}
+                                  >
+                                    {selected ? '✓ ' : ''}{item.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ACCORDION PARAMETER KHUSUS EXPERT */}
+                        <div className="qa-expert-box">
+                          <button
+                            type="button"
+                            className="qa-expert-toggle"
+                            onClick={() => setShowQualityExpert(!showQualityExpert)}
+                          >
+                            <span>⚙️ Sesuaikan Parameter Teknis Audit (Khusus Expert)</span>
+                            <span>{showQualityExpert ? '▲ Sembunyikan' : '▼ Tampilkan'}</span>
+                          </button>
+
+                          {showQualityExpert && (
+                            <div className="qa-expert-body">
+                              <div className="form-grid">
+                                <Field label="Maksimum Route" hint="0 = semua rute unik tanpa batasan">
+                                  <input type="number" min={0} max={1000} value={config.qualityAudit?.maxRoutes ?? 0} onChange={e => quality({ maxRoutes: Number(e.target.value) })} />
+                                </Field>
+                                <Field label="Route Offset" hint="Mulai audit dari index rute ke-N">
+                                  <input type="number" min={0} value={config.qualityAudit?.routeOffset ?? 0} onChange={e => quality({ routeOffset: Number(e.target.value) })} />
+                                </Field>
+                                <Field label="Timeout Navigasi (ms)" hint="Batas tunggu muat halaman (10.000 - 180.000 ms)">
+                                  <input type="number" min={10000} max={180000} step={1000} value={config.qualityAudit?.navigationTimeoutMs ?? 60000} onChange={e => quality({ navigationTimeoutMs: Number(e.target.value) })} />
+                                </Field>
+                                <Field label="Visual Regression Baseline" hint="Pemeriksaan perbedaan piksel tampilan">
+                                  <select value={config.qualityAudit?.visualRegression?.mode ?? 'required'} onChange={e => quality({ visualRegression: { ...config.qualityAudit?.visualRegression, mode: e.target.value as 'off' | 'capture' | 'required' } })}>
+                                    <option value="required">Wajib Baseline (Required)</option>
+                                    <option value="capture">Capture / Buat Baseline Baru</option>
+                                    <option value="off">Nonaktifkan Visual Diff</option>
+                                  </select>
+                                </Field>
+                                <Field label="Toleransi Perbedaan Piksel (%)" hint="Batas persentase selisih warna">
+                                  <input type="number" min={0} max={100} step={0.1} value={config.qualityAudit?.visualRegression?.allowedDiffPercent ?? 0.5} onChange={e => quality({ visualRegression: { ...config.qualityAudit?.visualRegression, allowedDiffPercent: Number(e.target.value) } })} />
+                                </Field>
+                              </div>
+
+                              <div style={{ marginTop: 14 }}>
+                                <Field label="Mutation Fixture Contract (Opsional)" hint="Path file JSON skenario testing CRUD aman">
+                                  <input value={config.qualityAudit?.negativeTesting?.mutationFixturePath || ''} placeholder=".qc-fixtures/crud.json" onChange={e => quality({ negativeTesting: { ...config.qualityAudit?.negativeTesting, mutationFixturePath: e.target.value } })} />
+                                </Field>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
-                {/* COLLAPSIBLE ADVANCED SETTINGS (FOR THOSE WHO NEED THEM, CLEAN FOR EVERYONE ELSE) */}
+                {/* COLLAPSIBLE ADVANCED SETTINGS */}
                 <div className="advanced-accordion">
                   <button
                     type="button"
@@ -1011,7 +1272,7 @@ export function Wizard({
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Icon name="settings" size={16} />
-                      <strong>Pengaturan Lanjutan &amp; Selector (Opsional)</strong>
+                      <strong>Pengaturan Lanjutan &amp; Selector Form (Opsional)</strong>
                     </div>
                     <span style={{ transform: showAdvanced ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
                       ▼
@@ -1020,93 +1281,80 @@ export function Wizard({
 
                   {showAdvanced && (
                     <div className="advanced-content">
-                      <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-                        Secara default, engine sudah memiliki deteksi otomatis cerdas untuk form login, selector button, dan batas discovery. Anda hanya perlu mengubah opsi di bawah jika aplikasi Anda menggunakan format non-standar.
+                      <p className="muted" style={{ fontSize: 13, marginBottom: 16 }}>
+                        💡 <strong>Deteksi Otomatis:</strong> Engine QC Maestro sudah memiliki deteksi otomatis cerdas untuk form login, input username/password, dan tombol login. Isi opsi di bawah ini <em>hanya jika</em> aplikasi Anda memakai selector HTML khusus.
                       </p>
 
-                      {(config.backendMode === 'repo' || config.stack === 'custom' || config.services.length > 0) && (
-                        <div className="runtime-services-editor">
-                          <div className="inline-heading">
-                            <div>
-                              <h3>Runtime Services</h3>
-                              <p>Definisikan service yang harus di-install, dinyalakan, dan dicek health-nya oleh managed-local runner.</p>
-                            </div>
-                            <button type="button" className="quiet" onClick={() => patch({ services: [...config.services, { id: `service-${Date.now()}`, name: '', kind: 'custom', workingDir: '.', installCommand: '', startCommand: '', healthCheck: config.baseUrl, port: undefined, dependsOn: [], runtimeImage: 'node:24-bookworm-slim' }] })}><Icon name="plus" size={14} /> Tambah Service</button>
-                          </div>
-                          {config.services.length === 0 && <p className="muted" style={{ fontSize: 12 }}>Belum ada service manual. Auto Detect tetap digunakan.</p>}
-                          {config.services.map((serviceItem, index) => (
-                            <div className="runtime-service-card" key={serviceItem.id || index}>
-                              <div className="runtime-service-header"><strong>Service {index + 1}</strong><button type="button" className="quiet danger-text" onClick={() => patch({ services: config.services.filter((_, itemIndex) => itemIndex !== index) })}><Icon name="trash" size={14} /> Hapus</button></div>
-                              <div className="form-grid">
-                                <Field label="Nama Service"><input value={serviceItem.name} placeholder="web-frontend" onChange={e => updateService(index, { name: e.target.value })} /></Field>
-                                <Field label="Kind"><select value={serviceItem.kind} onChange={e => updateService(index, { kind: e.target.value as Config['services'][number]['kind'] })}><option value="frontend">Frontend</option><option value="backend">Backend</option><option value="worker">Worker</option><option value="custom">Custom</option></select></Field>
-                                <Field label="Runtime Image"><input value={serviceItem.runtimeImage || ''} placeholder="node:24-bookworm-slim" onChange={e => updateService(index, { runtimeImage: e.target.value })} /></Field>
-                                <Field label="Working Directory"><input value={serviceItem.workingDir} placeholder="." onChange={e => updateService(index, { workingDir: e.target.value })} /></Field>
-                                <Field label="Install Command"><input value={serviceItem.installCommand} placeholder="npm ci" onChange={e => updateService(index, { installCommand: e.target.value })} /></Field>
-                                <Field label="Start Command"><input value={serviceItem.startCommand} placeholder="npm run dev -- --host 0.0.0.0 --port=3000" onChange={e => updateService(index, { startCommand: e.target.value })} /></Field>
-                                <Field label="Health Check"><input value={serviceItem.healthCheck} placeholder="http://127.0.0.1:3000" onChange={e => updateService(index, { healthCheck: e.target.value })} /></Field>
-                                <Field label="Port"><input type="number" min={1} max={65535} value={serviceItem.port || ''} placeholder="3000" onChange={e => updateService(index, { port: e.target.value ? Number(e.target.value) : undefined })} /></Field>
-                                <Field label="Depends On"><input value={serviceItem.dependsOn.join(', ')} placeholder="api, database" onChange={e => updateService(index, { dependsOn: lines(e.target.value.replace(/,/g, '\n')) })} /></Field>
-                              </div>
-                            </div>
-                          ))}
+                      <div className="clean-subcard">
+                        <div className="clean-subcard-title">
+                          <Icon name="shield" size={16} />
+                          <span>Kustomisasi Form Login (Opsional)</span>
                         </div>
-                      )}
+                        <div className="form-grid">
+                          <Field label="Path Halaman Login" hint="Default otomatis: /login">
+                            <input
+                              value={config.rules.loginPath || ''}
+                              placeholder="/login"
+                              onChange={e => rule({ loginPath: e.target.value })}
+                            />
+                          </Field>
+                          <Field label="Selector Input Email / Username" hint="CSS selector form email">
+                            <input
+                              value={config.rules.emailSelector || ''}
+                              placeholder="input[name='username'], #email"
+                              onChange={e => rule({ emailSelector: e.target.value })}
+                            />
+                          </Field>
+                          <Field label="Selector Input Password" hint="CSS selector form password">
+                            <input
+                              value={config.rules.passwordSelector || ''}
+                              placeholder="input[type='password'], #password"
+                              onChange={e => rule({ passwordSelector: e.target.value })}
+                            />
+                          </Field>
+                          <Field label="Selector Tombol Masuk" hint="CSS selector submit button">
+                            <input
+                              value={config.rules.submitSelector || ''}
+                              placeholder="button[type='submit'], .btn-primary"
+                              onChange={e => rule({ submitSelector: e.target.value })}
+                            />
+                          </Field>
+                        </div>
+                      </div>
 
-                      <div className="form-grid">
-                        <Field label="Path Halaman Login" hint="Default: /login">
-                          <input
-                            value={config.rules.loginPath || ''}
-                            placeholder="/login"
-                            onChange={e => rule({ loginPath: e.target.value })}
-                          />
-                        </Field>
-                        <Field label="Selector Input Email" hint="CSS selector form email">
-                          <input
-                            value={config.rules.emailSelector || ''}
-                            placeholder="input[name='email'], #email"
-                            onChange={e => rule({ emailSelector: e.target.value })}
-                          />
-                        </Field>
-                        <Field label="Selector Input Password" hint="CSS selector form password">
-                          <input
-                            value={config.rules.passwordSelector || ''}
-                            placeholder="input[type='password'], #password"
-                            onChange={e => rule({ passwordSelector: e.target.value })}
-                          />
-                        </Field>
-                        <Field label="Selector Tombol Masuk" hint="CSS selector submit button">
-                          <input
-                            value={config.rules.submitSelector || ''}
-                            placeholder="button[type='submit'], .btn-login"
-                            onChange={e => rule({ submitSelector: e.target.value })}
-                          />
-                        </Field>
-                        <Field label="Budget Maksimum Halaman" hint="Batas halaman yang dipetakan (1–200)">
-                          <input
-                            type="number"
-                            min={1}
-                            max={200}
-                            value={config.rules.maxPages}
-                            onChange={e => rule({ maxPages: Number(e.target.value) })}
-                          />
-                        </Field>
-                        <Field label="Kedalaman Navigasi (Depth)" hint="Batas tingkat klik link (0–10)">
-                          <input
-                            type="number"
-                            min={0}
-                            max={10}
-                            value={config.rules.maxDepth}
-                            onChange={e => rule({ maxDepth: Number(e.target.value) })}
-                          />
-                        </Field>
+                      <div className="clean-subcard">
+                        <div className="clean-subcard-title">
+                          <Icon name="map" size={16} />
+                          <span>Batasan Pemetaan Discovery</span>
+                        </div>
+                        <div className="form-grid">
+                          <Field label="Batas Maksimum Halaman" hint="Jumlah halaman yang dijelajahi (default: 40)">
+                            <input
+                              type="number"
+                              min={1}
+                              max={200}
+                              value={config.rules.maxPages}
+                              onChange={e => rule({ maxPages: Number(e.target.value) })}
+                            />
+                          </Field>
+                          <Field label="Kedalaman Navigasi (Depth)" hint="Tingkat kedalaman klik link (default: 4 tingkat)">
+                            <input
+                              type="number"
+                              min={0}
+                              max={10}
+                              value={config.rules.maxDepth}
+                              onChange={e => rule({ maxDepth: Number(e.target.value) })}
+                            />
+                          </Field>
+                        </div>
                       </div>
 
                       {/* ENVIRONMENT OVERRIDE */}
-                      <div style={{ marginTop: 14 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 6 }}>
-                          File Environment (.env) Override (Opsional)
-                        </span>
+                      <div className="clean-subcard" style={{ marginBottom: 0 }}>
+                        <div className="clean-subcard-title">
+                          <Icon name="terminal" size={16} />
+                          <span>File Variabel Environment (.env Override)</span>
+                        </div>
                         {!config.envUploadId ? (
                           <div
                             className={`file-dropzone ${dragOverEnv ? 'drag-over' : ''}`}
@@ -1126,7 +1374,7 @@ export function Wizard({
                             </div>
                             <div className="file-dropzone-text">
                               <strong>Upload File .env</strong>
-                              <p>Opsional: file variabel environment khusus sesi pengujian.</p>
+                              <p>Opsional: unggah variabel lingkungan khusus untuk sesi pengujian ini.</p>
                             </div>
                             <input
                               ref={envInputRef}
@@ -1173,17 +1421,32 @@ export function Wizard({
                   )}
                 </div>
 
-                <label className="toggle-row" style={{ marginTop: 18 }}>
-                  <input
-                    type="checkbox"
-                    checked={config.executeFlows}
-                    onChange={e => patch({ executeFlows: e.target.checked })}
-                  />
-                  <span>
-                    <strong>Jalankan eksekusi test flows otomatis setelah pemetaan selesai</strong>
-                    <small>Engine akan langsung memverifikasi skenario login, interaksi tombol, dan validasi form.</small>
-                  </span>
-                </label>
+                <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={config.executeFlows}
+                      onChange={e => patch({ executeFlows: e.target.checked })}
+                    />
+                    <span>
+                      <strong>Jalankan eksekusi test flows otomatis setelah pemetaan selesai</strong>
+                      <small>Engine akan langsung memverifikasi skenario login, interaksi tombol, dan validasi form.</small>
+                    </span>
+                  </label>
+                  {config.platform === 'web' && (
+                    <label className="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={config.businessFlowReview.mode === 'required'}
+                        onChange={e => patch({ businessFlowReview: { mode: e.target.checked ? 'required' : 'auto' } })}
+                      />
+                      <span>
+                        <strong>Review Business Flow sebelum eksekusi</strong>
+                        <small>Repo dan hasil discovery dirangkai menjadi peta alur produk yang dapat disetujui di dashboard. Eksekusi menunggu persetujuan agar tidak menebak proses bisnis.</small>
+                      </span>
+                    </label>
+                  )}
+                </div>
               </>
             )}
 
@@ -1240,8 +1503,8 @@ export function Wizard({
                       <Icon name="database" size={18} />
                       <span>Database &amp; Data</span>
                     </div>
-                    <strong>{config.database.source === 'sql' ? 'SQL Dump Import' : 'Database Backend Aktif'}</strong>
-                    <small>{filenames.sql ? `File: ${filenames.sql}` : 'Menggunakan data backend langsung'}</small>
+                    <strong>{config.database.source === 'sql' ? 'SQL Dump Import' : (config.database.source === 'seed' || config.database.source === 'migrate') ? 'Auto-Seed Dataset Lengkap' : 'Database Backend Aktif'}</strong>
+                    <small>{config.database.source === 'sql' ? (filenames.sql ? `File: ${filenames.sql}` : 'Upload SQL dump kustom') : (config.database.source === 'seed' || config.database.source === 'migrate') ? (config.database.seedCommand || 'Auto-seed relasional 49 tabel') : 'Menggunakan data backend langsung'}</small>
                   </div>
 
                   <div className="summary-item-card">

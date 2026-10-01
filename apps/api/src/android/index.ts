@@ -62,7 +62,7 @@ export async function installApkToDevice(
   forceClean = false
 ): Promise<{ success: boolean; output: string; device: string; usedExisting?: boolean }> {
   const status = await checkAndroid();
-  const targetDevice = deviceId || status.adb.devices[0];
+  const targetDevice = normalizeDeviceId(deviceId, status.adb.devices) || status.adb.devices[0];
   if (!targetDevice) {
     return { success: false, output: 'Tidak ada perangkat / emulator Android yang terhubung via ADB.', device: '' };
   }
@@ -149,6 +149,17 @@ export function resolveAdbBin(): string {
   return 'adb';
 }
 
+/** Normalize a dashboard-entered Wi-Fi IP to the serial reported by ADB. */
+export function normalizeDeviceId(deviceId: string | undefined, devices: string[] = []): string | undefined {
+  const raw = deviceId?.trim();
+  if (!raw) return undefined;
+  if (devices.includes(raw)) return raw;
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(raw)) {
+    return devices.find((device) => device === `${raw}:5555` || device.startsWith(`${raw}:`)) ?? `${raw}:5555`;
+  }
+  return raw;
+}
+
 function getExtendedEnv(): NodeJS.ProcessEnv {
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const maestroBin = path.join(home, '.maestro', 'bin');
@@ -212,6 +223,45 @@ function runCli(commandName: string, args: string[], timeoutMs = 8000): Promise<
       }
     });
   });
+}
+
+type UiNode = { text?: string; contentDesc?: string; left: number; top: number; right: number; bottom: number };
+
+function decodeUiText(value: string): string {
+  return value.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&').replace(/&#10;/g, '\n');
+}
+
+function parseUiNodes(xml: string): UiNode[] {
+  const nodes: UiNode[] = [];
+  const nodePattern = /<node\b[^>]*?(?:\/>|>)/g;
+  for (const raw of xml.match(nodePattern) ?? []) {
+    const bounds = raw.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+    if (!bounds) continue;
+    const attr = (name: string) => {
+      const match = raw.match(new RegExp(`${name}="([^"]*)"`));
+      return match ? decodeUiText(match[1]) : undefined;
+    };
+    nodes.push({
+      text: attr('text'),
+      contentDesc: attr('content-desc'),
+      left: Number(bounds[1]),
+      top: Number(bounds[2]),
+      right: Number(bounds[3]),
+      bottom: Number(bounds[4])
+    });
+  }
+  return nodes;
+}
+
+async function readUiNodes(deviceId: string): Promise<UiNode[]> {
+  await runCli('adb', ['-s', deviceId, 'shell', 'uiautomator', 'dump', '/sdcard/qc-maestro-window.xml'], 5000);
+  const xml = await runCli('adb', ['-s', deviceId, 'shell', 'cat', '/sdcard/qc-maestro-window.xml'], 5000);
+  return parseUiNodes(xml.stdout);
+}
+
+function uiNodeMatches(node: UiNode, expected: string): boolean {
+  const needle = expected.trim().toLocaleLowerCase();
+  return [node.text, node.contentDesc].some((value) => value?.trim().toLocaleLowerCase().includes(needle));
 }
 
 let cachedMaestro: { available: boolean; message: string; version?: string } | null = null;
@@ -385,7 +435,7 @@ export async function executeAndroidFlow(
   await writeFile(yamlPath, yamlContent, 'utf8');
 
   const args = ['test', yamlPath];
-  const targetDevice = deviceId || status.adb.devices[0];
+  const targetDevice = normalizeDeviceId(deviceId, status.adb.devices) || status.adb.devices[0];
   if (targetDevice) {
     args.push('--device', targetDevice);
   }
@@ -559,7 +609,7 @@ export async function executeAndroidRawFlow(
     };
   }
 
-  const targetDevice = (deviceId && status.adb.devices.includes(deviceId)) ? deviceId : status.adb.devices[0];
+  const targetDevice = normalizeDeviceId(deviceId, status.adb.devices) || status.adb.devices[0];
 
   if (apkPath && existsSync(apkPath)) {
     const installStart = Date.now();
@@ -675,31 +725,42 @@ export async function executeAndroidRawFlow(
             }
           }
         } else if (cmd.tapOn) {
-          const text = (cmd.tapOn.text || '').trim();
-          actionName = `tapOn: "${text || cmd.tapOn.point || 'element'}"`;
+          const tapSpec = typeof cmd.tapOn === 'string' ? { text: cmd.tapOn } : cmd.tapOn;
+          const text = String(tapSpec.text || '').trim();
+          actionName = `tapOn: "${text || tapSpec.point || 'element'}"`;
           let tapX = Math.round(screenWidth * 0.5);
           let tapY = Math.round(screenHeight * 0.5);
+          let matchedUiNode = false;
 
-          if (/masuk|login/i.test(text)) {
+          if (targetDevice && text) {
+            const node = (await readUiNodes(targetDevice)).find((candidate) => uiNodeMatches(candidate, text));
+            if (node) {
+              tapX = Math.round((node.left + node.right) / 2);
+              tapY = Math.round((node.top + node.bottom) / 2);
+              matchedUiNode = true;
+            }
+          }
+
+          if (!matchedUiNode && /masuk|login/i.test(text)) {
             tapX = Math.round(screenWidth * 0.5);
             tapY = Math.round(screenHeight * 0.70);
-          } else if (/beranda|home/i.test(text)) {
+          } else if (!matchedUiNode && /beranda|home/i.test(text)) {
             tapX = Math.round(screenWidth * 0.10);
             tapY = tabY;
-          } else if (/absensi|presensi/i.test(text)) {
+          } else if (!matchedUiNode && /absensi|presensi/i.test(text)) {
             tapX = Math.round(screenWidth * 0.30);
             tapY = tabY;
-          } else if (/keuangan|tagihan/i.test(text)) {
+          } else if (!matchedUiNode && /keuangan|tagihan/i.test(text)) {
             tapX = Math.round(screenWidth * 0.50);
             tapY = tabY;
-          } else if (/informasi|info/i.test(text)) {
+          } else if (!matchedUiNode && /informasi|info/i.test(text)) {
             tapX = Math.round(screenWidth * 0.70);
             tapY = tabY;
-          } else if (/t2q|quran|tahfidz/i.test(text)) {
+          } else if (!matchedUiNode && /t2q|quran|tahfidz/i.test(text)) {
             tapX = Math.round(screenWidth * 0.90);
             tapY = tabY;
-          } else if (cmd.tapOn.point) {
-            const parts = String(cmd.tapOn.point).split(',');
+          } else if (!matchedUiNode && tapSpec.point) {
+            const parts = String(tapSpec.point).split(',');
             if (parts.length === 2) {
               const px = parseFloat(parts[0]);
               const py = parseFloat(parts[1]);
@@ -708,11 +769,26 @@ export async function executeAndroidRawFlow(
             }
           }
 
+          if (targetDevice && text && !matchedUiNode && !tapSpec.point && !/masuk|login|beranda|home|absensi|presensi|keuangan|tagihan|informasi|info|t2q|quran|tahfidz/i.test(text)) {
+            throw new Error(`Elemen UI tidak ditemukan untuk tapOn: "${text}"`);
+          }
+
           if (targetDevice) {
             appendLog(`Melakukan tap pada (${tapX}, ${tapY}) untuk "${text}"`);
             await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'tap', String(tapX), String(tapY)], 4000);
             await new Promise((r) => setTimeout(r, 1200));
           }
+        } else if (cmd.inputText) {
+          const value = String(cmd.inputText);
+          actionName = `inputText: "${value}"`;
+          if (targetDevice) {
+            await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'text', value.replace(/ /g, '%s')], 4000);
+          }
+        } else if (cmd.pressKey) {
+          const key = String(cmd.pressKey).toUpperCase();
+          actionName = `pressKey: ${key}`;
+          const keycode = key === 'BACK' ? '4' : key === 'ENTER' ? '66' : key === 'TAB' ? '61' : key;
+          if (targetDevice) await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'keyevent', keycode], 4000);
         } else if (cmd.swipe || cmd.scroll) {
           actionName = 'scroll / swipe';
           const midX = Math.round(screenWidth * 0.5);
@@ -729,9 +805,12 @@ export async function executeAndroidRawFlow(
           appendLog(`Menunggu animasi selesai (${timeout}ms)...`);
           await new Promise((r) => setTimeout(r, timeout));
         } else if (cmd.assertVisible) {
-          const text = cmd.assertVisible.text || 'element';
+          const assertSpec = typeof cmd.assertVisible === 'string' ? { text: cmd.assertVisible } : cmd.assertVisible;
+          const text = String(assertSpec.text || 'element');
           actionName = `assertVisible: "${text}"`;
-          appendLog(`Assertion verifikasi visibilitas: "${text}"`);
+          const visible = targetDevice && (await readUiNodes(targetDevice)).some((node) => uiNodeMatches(node, text));
+          if (targetDevice && !visible) throw new Error(`Elemen UI tidak terlihat: "${text}"`);
+          appendLog(`Assertion verifikasi visibilitas lulus: "${text}"`);
           await new Promise((r) => setTimeout(r, 400));
         } else {
           actionName = JSON.stringify(cmd);
@@ -797,7 +876,7 @@ export async function executeAndroidRawFlow(
 
 export async function captureDeviceScreen(deviceId?: string): Promise<{ success: boolean; buffer?: Buffer; error?: string }> {
   const status = await checkAndroid();
-  const targetDevice = (deviceId && status.adb.devices.includes(deviceId)) ? deviceId : status.adb.devices[0];
+  const targetDevice = normalizeDeviceId(deviceId, status.adb.devices) || status.adb.devices[0];
   if (!targetDevice) {
     return { success: false, error: 'Tidak ada perangkat Android yang terhubung via ADB.' };
   }

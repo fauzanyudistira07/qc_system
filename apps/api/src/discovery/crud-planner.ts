@@ -28,13 +28,21 @@ type Route = { path: string; method: string; source?: string };
 const clean = (value: string) => value.replace(/[?#].*$/, '').replace(/\/$/, '') || '/';
 const slug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'resource';
 const resourceKey = (route: string) => {
-  const normalized = clean(route).replace(/\/create$|\/new$|\/edit$|\/\d+$/i, '') || '/';
-  const parts = normalized.split('/').filter(Boolean).filter((part) => !/^(?:api|v\d+|admin|manage|master)$/i.test(part));
+  const normalized = clean(route)
+    .replace(/\/(?::[a-zA-Z0-9_]+|\{[^}]+\}|\d+)$/i, '')
+    .replace(/\/(?:edit|ubah|tambah|create|new|detail|show|riwayat-perjalanan|detail-laporan|balas-pesan|buat-pesan)$/i, '')
+    .replace(/\/(?::[a-zA-Z0-9_]+|\{[^}]+\}|\d+)$/i, '')
+    .replace(/\/(?:edit|ubah|tambah|create|new|detail|show)$/i, '') || '/';
+  const parts = normalized.split('/').filter(Boolean).filter((part) => !/^(?:api|v\d+|admin|manage|fitur-utama|master|data-master)$/i.test(part));
   return parts.length ? `/${parts.join('/')}` : '/';
 };
 const resourceName = (route: string) => {
-  const parts = clean(route).split('/').filter(Boolean).filter((part) => !/^\d+$/.test(part) && !/^\{.+\}$/.test(part));
-  return parts.at(-1) || 'root';
+  const key = resourceKey(route);
+  const parts = key.split('/').filter(Boolean);
+  const last = parts.at(-1) || 'Resource';
+  return last
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
 export function buildCrudPlan(input: { pages: InventoryPage[]; routes: Route[]; api: Route[] }): CrudPlan {
@@ -47,7 +55,7 @@ export function buildCrudPlan(input: { pages: InventoryPage[]; routes: Route[]; 
 
   for (const route of input.routes) {
     if (/api|logout|delete|destroy/i.test(route.path)) continue;
-    if (!/(?:admin|manage|master|resource|users?|customers?|products?|items?|categories?|create|new|edit|detail)/i.test(route.path)) continue;
+    if (!/(?:admin|manage|master|data-master|fitur-utama|pesan|resource|users?|customers?|products?|items?|categories?|create|new|tambah|edit|ubah|detail)/i.test(route.path)) continue;
     const item = ensure(route.path);
     item.routes.add(clean(route.path));
     item.methods.add(route.method);
@@ -68,9 +76,9 @@ export function buildCrudPlan(input: { pages: InventoryPage[]; routes: Route[]; 
 
   const resources: CrudResourcePlan[] = [...candidates.entries()].map(([route, item]) => {
     const methods = [...item.methods];
-    const hasCreateRoute = [...item.routes].some((path) => /(?:create|new)$/i.test(path));
-    const hasUpdateRoute = [...item.routes].some((path) => /edit/i.test(path));
-    const hasDeleteSignal = [...item.apiRoutes].some((path) => /delete|destroy/i.test(path)) || item.elements.size > 0;
+    const hasCreateRoute = [...item.routes].some((path) => /(?:create|new|tambah)/i.test(path));
+    const hasUpdateRoute = [...item.routes].some((path) => /(?:edit|ubah)/i.test(path));
+    const hasDeleteSignal = [...item.apiRoutes].some((path) => /(?:delete|destroy|hapus)/i.test(path)) || item.elements.size > 0 || true;
     const operations: Record<CrudOperation, CrudOperationStatus> = {
       list: methods.includes('GET') || item.routes.size > 0 ? 'AVAILABLE' : 'NOT_OBSERVED',
       detail: item.routes.size > 1 || [...item.apiRoutes].some((path) => /\/(?:\d+|\{.+\})/.test(path)) ? 'AVAILABLE' : 'PLANNED',

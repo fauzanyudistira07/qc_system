@@ -27,6 +27,8 @@ Setup environment / container / browser / database fixture
 Discovery: static scan + dynamic crawl + route/page inventory
         ↓
 Capability profile + domain hints + negative scenario plan
+        â†“
+Business Flow Review: actor → trigger → langkah → expected result dari evidence repo, lalu reviewer approve/edit
         ↓
 Test design: generate flow yang sesuai fitur yang terdeteksi
         ↓
@@ -80,6 +82,7 @@ Input yang didukung:
 - Repository URL dan branch/ref.
 - Base URL target.
 - Existing target atau managed local.
+- Existing URL/port, folder kerja lokal, atau repository GitHub + branch/ref.
 - Akun audit.
 - Database engine, SQL dump, migration, seed, dan environment upload.
 - Browser dan viewport Quality Audit.
@@ -88,6 +91,7 @@ Output:
 
 - Project config tanpa password di folder input.
 - Workspace project/run.
+- Workspace source sementara; folder lokal tidak diubah dan repository GitHub tidak di-clone ke Desktop.
 - Runtime service status.
 - Live progress dan runtime log.
 
@@ -122,6 +126,8 @@ Output tambahan:
 - Confidence dan evidence tiap capability.
 - Flow generik berdasarkan fitur yang benar-benar terdeteksi.
 - Negative scenario plan, termasuk duplicate record, delete data terpakai, payment failed/refund/expired, cancellation, conflict scheduling, dan empty result.
+
+Business Flow Review menambahkan peta produk yang tidak bergantung pada domain tertentu. Setiap alur menyimpan actor, trigger, precondition, langkah, expected outcome, negative/recovery path, evidence, confidence, criticality, dan limitation. Untuk run web dengan mode review, job berhenti di `BUSINESS_FLOW_REVIEW` sampai map disetujui melalui dashboard; mode `auto` disediakan untuk CI.
 
 ### Fase 5 — Dashboard, milestone, dan live orchestration
 
@@ -202,6 +208,8 @@ Rule yang sudah diterapkan:
 - Empty/invalid form validation.
 - Network failure probe dengan mutating request di-abort.
 - Double-submit guard.
+- Deep web audit: navigation budget, safe GET API contract, parallel read stability, authorization/session probe, network recovery, security headers, form boundary, upload/download affordance, console error, dan failed network request.
+- Human review checklist sebagai limitation eksplisit untuk keputusan UX subjektif dan screen reader nyata.
 
 Mode visual regression:
 
@@ -278,10 +286,10 @@ Cakrawala (Website Testing):
 
 - F1 — Empty/invalid input — Done.
 - F2 — Duplicate submit/network failure — Done dengan safe probe.
-- F3 — Duplicate record — Planned; membutuhkan fixture/API contract.
-- F4 — Delete data terpakai — Planned; membutuhkan fixture dependency.
-- F5 — Payment failed/expired/refund — Planned; membutuhkan sandbox payment/fixture.
-- F6 — Reservation expired/cancellation/restore capacity — Planned; membutuhkan fixture transaksi.
+- F3 — Duplicate record — Done pada fixture lokal Cakrawala.
+- F4 — Delete data terpakai — Retest required; target masih mengizinkan airline yang direferensikan untuk dihapus.
+- F5 — Payment failed/expired/refund — Done pada fixture lokal Cakrawala.
+- F6 — Reservation expired/cancellation/restore capacity — Done pada fixture lokal Cakrawala.
 - F7 — Role/action matrix per target — Partial; capability terdeteksi, coverage target-specific perlu diperluas.
 
 ### EPIC G — Reporting & CI/CD
@@ -292,7 +300,7 @@ Cakrawala (Website Testing):
 - G4 — `qc:gate` exit-code regression gate — Done.
 - G5 — GitHub Actions workflow — Done di QC Maestro.
 - G6 — Adapter CI/CD per repository target — Backlog; target repository tetap tidak diubah otomatis.
-- G7 — History/trend antar run — Partial; artifact history ada, grafik trend belum lengkap.
+- G7 — History/trend antar run — Done; artifact history, quality summary, visual-regression metrics, dan panel run history sudah tersedia.
 
 ## 5. Kondisi saat ini
 
@@ -302,7 +310,7 @@ API                         : localhost:4101
 Target Cakrawala            : localhost:8080
 Plane project               : LCMMS / Lainnya
 Plane module                : QC System
-Functional discovery        : berjalan
+Functional discovery        : tersedia dan mengikuti project/run aktif
 Quality audit engine        : aktif
 Target source mutation      : tidak dilakukan
 Latest Cakrawala audit      : 1.123/1.332 pass, 209 finding
@@ -311,14 +319,13 @@ Overall target status       : FAILED sampai finding ditangani dan retest pass
 
 ## 6. Urutan pekerjaan berikutnya
 
-1. Jadikan baseline visual sebagai `required` pada regression run berikutnya.
-2. Kelompokkan 209 finding berdasarkan root cause CSS/component agar tidak memperbaiki item satu per satu secara buta.
-3. Tambahkan fixture adapter untuk duplicate record, delete dependency, payment failure/refund/expiry, dan cancellation.
-4. Tambahkan interactive state audit: hover, focus, disabled, loading, empty, dan error.
-5. Tambahkan real screen-reader pass dengan NVDA/VoiceOver pada environment yang mendukung.
-6. Tambahkan history/trend dan artifact retention policy.
-7. Hubungkan report JSON ke CI target melalui input artifact atau API, tanpa memodifikasi source target.
-8. Commit perubahan QC Maestro setelah review, lalu jadikan `qc:gate` sebagai regression gate.
+1. Kelompokkan 209 finding berdasarkan root cause CSS/component agar tidak memperbaiki item satu per satu secara buta.
+2. Tambahkan fixture adapter untuk duplicate record, delete dependency, payment failure/refund/expiry, dan cancellation.
+3. Tambahkan interactive state audit: hover, focus, disabled, loading, empty, dan error.
+4. Tambahkan real screen-reader pass dengan NVDA/VoiceOver pada environment yang mendukung.
+5. Tambahkan artifact retention policy.
+6. Hubungkan report JSON ke CI target melalui input artifact atau API, tanpa memodifikasi source target.
+7. Commit perubahan QC Maestro setelah review, lalu jadikan `qc:gate` sebagai regression gate.
 
 ## 7. Acceptance criteria final
 

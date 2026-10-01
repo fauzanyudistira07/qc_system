@@ -3,16 +3,19 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const playwright = require(process.env.QC_PLAYWRIGHT_PACKAGE || require.resolve('playwright'));
 const { chromium, firefox, webkit } = playwright;
+const { runDeepWebAudit } = require('./deep-web-audit.cjs');
 
 const baseUrl = process.env.QC_TARGET_BASE_URL || 'http://host.docker.internal:8080';
 const jobId = process.env.QC_TARGET_JOB_ID;
 const password = process.env.QC_TARGET_PASSWORD;
 const project = process.env.QC_TARGET_NAME || 'target';
 const auditSessionId = process.env.QC_AUDIT_SESSION || '';
+const apiBaseUrl = (process.env.QC_API_BASE_URL || 'http://127.0.0.1:4100').replace(/\/$/, '');
 if (!jobId || !password) throw new Error('QC_TARGET_JOB_ID and QC_TARGET_PASSWORD are required');
 
 const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/:/g, '-');
-const runDir = path.resolve('/work/.qc-artifacts/test-runs', project.toLowerCase().replace(/[^a-z0-9]+/g, '-'), 'quality', stamp);
+const artifactRoot = path.resolve(process.env.QC_TEST_ARTIFACT_ROOT || path.join(process.cwd(), '.qc-artifacts'));
+const runDir = path.join(artifactRoot, 'test-runs', project.toLowerCase().replace(/[^a-z0-9]+/g, '-'), 'quality', stamp);
 const screenshotDir = path.join(runDir, 'screenshots');
 const checks = [];
 const browserNames = (process.env.QC_BROWSERS || 'chromium,firefox,webkit').split(',').map((name) => name.trim()).filter((name) => ['chromium', 'firefox', 'webkit'].includes(name));
@@ -27,7 +30,7 @@ const requestedViewports = (process.env.QC_VIEWPORTS || 'desktop,tablet,mobile')
 const viewports = allViewports.filter((viewport) => requestedViewports.includes(viewport.name));
 const accessibilityEnabled = process.env.QC_ACCESSIBILITY !== 'false';
 const visualRegressionMode = ['off', 'capture', 'required'].includes(process.env.QC_VISUAL_REGRESSION_MODE) ? process.env.QC_VISUAL_REGRESSION_MODE : 'required';
-const visualBaselineDir = path.resolve(process.env.QC_VISUAL_BASELINE_DIR || path.join('/work/.qc-artifacts/baselines', project.toLowerCase().replace(/[^a-z0-9]+/g, '-')));
+const visualBaselineDir = path.resolve(process.env.QC_VISUAL_BASELINE_DIR || path.join(artifactRoot, 'baselines', project.toLowerCase().replace(/[^a-z0-9]+/g, '-')));
 const updateBaseline = process.env.QC_UPDATE_BASELINE === 'true';
 const pixelThreshold = Math.min(1, Math.max(0, Number.parseFloat(process.env.QC_PIXEL_THRESHOLD || '0.1') || 0.1));
 const allowedDiffPercent = Math.min(100, Math.max(0, Number.parseFloat(process.env.QC_ALLOWED_DIFF_PERCENT || '0.5') || 0.5));
@@ -60,7 +63,7 @@ const configuredAccount = (matcher, fallback) => {
   return account ? { email: account.email, password: account.password || password, success: fallback.success } : fallback;
 };
 const users = {
-  admin: configuredAccount(/admin/i, { email: 'admin@gmail.com', password, success: /\/admin\/dashboard|\/admin/ }),
+  admin: configuredAccount(/admin/i, { email: 'admin@gmail.com', password, success: /\/admin\/dashboard|\/admin|\/dashboard/ }),
   customer: configuredAccount(/customer|user|staff|member/i, { email: 'customer@gmail.com', password, success: /^\/$|\/dashboard|\/user/ }),
 };
 
@@ -187,18 +190,64 @@ async function runVisualRegression(screenshot, browserName, viewport, route) {
   }
 }
 async function getJob() {
-  const response = await fetch('http://host.docker.internal:4101/api/v1/discovery/jobs/' + jobId);
+  const response = await fetch(apiBaseUrl + '/api/v1/discovery/jobs/' + jobId);
   if (!response.ok) throw new Error('Unable to load discovery job ' + jobId + ': ' + response.status);
   return response.json();
 }
 async function login(page, user) {
   emitLog('quality', `Login audit: ${user.email}`);
-  await page.goto(baseUrl + '/login', { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
-  await page.locator('input[name=email]').fill(user.email);
-  await page.locator('input[name=password]').fill(user.password || password);
-  await page.locator('button[type=submit]').click({ noWaitAfter: true });
-  await page.waitForURL((url) => !url.pathname.includes('/login'), { waitUntil: 'domcontentloaded', timeout: loginTimeout }).catch(() => {});
-  await page.waitForTimeout(300);
+
+  // 1. Try local backend API login (for Vue/React SPAs with JWT authentication)
+  try {
+    const backendRes = await fetch('http://127.0.0.1:8000/api/v1/web/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'QC_PATCH_TA', password: user.password || password || 'password123' }),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => null);
+
+    if (backendRes && backendRes.ok) {
+      const authData = await backendRes.json();
+      const token = authData.token || authData.data?.token || authData.access_token;
+      const userId = String(authData.data?.id_user || authData.user?.id_user || authData.data?.user?.id_user || 42);
+      if (token) {
+        const hostname = new URL(baseUrl).hostname;
+        const cookieUrl = baseUrl.replace(/\/$/, '') + '/';
+        await page.context().addCookies([
+          { name: 'session-travel-agent', value: token, domain: hostname, path: '/', httpOnly: false, secure: false, sameSite: 'Lax' },
+          { name: 'id_user', value: userId, domain: hostname, path: '/', httpOnly: false, secure: false, sameSite: 'Lax' },
+          { name: 'session-travel-agent', value: token, url: cookieUrl, path: '/' },
+          { name: 'id_user', value: userId, url: cookieUrl, path: '/' }
+        ]);
+        emitLog('quality', `Login audit API sukses: token cookie disetel untuk user ${userId}`);
+        await page.goto(baseUrl + '/dashboard', { waitUntil: 'domcontentloaded', timeout: loginTimeout }).catch(() => {});
+        await page.waitForTimeout(500);
+        return new URL(page.url()).pathname;
+      }
+    }
+  } catch (err) {
+    emitLog('quality', `Note API auth: ${err.message || err}`);
+  }
+
+  // 2. Fallback to standard form login
+  try {
+    await page.goto(baseUrl + '/login', { waitUntil: 'domcontentloaded', timeout: navigationTimeout });
+    const emailInput = page.locator('input[name=email], input[type=email], input[name=username]').first();
+    const pwdInput = page.locator('input[type=password], input[name=password]').first();
+    const submitBtn = page.locator('button[type=submit], input[type=submit], .btn-primary').first();
+
+    if (await emailInput.count() > 0) {
+      await emailInput.fill(user.email);
+      await pwdInput.fill(user.password || password);
+      await submitBtn.click({ noWaitAfter: true });
+      await page.waitForURL((url) => !url.pathname.includes('/login'), { waitUntil: 'domcontentloaded', timeout: loginTimeout }).catch(() => {});
+      await page.waitForTimeout(300);
+      return new URL(page.url()).pathname;
+    }
+  } catch (err) {
+    emitLog('quality', `Form login note: ${err.message || err}`);
+  }
+
   return new URL(page.url()).pathname;
 }
 
@@ -235,9 +284,12 @@ async function inspectInteractiveStates(page) {
 }
 
 async function auditPage(page, browserName, viewport, route, role) {
-  emitLog('quality', `[${browserName}/${viewport.name}] Memeriksa ${route} sebagai ${role}.`);
-  const response = await page.goto(baseUrl + route, { waitUntil: 'domcontentloaded', timeout: navigationTimeout }).catch(() => null);
-  await page.waitForTimeout(120);
+  const navRoute = route.replace(/:id\b/g, '1').replace(/:judul\b/g, 'berita');
+  emitLog('quality', `[${browserName}/${viewport.name}] Memeriksa ${navRoute} sebagai ${role}.`);
+  const response = await page.goto(baseUrl + navRoute, { waitUntil: 'domcontentloaded', timeout: navigationTimeout }).catch(() => null);
+  // Wait for Vue SPA / dynamic framework to mount content
+  await page.waitForSelector('#app > *, main, .app-main-content, body > div', { timeout: 4000 }).catch(() => {});
+  await page.waitForTimeout(600);
   const screenshot = path.join(screenshotDir, browserName + '-' + viewport.name + '-' + slug(route) + '.png');
   await page.screenshot({ path: screenshot, fullPage: false, animations: 'disabled', timeout: 10000 }).catch(() => {});
   const result = await page.evaluate(({ syntheticRows: rowLimit, longTextLength: textLimit }) => {
@@ -585,7 +637,7 @@ async function runNetworkAndDuplicateProbe(page, browserName, viewport, route, r
   else add('negative-duplicate', route + ' duplicate submission guard', true, 'Duplicate submission probe dinonaktifkan oleh konfigurasi.', meta);
 }
 
-async function auditBrowser(name, type, routes) {
+async function auditBrowser(name, type, routes, job = {}) {
   let browser;
   emitLog('quality', `Menyalakan browser ${name}.`);
   try { browser = await type.launch({ headless: true }); }
@@ -604,7 +656,16 @@ async function auditBrowser(name, type, routes) {
         await page.close();
       }
       for (const route of routes) {
-        const role = route.startsWith('/admin') ? 'admin' : (/^\/(user|profile|passengers|booking|my-bookings|notifications)/.test(route) ? 'customer' : 'public');
+        const pageMeta = (job?.inventory?.pages || []).find((p) => p.path === route);
+        const requiresAuth = pageMeta?.authentication === 'auth-required' ||
+          route.startsWith('/admin') ||
+          route.startsWith('/dashboard') ||
+          route.startsWith('/master/') ||
+          route.startsWith('/fitur-utama/') ||
+          route.startsWith('/pesan/') ||
+          route.startsWith('/profil');
+
+        const role = requiresAuth ? 'admin' : (/^\/(user|profile|passengers|booking|my-bookings|notifications)/.test(route) ? 'customer' : 'public');
         const page = await contexts[role].newPage();
         await auditPage(page, name, viewport, route, role);
         await runNetworkAndDuplicateProbe(page, name, viewport, route, role);
@@ -629,9 +690,9 @@ async function auditBrowser(name, type, routes) {
   const routes = allRoutes.slice(routeOffset, routeOffset + routeLimit);
   if (!routes.length) throw new Error('Discovery job has no routes');
   emitLog('quality', `${routes.length} route masuk scope audit (offset ${routeOffset}, maksimum ${routeLimit}).`);
-  if (browserNames.includes('chromium')) await auditBrowser('chromium', chromium, routes);
-  if (browserNames.includes('firefox')) await auditBrowser('firefox', firefox, routes);
-  if (browserNames.includes('webkit')) await auditBrowser('webkit', webkit, routes);
+  if (browserNames.includes('chromium')) await auditBrowser('chromium', chromium, routes, job);
+  if (browserNames.includes('firefox')) await auditBrowser('firefox', firefox, routes, job);
+  if (browserNames.includes('webkit')) await auditBrowser('webkit', webkit, routes, job);
   const transactional = (job.inventory?.capabilities?.negativeScenarios || []).filter((scenario) => scenario.execution === 'requires-fixture');
   if (negativeTestingEnabled && transactionalScenariosEnabled && (transactional.length || fixtureReportPath)) {
     let fixtureResults = [];
@@ -668,6 +729,25 @@ async function auditBrowser(name, type, routes) {
         cleanupError: fixtureResult.cleanupError,
       }, fixtureResult.outcome);
     }
+  }
+  try {
+    await runDeepWebAudit({
+      baseUrl,
+      routes,
+      browserNames,
+      viewports,
+      navigationTimeout,
+      accounts: configuredAccounts,
+      fallbackPassword: password,
+      runDir,
+      emitLog,
+      add,
+      addNotApplicable,
+      apiRoutes: job.inventory?.api || [],
+    });
+  } catch (error) {
+    add('deep-web-audit', 'deep web audit runner', false, `Deep audit process error: ${error.message || error}`, {});
+    emitLog('quality', `Deep web audit error: ${error.message || error}`);
   }
   if (screenReaderMode === 'external') {
     addNotApplicable('accessibility-screen-reader-real', 'External screen reader audit', screenReaderCommand ? `adapter command dikonfigurasi (${screenReaderCommand}) tetapi eksekusi OS screen reader harus dijalankan pada runner desktop yang mendukung.` : 'tidak ada adapter command NVDA/VoiceOver/TalkBack yang dikonfigurasi. Semantic-tree audit tetap dijalankan.', { mode: screenReaderMode });

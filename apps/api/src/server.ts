@@ -2,7 +2,7 @@ process.env.TZ = 'Asia/Jakarta';
 import 'dotenv/config';
 import Fastify from 'fastify';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import url, { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile, unlink, readdir, stat } from 'node:fs/promises';
 import { validateFlow, type NormalizedFlow } from '@qc/flow-schema';
@@ -19,13 +19,16 @@ import type { DiscoveryConfig } from './discovery/types.ts';
 import { buildReport } from './report/report-builder.ts';
 import { buildJsonReport } from './report/report-json.ts';
 import { generatePdfReport } from './report/report-pdf.ts';
+import { cleanupRetention, runtimePolicy } from './runtime-policy.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '../../..');
 const port = Number(process.env.QC_API_PORT ?? 4100);
 const host = process.env.QC_API_HOST ?? '127.0.0.1';
 const artifactRoot = path.resolve(root, process.env.ARTIFACT_ROOT ?? '.qc-artifacts');
-const discoveryService = new DiscoveryService(artifactRoot, root);
+const discoveryService = new DiscoveryService(artifactRoot, root); // active discovery service v2
+const retention = runtimePolicy();
+let retentionTimer: NodeJS.Timeout | undefined;
 
 type RunStatus = 'QUEUED' | 'RUNNING' | 'PASSED' | 'FAILED' | 'INFRA_ERROR';
 type Run = { id: string; name: string; status: RunStatus; mode: 'simulation' | 'playwright'; createdAt: string; startedAt?: string; finishedAt?: string; phase?: string; progress?: number; message?: string; services?: ServiceRuntime[]; stepResults?: RunStepResult[]; result?: WebRunResult; flow?: NormalizedFlow };
@@ -136,6 +139,21 @@ async function latestFullFlowVideo() {
       await addCandidate(path.join(legacyRoot, entry.name, 'full-flow.webm'), path.join(artifactRoot, 'zannora', 'runs', `full-flow-${suffix}.json`), entry.name);
     }
   } catch { /* Legacy history may not exist. */ }
+
+  const jobsRoot = path.join(artifactRoot, 'jobs');
+  try {
+    const jobEntries = await readdir(jobsRoot, { withFileTypes: true });
+    for (const entry of jobEntries) {
+      if (!entry.isDirectory()) continue;
+      const videoPath = path.join(jobsRoot, entry.name, 'full-flow.webm');
+      try {
+        const metadata = await stat(videoPath);
+        if (metadata.isFile() && metadata.size > 0) {
+          candidates.push({ filePath: videoPath, name: `job-${entry.name}`, size: metadata.size, updatedAt: metadata.mtime.toISOString() });
+        }
+      } catch {}
+    }
+  } catch { /* Jobs history may not exist yet. */ }
 
   return candidates.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
 }
@@ -378,7 +396,8 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
   const routes = new Set<string>();
   const browsers = new Set<string>();
   const viewports = new Set<string>();
-  const directories = reports.map((item) => item.directory);
+  const latest = reports[0];
+  const directories = latest ? [latest.directory] : [];
 
   for (const item of reports) {
     const checks = Array.isArray(item.report.checks) ? item.report.checks as Array<Record<string, any>> : [];
@@ -405,7 +424,6 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
   }
 
   const failed = findings.length || Math.max(0, total - passed - notApplicable);
-  const latest = reports[0];
   const group = await makeEvidenceGroup({
     id: 'target-quality',
     title: `${job.name} · UI Quality Audit`,
@@ -426,18 +444,41 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
       findings
     }
   });
+  const groups = [group];
+  const jobDir = path.join(artifactRoot, 'jobs', job.id);
+  const fullFlowVideo = path.join(jobDir, 'full-flow.webm');
+  try {
+    const fullFlowMeta = await stat(fullFlowVideo);
+    if (fullFlowMeta.isFile() && fullFlowMeta.size > 0) {
+      const flowGroup = await makeEvidenceGroup({
+        id: 'full-flow',
+        title: `${job.name} · Full Flow Test Session (30 FPS 720p)`,
+        category: 'Execution',
+        status: 'PASSED',
+        summary: 'Rekaman video sesi pengujian penuh dari awal hingga akhir dengan resolusi 1280x720 pada 30 FPS.',
+        folder: `jobs/${job.id}`,
+        files: [fullFlowVideo]
+      });
+      groups.unshift(flowGroup);
+    }
+  } catch {}
+
+  const totalScreenshots = groups.reduce((acc, g) => acc + g.screenshots.length, 0);
+  const totalVideos = groups.reduce((acc, g) => acc + g.videos.length, 0);
+  const totalAssets = groups.reduce((acc, g) => acc + g.assets.length, 0);
+
   return {
     project: job.name,
     generatedAt: new Date().toISOString(),
-    groups: [group],
+    groups,
     totals: {
-      groups: 1,
+      groups: groups.length,
       passed: failed > 0 ? 0 : 1,
       failed: failed > 0 ? 1 : 0,
       reports: reports.length,
-      screenshots: group.screenshots.length,
-      videos: group.videos.length,
-      assets: group.assets.length
+      screenshots: totalScreenshots,
+      videos: totalVideos,
+      assets: totalAssets
     }
   };
 }
@@ -969,6 +1010,34 @@ app.post<{ Body: { accounts: Array<{ name?: string; email: string; password: str
   return { valid: errors.length === 0, errors };
 });
 
+// Database Auto-Seed Endpoints
+app.get('/api/v1/fixtures/seed/jamaahku', async () => {
+  const sqlPath = path.resolve(root, 'fixtures/sql/jamaahku_lengkap.sql');
+  try {
+    const meta = await stat(sqlPath);
+    return {
+      available: true,
+      sqlPath,
+      sizeBytes: meta.size,
+      sizeKb: (meta.size / 1024).toFixed(1)
+    };
+  } catch {
+    return { available: false, sqlPath };
+  }
+});
+
+app.post('/api/v1/fixtures/seed/jamaahku', async (_request, reply) => {
+  try {
+    const seederUrl = url.pathToFileURL(path.resolve(root, 'scripts/seed-jamaahku.mjs')).href;
+    const seederModule = await import(seederUrl);
+    const result = await seederModule.seedJamaahkuDatabase();
+    return reply.send({ success: true, ...result });
+  } catch (err: any) {
+    return reply.code(500).send({ success: false, error: err?.message || String(err) });
+  }
+});
+
+
 // Discovery Jobs Endpoints
 app.get('/api/v1/discovery/jobs', async () => {
   return discoveryService.listJobs();
@@ -977,13 +1046,23 @@ app.get('/api/v1/discovery/jobs', async () => {
 app.post<{ Body: DiscoveryConfig }>('/api/v1/discovery/jobs', async (request, reply) => {
   const body = request.body;
   if (!body?.name?.trim()) return reply.code(400).send({ error: 'Nama project / job wajib diisi.' });
-  if (body.runMode === 'managed-local' && !body.repositoryUrl?.trim()) {
-    return reply.code(400).send({ error: 'repositoryUrl wajib diisi untuk managed-local.' });
+  const sourceType = body.sourceType ?? (body.runMode === 'managed-local' ? (body.localPath?.trim() ? 'local-folder' : 'github') : 'existing-target');
+  if (body.runMode === 'managed-local' && sourceType === 'local-folder' && !body.localPath?.trim() && !body.repositoryUrl?.trim()) {
+    return reply.code(400).send({ error: 'Folder lokal wajib diisi untuk mode folder kerja.' });
+  }
+  if (body.runMode === 'managed-local' && sourceType === 'github' && !body.repositoryUrl?.trim()) {
+    return reply.code(400).send({ error: 'Repository GitHub wajib diisi untuk mode GitHub.' });
   }
   if (!body.baseUrl?.trim() && body.runMode !== 'demo') {
     return reply.code(400).send({ error: 'baseUrl wajib diisi.' });
   }
-  const job = await discoveryService.createJob(body);
+  if (sourceType === 'github') {
+    try {
+      const repository = new URL(body.repositoryUrl);
+      if (!['http:', 'https:'].includes(repository.protocol) || repository.username || repository.password) return reply.code(400).send({ error: 'Repository GitHub harus berupa URL HTTP(S) tanpa credential.' });
+    } catch { return reply.code(400).send({ error: 'repositoryUrl GitHub tidak valid.' }); }
+  }
+  const job = await discoveryService.createJob({ ...body, sourceType, localPath: body.localPath?.trim(), repositoryUrl: body.repositoryUrl?.trim() ?? '' });
   return reply.code(201).send(job);
 });
 
@@ -996,8 +1075,11 @@ app.get<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id', async (request
 app.put<{ Params: { id: string }; Body: DiscoveryConfig & { restart?: boolean } }>('/api/v1/discovery/jobs/:id', async (request, reply) => {
   const body = request.body;
   if (!body?.name?.trim()) return reply.code(400).send({ error: 'Nama project / job wajib diisi.' });
+  const sourceType = body.sourceType ?? (body.runMode === 'managed-local' ? (body.localPath?.trim() ? 'local-folder' : 'github') : 'existing-target');
+  if (body.runMode === 'managed-local' && sourceType === 'local-folder' && !body.localPath?.trim() && !body.repositoryUrl?.trim()) return reply.code(400).send({ error: 'Folder lokal wajib diisi untuk mode folder kerja.' });
+  if (body.runMode === 'managed-local' && sourceType === 'github' && !body.repositoryUrl?.trim()) return reply.code(400).send({ error: 'Repository GitHub wajib diisi untuk mode GitHub.' });
   try {
-    const job = await discoveryService.updateJob(request.params.id, body, body.restart !== false);
+    const job = await discoveryService.updateJob(request.params.id, { ...body, sourceType, localPath: body.localPath?.trim(), repositoryUrl: body.repositoryUrl?.trim() ?? '' }, body.restart !== false);
     return job;
   } catch (err) {
     return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -1038,6 +1120,22 @@ app.post<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/generate-flow',
   try {
     const flows = discoveryService.regenerateFlows(request.params.id);
     return { flows };
+  } catch (err) {
+    return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.put<{ Params: { id: string; flowId: string }; Body: Record<string, unknown> }>('/api/v1/discovery/jobs/:id/business-flows/:flowId', async (request, reply) => {
+  try {
+    return discoveryService.updateBusinessFlow(request.params.id, request.params.flowId, request.body as any);
+  } catch (err) {
+    return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post<{ Params: { id: string }; Body: { flowIds?: string[] } }>('/api/v1/discovery/jobs/:id/business-flows/approve', async (request, reply) => {
+  try {
+    return discoveryService.approveBusinessFlows(request.params.id, request.body?.flowIds);
   } catch (err) {
     return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
   }
@@ -1107,7 +1205,13 @@ app.get<{ Params: { id: string; '*': string } }>('/api/v1/discovery/jobs/:id/art
   if (!filePath.startsWith(jobDir)) return reply.code(403).send({ error: 'Access denied' });
   try {
     const ext = path.extname(filePath).toLowerCase();
-    const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.html' ? 'text/html' : ext === '.json' ? 'application/json' : 'text/plain';
+    const mime = ext === '.png' ? 'image/png'
+      : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+      : ext === '.webm' ? 'video/webm'
+      : ext === '.mp4' ? 'video/mp4'
+      : ext === '.html' ? 'text/html'
+      : ext === '.json' ? 'application/json'
+      : 'text/plain';
     return reply.type(mime).send(await readFile(filePath));
   } catch {
     return reply.code(404).type('application/json').send({ error: 'Artifact tidak ditemukan' });
@@ -1194,6 +1298,16 @@ app.get<{ Params: { '*': string } }>('/assets/*', async (request, reply) => {
 
 await restoreState();
 await discoveryService.init();
-app.addHook('onClose', flushState);
+const retentionResult = await cleanupRetention(artifactRoot, retention);
+if (retentionResult.removed.length) app.log.info({ removed: retentionResult.removed.length, policy: retention }, 'Retention cleanup completed');
+retentionTimer = setInterval(() => {
+  void cleanupRetention(artifactRoot, retention).then((result) => {
+    if (result.removed.length) app.log.info({ removed: result.removed.length }, 'Scheduled retention cleanup completed');
+  });
+}, retention.cleanupIntervalHours * 3_600_000);
+app.addHook('onClose', async () => {
+  if (retentionTimer) clearInterval(retentionTimer);
+  await flushState();
+});
 await app.listen({ port, host });
 console.log(`QC API running at http://${host}:${port}`);

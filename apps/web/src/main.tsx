@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
-import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus, FeatureContractPlan } from './types';
+import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus, FeatureContractPlan, BusinessFlowMap } from './types';
 import { Icon, Badge, Panel, Metric, Progress, Notice, Empty } from './ui';
 import { Wizard } from './wizard';
 import { LiveViewport } from './live-viewport';
@@ -24,6 +24,23 @@ type ProcessNode = {
   y: number;
 };
 
+function Paginated<T>({ items, resetKey, children }: { items: T[]; resetKey?: string; children: (items: T[], start: number) => React.ReactNode }) {
+  const pageSize = 10;
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  useEffect(() => setPage(0), [resetKey]);
+  useEffect(() => setPage((current) => Math.min(current, pageCount - 1)), [pageCount]);
+  const start = page * pageSize;
+  return <>
+    {children(items.slice(start, start + pageSize), start)}
+    {pageCount > 1 && <nav className="evidence-pagination" aria-label="Navigasi halaman data">
+      <button className="quiet" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Sebelumnya</button>
+      <span aria-live="polite">{start + 1}–{Math.min(start + pageSize, items.length)} dari {items.length} · halaman {page + 1}/{pageCount}</span>
+      <button className="quiet" disabled={page >= pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Berikutnya</button>
+    </nav>}
+  </>;
+}
+
 function CapabilityProfilePanel({ profile }: { profile?: CapabilityProfile }) {
   if (!profile) return null;
   return (
@@ -39,7 +56,7 @@ function CapabilityProfilePanel({ profile }: { profile?: CapabilityProfile }) {
         </div>
       </details>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 8, maxHeight: 360, overflowY: 'auto' }}>
-        {profile.capabilities.map((capability) => (
+        <Paginated items={profile.capabilities}>{(capabilities) => capabilities.map((capability) => (
           <details key={capability.id} style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-panel-sub)' }}>
             <summary style={{ cursor: 'pointer', padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'center' }}>
               <span style={{ color: capability.status === 'detected' ? 'var(--green)' : 'var(--yellow)' }}>●</span>
@@ -52,7 +69,7 @@ function CapabilityProfilePanel({ profile }: { profile?: CapabilityProfile }) {
               {capability.evidence.routes.length > 0 && <code style={{ display: 'block', marginTop: 6, color: 'var(--cyan)', whiteSpace: 'normal' }}>{capability.evidence.routes.slice(0, 5).join(' · ')}</code>}
             </div>
           </details>
-        ))}
+        ))}</Paginated>
       </div>
     </Panel>
   );
@@ -229,6 +246,45 @@ function MilestoneDetails({ node, activeJob, evidence, onClose, onNavigate, onOp
 
 type EvidenceFocus = { groupId: string; asset?: EvidenceAsset } | null;
 
+function ScreenshotGrid({ assets, selectedPath, onOpen, resetToken }: { assets: EvidenceAsset[]; selectedPath?: string; onOpen: (asset: EvidenceAsset) => void; resetToken?: string }) {
+  const pageSize = 10;
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(assets.length / pageSize));
+  const pageStart = page * pageSize;
+  const visibleAssets = assets.slice(pageStart, pageStart + pageSize);
+
+  useEffect(() => setPage(0), [assets.length, resetToken]);
+
+  return <>
+    <div className="evidence-screenshot-grid">
+      {visibleAssets.map((asset) => (
+        <button className={`evidence-screenshot-card ${selectedPath === asset.relativePath ? 'selected' : ''}`} key={asset.relativePath} onClick={() => onOpen(asset)} title="Klik untuk melihat screenshot dan konteks temuan">
+          <img src={asset.url} alt={asset.label} loading="lazy" decoding="async" fetchPriority="low" />
+          <span>{asset.name}</span>
+        </button>
+      ))}
+    </div>
+    {pageCount > 1 && <nav className="evidence-pagination" aria-label="Halaman screenshot">
+      <button className="quiet" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0}>Sebelumnya</button>
+      <span aria-live="polite">{pageStart + 1}–{Math.min(pageStart + pageSize, assets.length)} dari {assets.length} gambar · halaman {page + 1}/{pageCount}</span>
+      <button className="quiet" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page + 1 >= pageCount}>Berikutnya</button>
+    </nav>}
+  </>;
+}
+
+function ScreenshotGallery({ assets, selectedPath, onOpen, collapsible = false, title = 'SCREENSHOT CHECKPOINT', resetToken }: { assets: EvidenceAsset[]; selectedPath?: string; onOpen: (asset: EvidenceAsset) => void; collapsible?: boolean; title?: string; resetToken?: string }) {
+  const [open, setOpen] = useState(!collapsible);
+  const grid = open ? <ScreenshotGrid assets={assets} selectedPath={selectedPath} onOpen={onOpen} resetToken={resetToken} /> : null;
+  if (collapsible) return <details className="evidence-section evidence-screenshot-details" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary><span>{title}</span><small>{assets.length} file · buka untuk melihat gambar</small></summary>
+    {grid}
+  </details>;
+  return <div className="evidence-inline-section">
+    <div className="evidence-section-title"><span>{title}</span><small>{assets.length} checkpoint</small></div>
+    {grid}
+  </div>;
+}
+
 function EvidenceInspector({ focus, evidence, onClose, onOpenAsset }: { focus: EvidenceFocus; evidence: ZannoraEvidence | null; onClose: () => void; onOpenAsset: (asset: EvidenceAsset) => void }) {
   if (!focus || !evidence) return null;
   const group = evidence.groups.find((item) => item.id === focus.groupId);
@@ -239,7 +295,7 @@ function EvidenceInspector({ focus, evidence, onClose, onOpenAsset }: { focus: E
       <div className="evidence-inline-meta"><Badge value={group.status} /><span>{group.screenshots.length} screenshot</span><span>{group.videos.length} video</span><code>{group.folder}</code></div>
       {focus.asset && <div className="evidence-inline-focus"><div><span className="evidence-group-kicker">SELECTED CHECKPOINT</span><strong>{focus.asset.name}</strong><small>{focus.asset.relativePath}</small></div><button className="quiet" onClick={() => onOpenAsset(focus.asset!)}>Open full size <Icon name="arrow" size={13} /></button></div>}
       {group.videos.length > 0 && <div className="evidence-inline-section"><div className="evidence-section-title"><span>VIDEO TERKAIT</span><small>{group.videos.length} file</small></div><div className="evidence-video-grid">{group.videos.map((asset) => <div className="evidence-video-card" key={asset.relativePath}><video controls preload="metadata" src={asset.url} /><div className="evidence-asset-footer"><div><strong>{asset.label}</strong><small>{asset.relativePath}</small></div><a href={asset.url} download>Download</a></div></div>)}</div></div>}
-      {group.screenshots.length > 0 && <div className="evidence-inline-section"><div className="evidence-section-title"><span>SCREENSHOT YANG PERLU DICEK</span><small>{group.screenshots.length} checkpoint</small></div><div className="evidence-screenshot-grid">{group.screenshots.map((asset) => <button className={`evidence-screenshot-card ${focus.asset?.relativePath === asset.relativePath ? 'selected' : ''}`} key={asset.relativePath} onClick={() => { onOpenAsset(asset); }} title="Buka screenshot checkpoint"><img src={asset.url} alt={asset.label} loading="lazy" /><span>{asset.name}</span></button>)}</div></div>}
+      {group.screenshots.length > 0 && <ScreenshotGallery assets={group.screenshots} selectedPath={focus.asset?.relativePath} onOpen={onOpenAsset} title="SCREENSHOT YANG PERLU DICEK" resetToken={group.id} />}
     </section>
   );
 }
@@ -251,9 +307,146 @@ function findingScreenshot(evidence: ZannoraEvidence | null, finding: EvidenceFi
   return group.screenshots.find((asset) => finding.route && asset.label.includes(finding.route));
 }
 
+export type FindingCategory = 'critical' | 'functional' | 'content' | 'visual' | 'contrast' | 'accessibility';
+
+export const FINDING_CATEGORY_CONFIG: Record<FindingCategory, {
+  label: string;
+  badgeLabel: string;
+  badgeClass: string;
+  icon: string;
+  color: string;
+  description: string;
+  priority: number;
+}> = {
+  critical: {
+    label: 'Kritis & Akses',
+    badgeLabel: 'KRITIS',
+    badgeClass: 'critical',
+    icon: 'warning',
+    color: 'var(--red)',
+    description: 'Autentikasi, error konsol runtime, kegagalan jaringan, dan security headers',
+    priority: 1
+  },
+  functional: {
+    label: 'Fungsional & Data',
+    badgeLabel: 'FUNGSIONAL',
+    badgeClass: 'functional',
+    icon: 'zap',
+    color: 'var(--yellow)',
+    description: 'Data stress overflow, kegagalan recovery form, dan performa respon',
+    priority: 2
+  },
+  content: {
+    label: 'Konten & Layout',
+    badgeLabel: 'KONTEN',
+    badgeClass: 'content',
+    icon: 'reports',
+    color: 'var(--cyan)',
+    description: 'Teks terpotong, komponen bertumpuk, atau ukuran di luar batas',
+    priority: 3
+  },
+  visual: {
+    label: 'Visual Regression',
+    badgeLabel: 'VISUAL',
+    badgeClass: 'visual',
+    icon: 'projects',
+    color: '#c084fc',
+    description: 'Perbedaan render visual piksel dibanding baseline screenshot target',
+    priority: 4
+  },
+  contrast: {
+    label: 'Kontras Warna',
+    badgeLabel: 'KONTRAS',
+    badgeClass: 'contrast',
+    icon: 'sun',
+    color: '#f472b6',
+    description: 'Rasio kontras teks dan kontrol tidak memenuhi standar WCAG AA',
+    priority: 5
+  },
+  accessibility: {
+    label: 'Aksesibilitas',
+    badgeLabel: 'A11Y',
+    badgeClass: 'accessibility',
+    icon: 'shield',
+    color: '#60a5fa',
+    description: 'Navigasi keyboard, focus indicator, dan penamaan semantik ARIA',
+    priority: 6
+  }
+};
+
+function classifyFindingCategory(area: string = ''): FindingCategory {
+  const a = area.toLowerCase();
+  if (['authentication', 'deep-console', 'deep-network', 'http', 'deep-security-headers', 'security'].includes(a)) {
+    return 'critical';
+  }
+  if (a.startsWith('negative-') || a.startsWith('dense-data') || a === 'deep-performance') {
+    return 'functional';
+  }
+  if (a === 'visual-regression') {
+    return 'visual';
+  }
+  if (a === 'contrast') {
+    return 'contrast';
+  }
+  if (a.startsWith('accessibility')) {
+    return 'accessibility';
+  }
+  return 'content';
+}
+
+function getFindingSeverity(area: string = ''): { level: 'CRITICAL' | 'MAJOR' | 'MODERATE' | 'MINOR'; weight: number; color: string; label: string } {
+  const cat = classifyFindingCategory(area);
+  switch (cat) {
+    case 'critical':
+      return { level: 'CRITICAL', weight: 100, color: 'var(--red)', label: 'Kritis' };
+    case 'functional':
+      return { level: 'MAJOR', weight: 75, color: 'var(--yellow)', label: 'Fungsional' };
+    case 'content':
+      return { level: 'MODERATE', weight: 50, color: 'var(--cyan)', label: 'Konten' };
+    case 'visual':
+      return { level: 'MINOR', weight: 30, color: '#c084fc', label: 'Visual' };
+    case 'contrast':
+      return { level: 'MINOR', weight: 25, color: '#f472b6', label: 'Kontras' };
+    case 'accessibility':
+      return { level: 'MINOR', weight: 20, color: '#60a5fa', label: 'A11y' };
+    default:
+      return { level: 'MODERATE', weight: 40, color: 'var(--text-dim)', label: 'Temuan' };
+  }
+}
+
+function getAreaReadableName(area: string = ''): string {
+  const map: Record<string, string> = {
+    'authentication': 'Autentikasi & Sesi',
+    'deep-console': 'Error Konsol / Runtime',
+    'deep-network': 'Kegagalan Network / HTTP',
+    'http': 'Respons HTTP Error',
+    'deep-security-headers': 'Security Response Headers',
+    'deep-performance': 'Budget Performa Lambat',
+    'dense-data-stress': 'Data Stress & Overflow',
+    'dense-data': 'Data Padat',
+    'negative-empty-form': 'Validasi Form Kosong',
+    'negative-network': 'Pemulihan Gangguan Jaringan',
+    'negative-duplicate': 'Guard Dobel Submit',
+    'visual-regression': 'Visual Regression',
+    'contrast': 'Kontras Warna WCAG AA',
+    'accessibility-keyboard': 'Navigasi Keyboard & Fokus',
+    'accessibility-screen-reader': 'Struktur Screen Reader & ARIA',
+    'accessibility': 'Aksesibilitas UI',
+    'typography': 'Tipografi & Ukuran Teks',
+    'content-quality': 'Kualitas Konten & Teks Terpotong',
+    'responsive': 'Layout Responsif'
+  };
+  return map[area] || area.replace(/-/g, ' ').toUpperCase();
+}
+
 function findingDescription(finding: EvidenceFinding) {
   const route = finding.route || 'halaman yang diuji';
   switch (finding.area) {
+    case 'authentication': return `Sesi autentikasi atau token tidak valid saat mengakses ${route}, menyebabkan redirect ke landing page atau status tidak terotorisasi (401/403).`;
+    case 'deep-security-headers': return `Header keamanan (seperti CSP, X-Frame-Options, HSTS, X-Content-Type-Options) pada ${route} belum terkonfigurasi sesuai rekomendasi keamanan web.`;
+    case 'deep-console': return `Ditemukan error script runtime di konsol browser pada ${route} saat proses audit berjalan.`;
+    case 'deep-network': return `Permintaan jaringan (fetch/XHR/asset) pada ${route} mengalami kegagalan (network failure atau HTTP error).`;
+    case 'deep-performance': return `Waktu muat (load time) atau ukuran aset pada ${route} melebihi batas budget performa yang ditentukan.`;
     case 'contrast': return `Warna teks atau komponen pada ${route} tidak memenuhi batas contrast WCAG AA. Detail di bawah menunjukkan elemen dan rasio contrast yang terdeteksi.`;
     case 'typography': return `Ukuran atau dimensi kontrol/teks pada ${route} berada di luar baseline yang ditetapkan, atau teks tidak muat di dalam elemennya.`;
     case 'responsive': return `Ada elemen pada ${route} yang lebih lebar dari viewport ${finding.viewport || 'yang diuji'}, sehingga berpotensi keluar layar atau membutuhkan scroll horizontal.`;
@@ -302,10 +495,10 @@ function evidenceMetric(group?: EvidenceGroup) {
 function RunHistoryPanel({ history }: { history: RunHistoryEntry[] }) {
   if (!history.length) return null;
   return <Panel title="Run history & trend" description="Riwayat run berasal dari folder project/run. Status ini hanya membaca hasil engine; source target tidak diubah otomatis.">
-    <div className="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Quality</th><th>Updated</th></tr></thead><tbody>{history.map((entry) => {
+    <Paginated items={history}>{(entries) => <div className="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Quality</th><th>Updated</th></tr></thead><tbody>{entries.map((entry) => {
       const quality = entry.quality;
       return <tr key={entry.runLabel}><td><strong>{entry.runLabel}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{entry.project}</small></td><td><Badge value={quality?.status || entry.status} /></td><td>{entry.progress ?? 0}%</td><td>{quality ? `${quality.passed ?? 0}/${quality.total ?? 0} passed · ${quality.failed ?? 0} failed · ${quality.notApplicable ?? 0} N/A` : 'Quality report belum ada'}</td><td>{date(entry.updatedAt || entry.createdAt)}</td></tr>;
-    })}</tbody></table></div>
+    })}</tbody></table></div>}</Paginated>
   </Panel>;
 }
 
@@ -348,7 +541,7 @@ function ZannoraOverview({ evidence, onNavigate, onOpenEvidence }: { evidence: Z
         <Metric tone="green" label="Pass Rate" value={passRate + '%'} note={findings + ' open finding'} icon="warning" onClick={() => onNavigate('findings')} />
       </div>
       <Panel title="Zannora Evidence Snapshot" description={'Generated ' + date(evidence.generatedAt) + ' · ' + evidence.totals.assets + ' artifact terindeks'}>
-        <div className="table-wrap"><table><thead><tr><th>Suite</th><th>Status</th><th>Coverage</th><th>Evidence</th><th>Action</th></tr></thead><tbody>{evidence.groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.category}</small></td><td><Badge value={group.status} /></td><td>{metric.passed}/{metric.total}</td><td>{group.screenshots.length} screenshot · {group.videos.length} video</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div>
+        <Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Suite</th><th>Status</th><th>Coverage</th><th>Evidence</th><th>Action</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.category}</small></td><td><Badge value={group.status} /></td><td>{metric.passed}/{metric.total}</td><td>{group.screenshots.length} screenshot · {group.videos.length} video</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div>}</Paginated>
       </Panel>
     </div>
   );
@@ -356,18 +549,19 @@ function ZannoraOverview({ evidence, onNavigate, onOpenEvidence }: { evidence: Z
 
 function ZannoraDiscovery({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
   const routes = zannoraRoutes(evidence);
-  return <div><div className="view-header"><div><h1>Discovery &amp; Inventory · Zannora</h1><p>Inventory diambil dari scope quality/responsive dan suite yang benar-benar dijalankan.</p></div><span className="evidence-project-chip">LIVE EVIDENCE SNAPSHOT</span></div><div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.25fr) minmax(280px, .75fr)', gap: 18 }}><Panel title={'Evidence pipeline (' + evidence.groups.length + ' suites)'}><div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{evidence.groups.map((group) => { const metric = evidenceMetric(group); return <button key={group.id} className="milestone-related-evidence-card" onClick={() => onOpenEvidence(group.id)}><span><strong>{group.title}</strong><small>{metric.passed}/{metric.total} checks · {group.assets.length} asset · {date(group.report?.updatedAt)}</small></span><Badge value={group.status} /><Icon name="arrow" size={13} /></button>; })}</div></Panel><Panel title={'Route scope (' + routes.length + ')'}><div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{routes.length ? routes.map((route) => <code key={route} style={{ color: 'var(--cyan)', padding: '8px 10px', background: 'var(--bg-panel)', borderRadius: 6 }}>{route}</code>) : <Empty title="Route scope belum tersedia">Report suite belum membawa daftar route.</Empty>}</div></Panel></div></div>;
+  return <div><div className="view-header"><div><h1>Discovery &amp; Inventory · Zannora</h1><p>Inventory diambil dari scope quality/responsive dan suite yang benar-benar dijalankan.</p></div><span className="evidence-project-chip">LIVE EVIDENCE SNAPSHOT</span></div><div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.25fr) minmax(280px, .75fr)', gap: 18 }}><Panel title={'Evidence pipeline (' + evidence.groups.length + ' suites)'}><Paginated items={evidence.groups}>{(groups) => <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{groups.map((group) => { const metric = evidenceMetric(group); return <button key={group.id} className="milestone-related-evidence-card" onClick={() => onOpenEvidence(group.id)}><span><strong>{group.title}</strong><small>{metric.passed}/{metric.total} checks · {group.assets.length} asset · {date(group.report?.updatedAt)}</small></span><Badge value={group.status} /><Icon name="arrow" size={13} /></button>; })}</div>}</Paginated></Panel><Panel title={'Route scope (' + routes.length + ')'}><Paginated items={routes}>{(visibleRoutes) => <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{visibleRoutes.length ? visibleRoutes.map((route) => <code key={route} style={{ color: 'var(--cyan)', padding: '8px 10px', background: 'var(--bg-panel)', borderRadius: 6 }}>{route}</code>) : <Empty title="Route scope belum tersedia">Report suite belum membawa daftar route.</Empty>}</div>}</Paginated></Panel></div></div>;
 }
 
 function ZannoraAppMap({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
   const routes = zannoraRoutes(evidence);
   const quality = evidence.groups.find((group) => group.id === 'quality');
-  return <div><div className="view-header"><div><h1>App Map · Zannora</h1><p>Route inventory real dari report quality, dengan browser, viewport, dan status evidence.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Inspect quality evidence</button></div><div className="split-view"><div className="list-pane"><div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>Routes ({routes.length})</div>{routes.map((route) => <div key={route} style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}><strong>{route}</strong><small style={{ display: 'block', marginTop: 5, color: 'var(--text-dim)' }}>covered by quality audit · desktop / tablet / mobile</small></div>)}</div><div className="detail-pane"><Panel title="Inventory source" description={quality?.summary}><div className="evidence-inline-meta"><Badge value={quality?.status ?? 'UNKNOWN'} /><span>{quality?.metadata?.browsers?.join(' · ') || 'browser scope unavailable'}</span><span>{quality?.metadata?.viewports?.join(' · ') || 'viewport scope unavailable'}</span></div><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>App Map ini memakai daftar route yang tersimpan di report; bukan data demo atau hasil hitungan statis.</p></Panel><Panel title="Quality coverage"><div className="table-wrap"><table><thead><tr><th>Area</th><th>Checks</th><th>Status</th></tr></thead><tbody>{evidence.groups.filter((group) => group.category === 'UI Quality').map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td>{group.title}</td><td>{metric.passed}/{metric.total}</td><td><Badge value={group.status} /></td></tr>; })}</tbody></table></div></Panel></div></div></div>;
+  const qualityGroups = evidence.groups.filter((group) => group.category === 'UI Quality');
+  return <div><div className="view-header"><div><h1>App Map · Zannora</h1><p>Route inventory real dari report quality, dengan browser, viewport, dan status evidence.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Inspect quality evidence</button></div><div className="split-view"><div className="list-pane"><div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>Routes ({routes.length})</div><Paginated items={routes}>{(visibleRoutes) => visibleRoutes.map((route) => <div key={route} style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}><strong>{route}</strong><small style={{ display: 'block', marginTop: 5, color: 'var(--text-dim)' }}>covered by quality audit · desktop / tablet / mobile</small></div>)}</Paginated></div><div className="detail-pane"><Panel title="Inventory source" description={quality?.summary}><div className="evidence-inline-meta"><Badge value={quality?.status ?? 'UNKNOWN'} /><span>{quality?.metadata?.browsers?.join(' · ') || 'browser scope unavailable'}</span><span>{quality?.metadata?.viewports?.join(' · ') || 'viewport scope unavailable'}</span></div><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>App Map ini memakai daftar route yang tersimpan di report; bukan data demo atau hasil hitungan statis.</p></Panel><Panel title="Quality coverage"><Paginated items={qualityGroups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Area</th><th>Checks</th><th>Status</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td>{group.title}</td><td>{metric.passed}/{metric.total}</td><td><Badge value={group.status} /></td></tr>; })}</tbody></table></div>}</Paginated></Panel></div></div></div>;
 }
 
 function ZannoraTestDesign({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
   const groups = evidence.groups.filter((group) => ['API & CRUD', 'Web Flow'].includes(group.category));
-  return <div><div className="view-header"><div><h1>Test Design · Zannora</h1><p>Suite nyata yang menjadi dasar test design: API, CRUD, role access, navigation, dan full flow.</p></div><button className="quiet" onClick={() => onOpenEvidence('api-e2e')}><Icon name="reports" size={15} /> Open source evidence</button></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>{groups.map((group) => { const metric = evidenceMetric(group); return <Panel key={group.id} title={group.title} description={group.summary} actions={<Badge value={group.status} />}><div className="evidence-inline-meta"><strong>{metric.passed}/{metric.total}</strong><span>{group.category}</span></div><div className="evidence-asset-count"><span>{group.assets.length} artifact</span><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Detail &amp; evidence <Icon name="arrow" size={12} /></button></div></Panel>; })}</div></div>;
+  return <div><div className="view-header"><div><h1>Test Design · Zannora</h1><p>Suite nyata yang menjadi dasar test design: API, CRUD, role access, navigation, dan full flow.</p></div><button className="quiet" onClick={() => onOpenEvidence('api-e2e')}><Icon name="reports" size={15} /> Open source evidence</button></div><Paginated items={groups}>{(visibleGroups) => <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>{visibleGroups.map((group) => { const metric = evidenceMetric(group); return <Panel key={group.id} title={group.title} description={group.summary} actions={<Badge value={group.status} />}><div className="evidence-inline-meta"><strong>{metric.passed}/{metric.total}</strong><span>{group.category}</span></div><div className="evidence-asset-count"><span>{group.assets.length} artifact</span><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Detail &amp; evidence <Icon name="arrow" size={12} /></button></div></Panel>; })}</div>}</Paginated></div>;
 }
 
 function CrudCoveragePanel({ plan }: { plan?: import('./types').CrudPlan }) {
@@ -376,7 +570,7 @@ function CrudCoveragePanel({ plan }: { plan?: import('./types').CrudPlan }) {
   const tone = (status: string) => status === 'AVAILABLE' ? 'var(--green)' : status === 'REQUIRES_FIXTURE' ? 'var(--yellow)' : status === 'PLANNED' ? 'var(--cyan)' : 'var(--text-dim)';
   return <Panel title={`CRUD coverage · ${plan.totals.resources} resource`} description="Read-only checks dapat dijalankan otomatis; operasi mutasi menunggu fixture yang dapat di-reset.">
     <div className="evidence-inline-meta" style={{ marginBottom: 12 }}><strong>{plan.totals.available}</strong><span>observed</span><strong>{plan.totals.planned}</strong><span>planned</span><strong>{plan.totals.requiresFixture}</strong><span>fixture required</span></div>
-    <div className="table-wrap"><table><thead><tr><th>Resource</th>{Object.values(labels).map((label) => <th key={label}>{label}</th>)}<th>Confidence</th></tr></thead><tbody>{plan.resources.map((resource) => <tr key={resource.id}><td><strong>{resource.name}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{resource.routes.slice(0, 2).join(' · ')}</small></td>{Object.keys(labels).map((operation) => <td key={operation}><span style={{ color: tone(resource.operations[operation as keyof typeof resource.operations]), fontSize: 10, fontWeight: 800 }}>{resource.operations[operation as keyof typeof resource.operations].replace('_', ' ')}</span></td>)}<td>{Math.round(resource.confidence * 100)}%</td></tr>)}</tbody></table></div>
+    <Paginated items={plan.resources}>{(resources) => <div className="table-wrap"><table><thead><tr><th>Resource</th>{Object.values(labels).map((label) => <th key={label}>{label}</th>)}<th>Confidence</th></tr></thead><tbody>{resources.map((resource) => <tr key={resource.id}><td><strong>{resource.name}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{resource.routes.slice(0, 2).join(' · ')}</small></td>{Object.keys(labels).map((operation) => <td key={operation}><span style={{ color: tone(resource.operations[operation as keyof typeof resource.operations]), fontSize: 10, fontWeight: 800 }}>{resource.operations[operation as keyof typeof resource.operations].replace('_', ' ')}</span></td>)}<td>{Math.round(resource.confidence * 100)}%</td></tr>)}</tbody></table></div>}</Paginated>
     <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 12 }}>{plan.limitations.join(' ')}</p>
   </Panel>;
 }
@@ -386,7 +580,7 @@ function RoleActionPanel({ plan }: { plan?: import('./types').RoleActionPlan }) 
   const tone = (status: string) => status === 'EXPECTED' ? 'var(--green)' : status === 'CANDIDATE' ? 'var(--yellow)' : 'var(--cyan)';
   return <Panel title={`Role & action matrix · ${plan.roles.join(', ')}`} description="Static evidence menjadi baseline; direct URL, API permission, dan cross-role leakage wajib diverifikasi saat runtime.">
     <div className="evidence-inline-meta" style={{ marginBottom: 12 }}><strong>{plan.totals.expected}</strong><span>expected</span><strong>{plan.totals.candidate}</strong><span>candidate</span><strong>{plan.totals.runtime}</strong><span>runtime required</span></div>
-    <div className="table-wrap"><table><thead><tr><th>Role</th><th>Page</th><th>Auth</th><th>Actions</th><th>Coverage</th></tr></thead><tbody>{plan.rows.slice(0, 80).map((row, index) => <tr key={`${row.role}-${row.page}-${index}`}><td><strong>{row.role}</strong></td><td><code>{row.page}</code></td><td>{row.authentication}</td><td style={{ maxWidth: 300, whiteSpace: 'normal' }}>{row.actions.join(' · ')}</td><td><span style={{ color: tone(row.expectation), fontSize: 10, fontWeight: 800 }}>{row.expectation.replace('_', ' ')}</span></td></tr>)}</tbody></table></div>
+    <Paginated items={plan.rows}>{(rows, start) => <div className="table-wrap"><table><thead><tr><th>Role</th><th>Page</th><th>Auth</th><th>Actions</th><th>Coverage</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.role}-${row.page}-${start + index}`}><td><strong>{row.role}</strong></td><td><code>{row.page}</code></td><td>{row.authentication}</td><td style={{ maxWidth: 300, whiteSpace: 'normal' }}>{row.actions.join(' · ')}</td><td><span style={{ color: tone(row.expectation), fontSize: 10, fontWeight: 800 }}>{row.expectation.replace('_', ' ')}</span></td></tr>)}</tbody></table></div>}</Paginated>
     <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 12 }}>{plan.limitations.join(' ')}</p>
   </Panel>;
 }
@@ -397,18 +591,87 @@ function FeatureContractPanel({ plan }: { plan?: FeatureContractPlan }) {
   const tone = (status: string) => status === 'READY_FOR_REVIEW' ? 'var(--green)' : status === 'CANDIDATE' ? 'var(--yellow)' : 'var(--cyan)';
   return <Panel title={`Feature test contract · ${plan.total} fitur`} description="Contract ini memisahkan fitur yang terdeteksi dari fitur yang benar-benar memiliki expected result dan skenario review." actions={<Badge value={`${plan.readyForReview} ready · ${plan.requiresReview} review`} />}>
     <div className="evidence-inline-meta" style={{ marginBottom: 12 }}><strong>{plan.scenarioTotals.happy}</strong><span>happy</span><strong>{plan.scenarioTotals.negative}</strong><span>negative</span><strong>{plan.scenarioTotals.boundary}</strong><span>boundary</span><strong>{plan.scenarioTotals.integrity}</strong><span>integrity</span></div>
-    <div className="table-wrap"><table><thead><tr><th>Feature</th><th>Status</th><th>Actors</th><th>Evidence</th><th>Scenarios</th></tr></thead><tbody>{plan.contracts.map((contract) => <tr key={contract.id}><td><strong>{contract.label}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{contract.category} · {Math.round(contract.confidence * 100)}%</small></td><td><span style={{ color: tone(contract.status), fontSize: 10, fontWeight: 800 }}>{contract.status.replace(/_/g, ' ')}</span></td><td>{contract.actors.slice(0, 3).join(' · ')}</td><td>{contract.routes.length} route · {contract.apiRoutes.length} API</td><td>{scenarioKinds.map((kind) => <span key={kind} className="tag" style={{ marginRight: 4 }}>{kind}: {contract.scenarios.filter((scenario) => scenario.kind === kind).length}</span>)}</td></tr>)}</tbody></table></div>
+    <Paginated items={plan.contracts}>{(contracts) => <div className="table-wrap"><table><thead><tr><th>Feature</th><th>Status</th><th>Actors</th><th>Evidence</th><th>Scenarios</th></tr></thead><tbody>{contracts.map((contract) => <tr key={contract.id}><td><strong>{contract.label}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{contract.category} · {Math.round(contract.confidence * 100)}%</small></td><td><span style={{ color: tone(contract.status), fontSize: 10, fontWeight: 800 }}>{contract.status.replace(/_/g, ' ')}</span></td><td>{contract.actors.slice(0, 3).join(' · ')}</td><td>{contract.routes.length} route · {contract.apiRoutes.length} API</td><td>{scenarioKinds.map((kind) => <span key={kind} className="tag" style={{ marginRight: 4 }}>{kind}: {contract.scenarios.filter((scenario) => scenario.kind === kind).length}</span>)}</td></tr>)}</tbody></table></div>}</Paginated>
     <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 12 }}>{plan.limitations.join(' ')}</p>
   </Panel>;
 }
 
+function BusinessFlowReviewPanel({ map, onApprove }: { map?: BusinessFlowMap; onApprove: () => void }) {
+  if (!map) return null;
+  const waiting = map.status !== 'APPROVED';
+  return (
+    <Panel
+      title="Business Flow Review"
+      description="Peta alur produk disusun dari evidence repo dan runtime discovery. Review ini menandai bagian yang masih berupa inferensi sebelum flow dijalankan."
+      actions={waiting ? <button className="primary" onClick={onApprove}><Icon name="check" size={14} /> Setujui seluruh flow</button> : <Badge value="APPROVED" />}
+    >
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+        <Badge value={map.status} />
+        <span className="tag">{map.summary.total} alur</span>
+        <span className="tag">{map.summary.critical} critical</span>
+        <span className="tag">{map.summary.needsReview} perlu review</span>
+        {map.productProfile.domainHints.map((hint) => <span key={hint} className="tag" style={{ color: 'var(--cyan)' }}>{hint}</span>)}
+      </div>
+      <div style={{ display: 'grid', gap: 8 }}>
+        {map.flows.map((flow) => (
+          <details key={flow.id} style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '10px 12px', background: 'rgba(255,255,255,.015)' }}>
+            <summary style={{ cursor: 'pointer', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <Badge value={flow.status} />
+              <strong style={{ flex: 1 }}>{flow.title}</strong>
+              <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{Math.round(flow.confidence * 100)}% confidence {flow.critical ? '· critical' : ''}</span>
+            </summary>
+            <div style={{ display: 'grid', gap: 12, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 12 }}>{flow.summary}</p>
+              <div style={{ display: 'grid', gap: 6 }}><strong>Actors &amp; trigger</strong><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{flow.actors.join(', ')} · {flow.trigger}</span></div>
+              <div style={{ display: 'grid', gap: 6 }}><strong>Urutan kandidat</strong>{flow.steps.map((step) => <div key={step.order} style={{ display: 'grid', gridTemplateColumns: '24px 1fr', gap: 8, color: 'var(--text-muted)', fontSize: 12 }}><span style={{ color: 'var(--cyan)' }}>{step.order}.</span><span>{step.action}{step.route ? ` · ${step.route}` : ''} → {step.expected}</span></div>)}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                <div><strong>Expected outcome</strong>{flow.expectedOutcome.slice(0, 5).map((item) => <small key={item} style={{ display: 'block', color: 'var(--text-muted)', marginTop: 4 }}>• {item}</small>)}</div>
+                <div><strong>Negative / recovery</strong>{flow.negativeScenarios.slice(0, 3).concat(flow.recoveryScenarios.slice(0, 2)).map((item) => <small key={item} style={{ display: 'block', color: 'var(--text-muted)', marginTop: 4 }}>• {item}</small>)}</div>
+              </div>
+              {flow.limitations.length > 0 && <small style={{ color: 'var(--yellow)' }}>Catatan: {flow.limitations.join(' · ')}</small>}
+            </div>
+          </details>
+        ))}
+      </div>
+      {map.limitations.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 11, marginBottom: 0 }}>{map.limitations.join(' · ')}</p>}
+    </Panel>
+  );
+}
+
+function BusinessFlowEditorPanel({ map, onApprove, onUpdate }: { map?: BusinessFlowMap; onApprove: () => void; onUpdate: (flowId: string, patch: Record<string, unknown>) => Promise<void> }) {
+  const [drafts, setDrafts] = useState<Record<string, BusinessFlowMap['flows'][number]>>({});
+  useEffect(() => { if (map) setDrafts(Object.fromEntries(map.flows.map((flow) => [flow.id, flow]))); }, [map]);
+  if (!map) return null;
+  const waiting = map.status !== 'APPROVED';
+  const lines = (value: string) => value.split('\n').map((item) => item.trim()).filter(Boolean);
+  const updateDraft = (flowId: string, patch: Partial<BusinessFlowMap['flows'][number]>) => setDrafts((current) => ({ ...current, [flowId]: { ...current[flowId], ...patch } }));
+  return <Panel title="Business Flow Review" description="Peta alur produk disusun dari evidence repo dan runtime discovery. Edit expected result dan langkah sebelum user menyetujui flow." actions={waiting ? <button className="primary" onClick={onApprove}><Icon name="check" size={14} /> Setujui seluruh flow</button> : <Badge value="APPROVED" />}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}><Badge value={map.status} /><span className="tag">{map.summary.total} alur</span><span className="tag">{map.summary.critical} critical</span><span className="tag">{map.summary.needsReview} perlu review</span></div>
+    <Paginated items={map.flows}>{(flows) => <div style={{ display: 'grid', gap: 8 }}>{flows.map((flow) => { const draft = drafts[flow.id] ?? flow; return <details key={flow.id} style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '10px 12px' }}>
+      <summary style={{ cursor: 'pointer', display: 'flex', gap: 10, alignItems: 'center' }}><Badge value={draft.status} /><strong style={{ flex: 1 }}>{draft.title}</strong><span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{Math.round(draft.confidence * 100)}% confidence</span></summary>
+      <div style={{ display: 'grid', gap: 10, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+        <label>Judul<input value={draft.title} onChange={(event) => updateDraft(flow.id, { title: event.target.value })} /></label>
+        <label>Ringkasan<textarea rows={2} value={draft.summary} onChange={(event) => updateDraft(flow.id, { summary: event.target.value })} /></label>
+        <label>Trigger<input value={draft.trigger} onChange={(event) => updateDraft(flow.id, { trigger: event.target.value })} /></label>
+        <label>Actors <small>(satu per baris)</small><textarea rows={2} value={draft.actors.join('\n')} onChange={(event) => updateDraft(flow.id, { actors: lines(event.target.value) })} /></label>
+        <label>Preconditions <small>(satu per baris)</small><textarea rows={2} value={draft.preconditions.join('\n')} onChange={(event) => updateDraft(flow.id, { preconditions: lines(event.target.value) })} /></label>
+        <strong>Urutan flow — edit per langkah</strong>
+        {draft.steps.map((step, index) => <div key={`${flow.id}-${index}`} style={{ display: 'grid', gridTemplateColumns: '24px 1fr 1fr', gap: 8, alignItems: 'start' }}><span style={{ color: 'var(--cyan)', paddingTop: 8 }}>{index + 1}.</span><div style={{ display: 'grid', gap: 6 }}><input aria-label={`Action langkah ${index + 1}`} value={step.action} placeholder="Action" onChange={(event) => updateDraft(flow.id, { steps: draft.steps.map((item, stepIndex) => stepIndex === index ? { ...item, action: event.target.value, order: stepIndex + 1 } : item) })} /><input aria-label={`Route langkah ${index + 1}`} value={step.route ?? ''} placeholder="Route / endpoint" onChange={(event) => updateDraft(flow.id, { steps: draft.steps.map((item, stepIndex) => stepIndex === index ? { ...item, route: event.target.value, order: stepIndex + 1 } : item) })} /></div><textarea aria-label={`Expected langkah ${index + 1}`} rows={2} value={step.expected} placeholder="Expected result" onChange={(event) => updateDraft(flow.id, { steps: draft.steps.map((item, stepIndex) => stepIndex === index ? { ...item, expected: event.target.value, order: stepIndex + 1 } : item) })} /></div>)}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}><label><strong>Expected outcome</strong><textarea rows={4} value={draft.expectedOutcome.join('\n')} onChange={(event) => updateDraft(flow.id, { expectedOutcome: lines(event.target.value) })} /></label><label><strong>Negative scenarios</strong><textarea rows={4} value={draft.negativeScenarios.join('\n')} onChange={(event) => updateDraft(flow.id, { negativeScenarios: lines(event.target.value) })} /></label><label><strong>Recovery scenarios</strong><textarea rows={4} value={draft.recoveryScenarios.join('\n')} onChange={(event) => updateDraft(flow.id, { recoveryScenarios: lines(event.target.value) })} /></label></div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}><input type="checkbox" checked={draft.critical} onChange={(event) => updateDraft(flow.id, { critical: event.target.checked })} /> Critical flow</label>
+        <button className="primary" onClick={() => void onUpdate(flow.id, { title: draft.title, summary: draft.summary, trigger: draft.trigger, actors: draft.actors, preconditions: draft.preconditions, steps: draft.steps, expectedOutcome: draft.expectedOutcome, negativeScenarios: draft.negativeScenarios, recoveryScenarios: draft.recoveryScenarios, critical: draft.critical })}><Icon name="check" size={14} /> Simpan perubahan flow</button>
+      </div>
+    </details>; })}</div>}</Paginated>
+  </Panel>;
+}
+
 function ZannoraRuns({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
-  return <div><div className="view-header"><div><h1>Execution Runs · Zannora</h1><p>Ringkasan eksekusi yang dirakit dari report JSON terbaru tiap suite.</p></div><span className="evidence-project-chip">{evidence.totals.passed}/{evidence.totals.groups} SUITES PASSED</span></div><Panel title="Real execution ledger"><div className="table-wrap"><table><thead><tr><th>Run</th><th>Passed / Total</th><th>Failed</th><th>Artifacts</th><th>Report</th></tr></thead><tbody>{evidence.groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.id}</small></td><td>{metric.passed}/{metric.total}</td><td>{metric.failed}</td><td>{group.assets.length}</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div></Panel></div>;
+  return <div><div className="view-header"><div><h1>Execution Runs · Zannora</h1><p>Ringkasan eksekusi yang dirakit dari report JSON terbaru tiap suite.</p></div><span className="evidence-project-chip">{evidence.totals.passed}/{evidence.totals.groups} SUITES PASSED</span></div><Panel title="Real execution ledger"><Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Run</th><th>Passed / Total</th><th>Failed</th><th>Artifacts</th><th>Report</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.id}</small></td><td>{metric.passed}/{metric.total}</td><td>{metric.failed}</td><td>{group.assets.length}</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div>}</Paginated></Panel></div>;
 }
 
 function ZannoraReport({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
   const total = evidence.groups.reduce((acc, group) => { const metric = evidenceMetric(group); return { passed: acc.passed + metric.passed, total: acc.total + metric.total }; }, { passed: 0, total: 0 });
-  return <div><div className="view-header"><div><h1>Final Report · Zannora</h1><p>Executive summary live dari seluruh report dan evidence yang tersedia.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Open quality report</button></div><div className="metric-grid"><Metric tone="green" label="Suite Clear" value={evidence.totals.passed + '/' + evidence.totals.groups} note="evidence groups" icon="check" /><Metric tone="cyan" label="Checks Passed" value={total.passed + '/' + total.total} note="across all reports" icon="runs" /><Metric tone="violet" label="Screenshots" value={evidence.totals.screenshots} note="checkpoint evidence" icon="reports" /><Metric tone="yellow" label="Videos" value={evidence.totals.videos} note="flow recording" icon="discovery" /></div><Panel title="Report index"><div className="table-wrap"><table><thead><tr><th>Category</th><th>Summary</th><th>Folder</th><th>Open</th></tr></thead><tbody>{evidence.groups.map((group) => <tr key={group.id}><td><Badge value={group.category} /></td><td>{group.summary}</td><td><code>{group.folder}</code></td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Evidence <Icon name="arrow" size={12} /></button></td></tr>)}</tbody></table></div></Panel></div>;
+  return <div><div className="view-header"><div><h1>Final Report · Zannora</h1><p>Executive summary live dari seluruh report dan evidence yang tersedia.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Open quality report</button></div><div className="metric-grid"><Metric tone="green" label="Suite Clear" value={evidence.totals.passed + '/' + evidence.totals.groups} note="evidence groups" icon="check" /><Metric tone="cyan" label="Checks Passed" value={total.passed + '/' + total.total} note="across all reports" icon="runs" /><Metric tone="violet" label="Screenshots" value={evidence.totals.screenshots} note="checkpoint evidence" icon="reports" /><Metric tone="yellow" label="Videos" value={evidence.totals.videos} note="flow recording" icon="discovery" /></div><Panel title="Report index"><Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Category</th><th>Summary</th><th>Folder</th><th>Open</th></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td><Badge value={group.category} /></td><td>{group.summary}</td><td><code>{group.folder}</code></td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Evidence <Icon name="arrow" size={12} /></button></td></tr>)}</tbody></table></div>}</Paginated></Panel></div>;
 }
 
 export function App() {
@@ -423,7 +686,15 @@ export function App() {
 
   const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
 
-  const [currentView, setCurrentView] = useState<View>('overview');
+  const [currentView, setCurrentView] = useState<View>(() => {
+    const routeViews: Record<string, View> = {
+      '/': 'overview', '/overview': 'overview', '/process': 'process', '/projects': 'projects',
+      '/discovery': 'discovery', '/discovery/new': 'new', '/map': 'map', '/flows': 'flows',
+      '/runs': 'runs', '/findings': 'findings', '/reports': 'reports', '/evidence': 'evidence',
+      '/settings': 'settings', '/live': 'live'
+    };
+    return routeViews[window.location.pathname.replace(/\/$/, '') || '/'] ?? 'overview';
+  });
   const [jobs, setJobs] = useState<Job[]>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<Job | null>(null);
@@ -603,8 +874,8 @@ export function App() {
         const job = await request<Job>(jobPath(activeJobId));
         if (cancelled) return;
         setActiveJob(job);
-        if (job.status === 'RUNNING' || job.status === 'QUEUED') {
-          timer = window.setTimeout(() => void pollJob(), 1200);
+        if (job.status === 'RUNNING' || job.status === 'QUEUED' || job.status === 'WAITING_REVIEW') {
+          timer = window.setTimeout(() => void pollJob(), 500);
         } else {
           void refreshJobs();
         }
@@ -674,6 +945,18 @@ export function App() {
   const zannoraExecutionTotal = zannoraExecutionGroups.reduce((total, group) => total + evidenceMetric(group).total, 0);
   const [selectedMilestone, setSelectedMilestone] = useState<ProcessNode | null>(null);
   const [expandedFindingKey, setExpandedFindingKey] = useState<string | null>(null);
+  const [findingCategoryFilter, setFindingCategoryFilter] = useState<'all' | FindingCategory>('all');
+  const [findingAreaFilter, setFindingAreaFilter] = useState<string>('all');
+  const [findingSearchQuery, setFindingSearchQuery] = useState<string>('');
+  const [findingViewMode, setFindingViewMode] = useState<'grouped' | 'list'>('grouped');
+  const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({
+    visual: true,
+    contrast: true,
+    accessibility: true,
+    content: false,
+    functional: false,
+    critical: false
+  });
 
   useEffect(() => {
     if (!selectedMilestone) return;
@@ -686,7 +969,7 @@ export function App() {
 
   const processNodes = useMemo<ProcessNode[]>(() => {
     const groups = new Map((flowEvidence?.groups || []).map((group) => [group.id, group]));
-    const active = flowJob?.status === 'RUNNING' || flowJob?.status === 'QUEUED';
+    const active = flowJob?.status === 'RUNNING' || flowJob?.status === 'QUEUED' || flowJob?.status === 'WAITING_REVIEW';
     const failedJob = flowJob?.status === 'FAILED' || flowJob?.results?.some((result) => result.status !== 'PASSED');
     const hasSource = Boolean(flowJob || flowEvidence);
     const groupStatus = (id: string, fallback: MilestoneStatus = 'READY'): MilestoneStatus => {
@@ -699,7 +982,7 @@ export function App() {
     const setupStatus: MilestoneStatus = phaseMatches(/PREPAR|DATABASE|RUNTIME|BOOT|ENV|STARTING/) ? 'RUNNING' : failedJob ? 'ATTENTION' : hasSource ? 'CLEAR' : 'READY';
     const discoveryStatus: MilestoneStatus = phaseMatches(/DISCOVER|SCAN|CRAWL|INVENTORY/) ? 'RUNNING' : failedJob && !flowJob?.inventory ? 'ATTENTION' : flowJob?.inventory || flowEvidence ? 'CLEAR' : 'READY';
     const designReady = Boolean((flowJob?.flows?.length ?? 0) > 0 || (groups.get('api-e2e')?.status === 'PASSED' && groups.get('crud')?.status === 'PASSED' && groups.get('roles')?.status === 'PASSED'));
-    const designStatus: MilestoneStatus = phaseMatches(/FLOW|DESIGN|SYNTHESIS/) ? 'RUNNING' : failedJob && !designReady ? 'ATTENTION' : designReady ? 'CLEAR' : 'READY';
+    const designStatus: MilestoneStatus = phaseMatches(/FLOW|DESIGN|SYNTHESIS|BUSINESS_FLOW_REVIEW/) ? 'RUNNING' : failedJob && !designReady ? 'ATTENTION' : designReady ? 'CLEAR' : 'READY';
     const executionGroupStatus = groupStatus('full-flow', 'READY');
     const executionStatus: MilestoneStatus = phaseMatches(/RUN|EXECUTE|PLAYWRIGHT|MAESTRO/) ? 'RUNNING' : executionGroupStatus !== 'READY' ? executionGroupStatus : (flowJob?.results?.length ? (failedJob ? 'ATTENTION' : 'CLEAR') : 'READY');
     const responsiveStatus = groupStatus('responsive', groupStatus('target-quality', 'READY'));
@@ -735,7 +1018,7 @@ export function App() {
   }, [flowEvidence, flowJob, flowSource, zannoraDesignGroups]);
 
   const processProgress = useMemo(() => Math.round((processNodes.filter((node) => node.status === 'CLEAR' || node.status === 'ATTENTION').length / Math.max(1, processNodes.length)) * 100), [processNodes]);
-  const centralProcessStatus: MilestoneStatus = flowJob?.status === 'RUNNING' || flowJob?.status === 'QUEUED' ? 'RUNNING' : processNodes.some((node) => node.status === 'BLOCKED') ? 'BLOCKED' : processNodes.some((node) => node.status === 'ATTENTION' || node.status === 'RETEST') ? 'ATTENTION' : processProgress === 100 ? 'CLEAR' : 'READY';
+  const centralProcessStatus: MilestoneStatus = flowJob?.status === 'RUNNING' || flowJob?.status === 'QUEUED' || flowJob?.status === 'WAITING_REVIEW' ? 'RUNNING' : processNodes.some((node) => node.status === 'BLOCKED') ? 'BLOCKED' : processNodes.some((node) => node.status === 'ATTENTION' || node.status === 'RETEST') ? 'ATTENTION' : processProgress === 100 ? 'CLEAR' : 'READY';
   const openEvidenceGroup = (groupId: string) => {
     setEvidenceGroupFilter('all');
     setEvidenceFocus({ groupId });
@@ -787,6 +1070,38 @@ export function App() {
       setActiveJob(updated);
       setCurrentView('runs');
       setActionSuccess('Eksekusi flow berhasil diselesaikan!');
+      setTimeout(() => setActionSuccess(''), 3000);
+    } catch (err) {
+      setActionError(errorText(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApproveBusinessFlows = async () => {
+    if (!activeJobId) return;
+    setLoading(true);
+    setActionError('');
+    try {
+      const updated = await send<Job>(`/api/v1/discovery/jobs/${activeJobId}/business-flows/approve`, {}, 'POST');
+      setActiveJob(updated);
+      setActionSuccess('Business Flow Map disetujui. Eksekusi akan dilanjutkan otomatis.');
+      setTimeout(() => setActionSuccess(''), 4000);
+    } catch (err) {
+      setActionError(errorText(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateBusinessFlow = async (flowId: string, patch: Record<string, unknown>) => {
+    if (!activeJobId) return;
+    setLoading(true);
+    setActionError('');
+    try {
+      const updated = await send<Job>(`/api/v1/discovery/jobs/${activeJobId}/business-flows/${flowId}`, patch, 'PUT');
+      setActiveJob(updated);
+      setActionSuccess('Business flow diperbarui dan menunggu approval ulang.');
       setTimeout(() => setActionSuccess(''), 3000);
     } catch (err) {
       setActionError(errorText(err));
@@ -865,6 +1180,7 @@ export function App() {
       const updated = await send<Job>(`/api/v1/discovery/jobs/${jobId}/restart`, {}, 'POST');
       setActiveJobId(updated.id);
       setActiveJob(updated);
+      setFlowSource('job');
       setCurrentView('discovery');
       setActionSuccess('Discovery job berhasil dijalankan ulang!');
       setTimeout(() => setActionSuccess(''), 3000);
@@ -936,10 +1252,10 @@ export function App() {
     if (currentView === 'discovery') {
       const timer = setTimeout(() => {
         scrollToBottom(false);
-      }, 50);
+      }, 30);
       return () => clearTimeout(timer);
     }
-  }, [currentView, filteredLogs, scrollToBottom]);
+  }, [currentView, filteredLogs.length, activeJob?.progress, activeJob?.phase, scrollToBottom]);
 
   const formatLogTime = (timeStr?: string) => {
     if (!timeStr) return '—';
@@ -1000,7 +1316,7 @@ export function App() {
 
           <div className="nav-section-title" style={{ marginTop: 12 }}>ANALYSIS</div>
           <button className={`nav-item ${currentView === 'discovery' ? 'active' : ''}`} onClick={() => setCurrentView('discovery')}>
-            <div className="nav-item-left"><Icon name="discovery" size={18} /><span>Discovery &amp; Inventory</span></div>{(activeJob?.status === 'RUNNING' || (flowSource === 'zannora' && evidenceLoading)) && <span className="status-dot active" />}
+            <div className="nav-item-left"><Icon name="discovery" size={18} /><span>Discovery &amp; Inventory</span></div>{(activeJob?.status === 'RUNNING' || activeJob?.status === 'WAITING_REVIEW' || (flowSource === 'zannora' && evidenceLoading)) && <span className="status-dot active" />}
           </button>
           <button className={`nav-item ${currentView === 'map' ? 'active' : ''}`} onClick={() => setCurrentView('map')}>
             <div className="nav-item-left"><Icon name="map" size={18} /><span>App Map</span></div><span className="nav-badge">{flowSource === 'zannora' ? zannoraRouteCount : activeJob?.inventory?.pages.length ?? 0}</span>
@@ -1014,7 +1330,7 @@ export function App() {
             <div className="nav-item-left"><Icon name="runs" size={18} /><span>Execution Runs</span></div><span className="nav-badge">{flowSource === 'zannora' ? zannoraExecutionTotal : activeJob?.results?.length ?? 0}</span>
           </button>
           <button className={`nav-item ${currentView === 'live' ? 'active' : ''}`} onClick={() => setCurrentView('live')}>
-            <div className="nav-item-left"><Icon name="discovery" size={18} /><span>Live Viewport</span></div><span className="nav-live-badge">LIVE</span>
+            <div className="nav-item-left"><Icon name="media" size={18} /><span>Media &amp; Rekaman</span></div><span className="nav-live-badge">MEDIA</span>
           </button>
 
           <div className="nav-section-title" style={{ marginTop: 12 }}>QUALITY &amp; OUTPUT</div>
@@ -1235,7 +1551,7 @@ export function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {jobs.map(j => (
+                        <Paginated items={jobs}>{(visibleJobs) => visibleJobs.map(j => (
                           <tr key={j.id}>
                             <td><strong>{j.name}</strong></td>
                             <td><Badge value={j.config?.platform ?? 'web'} /></td>
@@ -1287,7 +1603,7 @@ export function App() {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                        ))}</Paginated>
                       </tbody>
                     </table>
                   </div>
@@ -1309,7 +1625,7 @@ export function App() {
                   <button className="primary" onClick={() => setCurrentView('evidence')}><Icon name="reports" size={15} /> Evidence Center</button>
                 </div>
               </div>
-              <MilestoneFlow nodes={processNodes} progress={processProgress} centralStatus={centralProcessStatus} sourceLabel={flowSourceLabel} isLive={Boolean(flowJob && (flowJob.status === 'RUNNING' || flowJob.status === 'QUEUED'))} selectedNodeId={selectedMilestone?.id || null} onSelect={setSelectedMilestone} onNavigate={setCurrentView} />
+              <MilestoneFlow nodes={processNodes} progress={processProgress} centralStatus={centralProcessStatus} sourceLabel={flowSourceLabel} isLive={Boolean(flowJob && (flowJob.status === 'RUNNING' || flowJob.status === 'QUEUED' || flowJob.status === 'WAITING_REVIEW'))} selectedNodeId={selectedMilestone?.id || null} onSelect={setSelectedMilestone} onNavigate={setCurrentView} />
               {selectedMilestone && (
                 <div className="milestone-floating-layer">
                   <button className="milestone-floating-backdrop" aria-label="Tutup detail milestone" onClick={() => setSelectedMilestone(null)} />
@@ -1362,7 +1678,7 @@ export function App() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18 }}>
-                {jobs.map(j => (
+                <Paginated items={jobs}>{(visibleJobs) => visibleJobs.map(j => (
                   <div key={j.id} className="panel" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div>
@@ -1403,7 +1719,7 @@ export function App() {
                       </button>
                     </div>
                   </div>
-                ))}
+                ))}</Paginated>
               </div>
             </div>
           )}
@@ -1418,25 +1734,30 @@ export function App() {
                 </div>
                 <div className="header-actions">
                   <button className="quiet" style={{ color: 'var(--cyan)', borderColor: 'rgba(53, 208, 186, 0.4)' }} onClick={() => setCurrentView('live')}>
-                    <Icon name="discovery" size={16} /> Live Viewport
+                    <Icon name="media" size={16} /> Media &amp; Rekaman
                   </button>
-                  {activeJob?.status === 'RUNNING' && (
+                  {(activeJob?.status === 'RUNNING' || activeJob?.status === 'WAITING_REVIEW') && (
                     <button className="quiet" style={{ color: 'var(--red)', borderColor: 'rgba(255, 107, 122, 0.4)' }} onClick={handleCancelJob}>
                       Batalkan Discovery
                     </button>
                   )}
                   {activeJob?.status === 'COMPLETED' && (
                     <>
-                      {activeJob.config?.platform === 'web' && <button className="quiet" style={{ color: 'var(--violet)', borderColor: 'rgba(139, 124, 255, 0.45)' }} onClick={() => void handleRunQualityAudit()} disabled={loading}>
-                        <Icon name="discovery" size={16} /> Jalankan Quality Audit
-                      </button>}
-                      <button className="primary" onClick={() => setCurrentView('map')}>
-                        Buka Application Map <Icon name="arrow" size={16} />
+                      <button className="tool-btn" style={{ color: 'var(--cyan)', borderColor: 'rgba(53, 208, 186, 0.4)' }} onClick={() => activeJobId && downloadReport(activeJobId, 'pdf')} title="Unduh Dokumen Laporan Mutu PDF">
+                        <Icon name="download" size={15} /> Unduh PDF
+                      </button>
+                      <button className="primary" onClick={() => setCurrentView('reports')}>
+                        <Icon name="reports" size={15} /> Lihat Laporan Akhir
+                      </button>
+                      <button className="quiet" onClick={() => setCurrentView('map')}>
+                        Peta Aplikasi <Icon name="arrow" size={14} />
                       </button>
                     </>
                   )}
                 </div>
               </div>
+
+              {flowSource === 'job' && activeJob?.businessFlowMap && <div style={{ marginBottom: 18 }}><BusinessFlowEditorPanel map={activeJob.businessFlowMap} onApprove={() => void handleApproveBusinessFlows()} onUpdate={handleUpdateBusinessFlow} /></div>}
 
               {flowSource === 'zannora' && zannoraEvidence ? (
                 <ZannoraDiscovery evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
@@ -1444,6 +1765,81 @@ export function App() {
                 <Empty title="Tidak Ada Job Terpilih">Pilih project atau buat discovery baru.</Empty>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24 }}>
+                  {activeJob.status === 'COMPLETED' && (() => {
+                    const results = activeJob.results || [];
+                    const passed = results.filter(r => r.status === 'PASSED').length;
+                    const failed = results.filter(r => r.status === 'FAILED').length;
+                    const total = results.length || 1;
+                    const score = Math.round((passed / total) * 100);
+                    return (
+                      <div className="qc-completion-banner" style={{
+                        gridColumn: '1 / -1',
+                        padding: '18px 24px',
+                        borderRadius: 16,
+                        background: 'linear-gradient(135deg, rgba(53, 208, 186, 0.12), rgba(139, 124, 255, 0.08))',
+                        border: '1px solid rgba(53, 208, 186, 0.35)',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 16,
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <div style={{
+                            width: 50,
+                            height: 50,
+                            borderRadius: '50%',
+                            background: 'rgba(53, 208, 186, 0.2)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 24
+                          }}>
+                            🎉
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>
+                                Quality Control &amp; Audit Selesai
+                              </h3>
+                              <span style={{
+                                padding: '2px 10px',
+                                borderRadius: 999,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                background: score >= 70 ? 'rgba(53, 208, 186, 0.2)' : 'rgba(255, 179, 0, 0.2)',
+                                color: score >= 70 ? 'var(--cyan)' : '#ffb300',
+                                border: '1px solid currentColor'
+                              }}>
+                                Skor Kualitas: {score}%
+                              </span>
+                            </div>
+                            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-dim)' }}>
+                              Pengujian otomatis Playwright &amp; inspeksi layar telah tuntas. <strong>{passed} flow lulus</strong>, <strong>{failed} temuan kendala</strong>, dari total <strong>{results.length} skenario bisnis</strong>.
+                            </p>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <button
+                            className="tool-btn primary"
+                            style={{ padding: '9px 18px', fontWeight: 600 }}
+                            onClick={() => setCurrentView('reports')}
+                          >
+                            <Icon name="reports" size={15} /> Lihat Laporan Lengkap
+                          </button>
+                          <button
+                            className="tool-btn"
+                            style={{ padding: '9px 16px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)' }}
+                            onClick={() => activeJobId && downloadReport(activeJobId, 'pdf')}
+                            title="Unduh Berkas Laporan Resmi PDF"
+                          >
+                            <Icon name="download" size={15} /> Unduh PDF
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {/* Left: Timeline Stepper */}
                   <Panel title="Discovery Stages">
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -1496,7 +1892,7 @@ export function App() {
                             {stages.map((stepItem, idx) => {
                               const stepSize = 100 / stages.length;
                               const isDone = activeJob.status === 'COMPLETED' || activeJob.progress > (idx + 1) * stepSize;
-                              const isCurrent = activeJob.status === 'RUNNING' && activeJob.progress >= idx * stepSize && activeJob.progress <= (idx + 1) * stepSize;
+                              const isCurrent = (activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW') && activeJob.progress >= idx * stepSize && activeJob.progress <= (idx + 1) * stepSize;
                               return (
                                 <div key={idx} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
                                   <div style={{
@@ -1594,32 +1990,41 @@ export function App() {
                               <span className="log-text">{log.message}</span>
                             </div>
                           ))}
-                          {activeJob.status === 'RUNNING' && (
+                          {(activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW') && (
                             <div className="log-row running-indicator">
                               <span className="terminal-spinner" />
                               <span style={{ color: 'var(--cyan)', fontWeight: 600, fontSize: 11 }}>Sedang proses:</span>
                               <span style={{ color: '#E2E8F0', fontSize: 12 }}>
                                 {(() => {
                                   const isMobile = activeJob.config?.platform === 'android';
-                                  switch (activeJob.phase) {
+                                  const phase = activeJob.phase || '';
+                                  switch (phase) {
                                     case 'INITIALIZING': return 'Menginisialisasi pipeline discovery & environment...';
+                                    case 'CLONING': return 'Mengunduh repositori sumber project...';
+                                    case 'COPYING_SOURCE': return 'Menyiapkan berkas sumber dari direktori lokal...';
+                                    case 'DETECTING_STACK': return 'Menganalisis stack framework & dependency...';
                                     case 'STARTING_DEMO_APP': return 'Menyiapkan & menyalakan server aplikasi demo...';
-                                    case 'PREPARING_RUNTIME': return 'Menyiapkan workspace runtime aplikasi...';
+                                    case 'PREPARING_RUNTIME': return 'Menyiapkan workspace runtime & service aplikasi...';
+                                    case 'STARTING_SERVICES': return 'Menyalakan dev server & service backend...';
+                                    case 'HEALTH_CHECK': return 'Memeriksa kesiapan port & endpoint aplikasi...';
                                     case 'PREPARING_DATABASE': return 'Menyiapkan database isolated container...';
                                     case 'SCANNING_SOURCE': return isMobile 
                                       ? 'Scan berkas sumber Flutter/Dart (Screen, Route, Widget)...' 
-                                      : 'Scan berkas web (.tsx / .vue / .php)...';
+                                      : 'Scan berkas web (.tsx / .vue / .php / controllers / routes)...';
                                     case 'PREPARING_MOBILE': return 'Menyiapkan target mobile ADB & verifikasi backend...';
-                                    case 'CRAWLING_UI': return 'Dynamic crawler Playwright menelusuri interaksi & form...';
-                                    case 'BUILDING_INVENTORY': return 'Menyusun inventory layar & routes...';
+                                    case 'CRAWLING_UI': return 'Dynamic crawler Playwright menelusuri interaksi DOM & form...';
+                                    case 'BUILDING_INVENTORY': return 'Menyusun inventory layar, endpoint API & routes...';
+                                    case 'SYNTHESIZING_FLOWS':
                                     case 'GENERATING_FLOWS': return isMobile 
                                       ? 'Menghasilkan flow Maestro YAML untuk pengujian otomatis...' 
                                       : 'Menghasilkan spec Playwright skenario otomatis...';
+                                    case 'WAITING_REVIEW':
+                                    case 'BUSINESS_FLOW_REVIEW': return 'Menunggu review alur bisnis oleh penguji...';
                                     case 'EXECUTING_TESTS': return isMobile 
                                       ? 'Menjalankan skenario test di perangkat Android...' 
                                       : 'Menjalankan automated test di browser...';
                                     case 'QUALITY_AUDIT': return 'Menjalankan Quality Audit: browser, viewport, rule UI, screenshot, dan report...';
-                                    default: return 'Memproses langkah pengujian...';
+                                    default: return activeJob.message || 'Memproses langkah pengujian...';
                                   }
                                 })()}
                               </span>
@@ -1693,7 +2098,7 @@ export function App() {
                     {/* Left: Pages List */}
                     <div className="list-pane">
                     {mapViewMode === 'table' ? (
-                      <div className="table-wrap">
+                      <Paginated items={filteredPages} resetKey={`${mapViewMode}-${mapSearch}-${mapFilter}`}>{(visiblePages, start) => <div className="table-wrap">
                         <table>
                           <thead>
                             <tr>
@@ -1705,9 +2110,9 @@ export function App() {
                             </tr>
                           </thead>
                           <tbody>
-                            {filteredPages.map(page => (
+                            {visiblePages.map((page, index) => (
                               <tr
-                                key={page.id}
+                                key={`${page.id}-${start + index}`}
                                 onClick={() => setSelectedPageId(page.id)}
                                 style={{
                                   cursor: 'pointer',
@@ -1723,10 +2128,10 @@ export function App() {
                             ))}
                           </tbody>
                         </table>
-                      </div>
+                      </div>}</Paginated>
                     ) : (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14, padding: 16 }}>
-                        {filteredPages.map(page => (
+                      <Paginated items={filteredPages} resetKey={`${mapViewMode}-${mapSearch}-${mapFilter}`}>{(visiblePages) => <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14, padding: 16 }}>
+                        {visiblePages.map(page => (
                           <div
                             key={page.id}
                             onClick={() => setSelectedPageId(page.id)}
@@ -1744,7 +2149,7 @@ export function App() {
                             </div>
                           </div>
                         ))}
-                      </div>
+                      </div>}</Paginated>
                     )}
                     </div>
 
@@ -1779,7 +2184,7 @@ export function App() {
                           <h4 style={{ fontSize: 14, marginBottom: 12 }}>
                             Elemen Interaktif ({selectedPage.elements?.length || 0})
                           </h4>
-                          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                          <Paginated items={selectedPage.elements ?? []} resetKey={selectedPage.id}>{(elements) => <div style={{ maxHeight: 320, overflowY: 'auto' }}>
                             <table>
                               <thead>
                                 <tr>
@@ -1790,7 +2195,7 @@ export function App() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {selectedPage.elements?.map((el, idx) => (
+                                {elements.map((el, idx) => (
                                   <tr key={idx}>
                                     <td><strong>{el.name}</strong></td>
                                     <td><span style={{ color: 'var(--text-dim)' }}>{el.type}</span></td>
@@ -1800,7 +2205,7 @@ export function App() {
                                 ))}
                               </tbody>
                             </table>
-                          </div>
+                          </div>}</Paginated>
                         </div>
                       </>
                     ) : (
@@ -1836,6 +2241,8 @@ export function App() {
                 </div>
               </div>
 
+              {flowSource === 'job' && activeJob?.businessFlowMap && <div style={{ marginBottom: 18 }}><BusinessFlowEditorPanel map={activeJob.businessFlowMap} onApprove={() => void handleApproveBusinessFlows()} onUpdate={handleUpdateBusinessFlow} /></div>}
+
               {flowSource === 'zannora' && zannoraEvidence ? (
                 <ZannoraTestDesign evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
               ) : !activeJob?.flows || activeJob.flows.length === 0 ? (
@@ -1850,7 +2257,7 @@ export function App() {
                       Skenario Tergenerate ({activeJob.flows.length})
                     </div>
                     <div>
-                      {activeJob.flows.map(f => (
+                      <Paginated items={activeJob.flows}>{(flows) => flows.map(f => (
                         <div
                           key={f.id}
                           onClick={() => {
@@ -1873,7 +2280,7 @@ export function App() {
                             {f.reason && <span style={{ color: 'var(--yellow)' }}>• {f.reason}</span>}
                           </div>
                         </div>
-                      ))}
+                      ))}</Paginated>
                     </div>
                   </div>
 
@@ -1932,9 +2339,9 @@ export function App() {
                 </Empty>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                  {activeJob.results.map((res, i) => (
+                  <Paginated items={activeJob.results}>{(resultsPage, start) => resultsPage.map((res, i) => (
                     <Panel
-                      key={i}
+                      key={`${res.runId}-${start + i}`}
                       title={`Flow: ${res.flowId}`}
                       description={`Status: ${res.status} · Finished at: ${date(res.finishedAt)}`}
                       actions={<Badge value={res.status} />}
@@ -1964,7 +2371,7 @@ export function App() {
                         </table>
                       </div>
                     </Panel>
-                  ))}
+                  ))}</Paginated>
                 </div>
               )}
             </div>
@@ -1974,40 +2381,367 @@ export function App() {
           {currentView === 'findings' && (
             <div>
               <div className="view-header">
-                <div><h1>Findings &amp; Retest</h1><p>Semua temuan dari milestone audit dikumpulkan di sini dan dapat dilacak sampai retest.</p></div>
-                <div className="header-actions"><button className="quiet" onClick={() => setCurrentView('process')}><Icon name="map" size={15} /> Back to Milestone Flow</button><button className="primary" onClick={() => setEvidenceFocus({ groupId: activeEvidence?.groups.find((group) => group.id === 'target-quality' || group.id === 'quality' || group.id === 'responsive')?.id || 'quality' })}><Icon name="reports" size={15} /> Inspect Evidence Inline</button></div>
+                <div>
+                  <h1>Findings &amp; Retest</h1>
+                  <p>Semua temuan dari milestone audit dikelompokkan berdasarkan jenis masalah dengan prioritas kritis di paling atas.</p>
+                </div>
+                <div className="header-actions">
+                  <button className="quiet" onClick={() => setCurrentView('process')}><Icon name="map" size={15} /> Back to Milestone Flow</button>
+                  <button className="primary" onClick={() => setEvidenceFocus({ groupId: activeEvidence?.groups.find((group) => group.id === 'target-quality' || group.id === 'quality' || group.id === 'responsive')?.id || 'quality' })}><Icon name="reports" size={15} /> Inspect Evidence Inline</button>
+                </div>
               </div>
               {(() => {
-                const responsive = activeEvidence?.groups.find((group) => group.id === 'target-quality' || group.id === 'responsive');
-                const quality = activeEvidence?.groups.find((group) => group.id === 'quality');
                 const findings = activeOpenFindings.length;
+
+                // Category counts and sub-area counts
+                const categoryCounts: Record<FindingCategory, number> = {
+                  critical: 0,
+                  functional: 0,
+                  content: 0,
+                  visual: 0,
+                  contrast: 0,
+                  accessibility: 0
+                };
+                const areaCounts: Record<string, number> = {};
+
+                for (const f of activeOpenFindings) {
+                  const cat = classifyFindingCategory(f.area);
+                  categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+                  const a = f.area || 'unknown';
+                  areaCounts[a] = (areaCounts[a] || 0) + 1;
+                }
+
+                // Sorted findings: Critical (weight 100) -> Functional (75) -> Content (50) -> Visual (30) -> Contrast (25) -> A11y (20)
+                const sortedFindings = [...activeOpenFindings].sort((a, b) => {
+                  const sevA = getFindingSeverity(a.area).weight;
+                  const sevB = getFindingSeverity(b.area).weight;
+                  if (sevA !== sevB) return sevB - sevA;
+                  const areaCompare = (a.area || '').localeCompare(b.area || '');
+                  if (areaCompare !== 0) return areaCompare;
+                  return (a.route || '').localeCompare(b.route || '');
+                });
+
+                // Filtered by category, area, and search query
+                const filteredFindings = sortedFindings.filter((item) => {
+                  if (findingCategoryFilter !== 'all') {
+                    if (classifyFindingCategory(item.area) !== findingCategoryFilter) return false;
+                  }
+                  if (findingAreaFilter !== 'all') {
+                    if ((item.area || 'unknown') !== findingAreaFilter) return false;
+                  }
+                  if (findingSearchQuery.trim()) {
+                    const q = findingSearchQuery.toLowerCase();
+                    const matchRoute = (item.route || '').toLowerCase().includes(q);
+                    const matchName = (item.name || '').toLowerCase().includes(q);
+                    const matchLocation = (item.location || '').toLowerCase().includes(q);
+                    const matchDetail = (item.detail || '').toLowerCase().includes(q);
+                    if (!matchRoute && !matchName && !matchLocation && !matchDetail) return false;
+                  }
+                  return true;
+                });
+
+                const categoryOrder: FindingCategory[] = ['critical', 'functional', 'content', 'visual', 'contrast', 'accessibility'];
+
+                const renderFindingRow = (item: (typeof activeOpenFindings)[0], index: number) => {
+                  const key = `${item.groupId || 'finding'}-${item.route || ''}-${item.name || ''}-${index}`;
+                  const expanded = expandedFindingKey === key;
+                  const severity = getFindingSeverity(item.area);
+                  const readableArea = getAreaReadableName(item.area);
+                  const cat = classifyFindingCategory(item.area);
+
+                  return (
+                    <div className={`finding-item ${expanded ? 'expanded' : ''}`} key={key}>
+                      <button
+                        type="button"
+                        className="finding-row finding-row-toggle"
+                        aria-expanded={expanded}
+                        onClick={() => setExpandedFindingKey(expanded ? null : key)}
+                      >
+                        <span className={`finding-severity finding-cat-tag ${cat}`} style={{ minWidth: 92, textAlign: 'center', justifyContent: 'center' }}>
+                          {readableArea}
+                        </span>
+                        <span className="finding-row-copy">
+                          <strong>{item.name || 'Quality check failed'}</strong>
+                          <small>{[item.route, item.viewport, item.browser].filter(Boolean).join(' · ') || 'Lokasi tidak tersedia'}</small>
+                        </span>
+                        <span className="finding-row-status" style={severity.level === 'CRITICAL' ? { background: 'rgba(255, 105, 123, 0.2)', color: 'var(--red)' } : undefined}>
+                          {item.workflowStatus.replace('_', ' ')}
+                        </span>
+                        <span className="finding-expand-label">
+                          {expanded ? 'Tutup' : 'Lihat bukti'} <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={13} />
+                        </span>
+                      </button>
+                      {flowSource === 'job' && (
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 0 10px' }}>
+                          <select
+                            aria-label={`Status finding ${item.name || key}`}
+                            value={item.workflowStatus}
+                            disabled={loading}
+                            onChange={(event) => void updateFindingStatus(item, event.target.value as FindingWorkflowStatus)}
+                          >
+                            <option value="OPEN">Open</option>
+                            <option value="IN_PROGRESS">In Progress</option>
+                            <option value="READY_FOR_RETEST">Ready for Retest</option>
+                            <option value="PASSED">Passed</option>
+                          </select>
+                        </div>
+                      )}
+                      {expanded && <FindingEvidenceDropdown finding={item} evidence={activeEvidence} />}
+                    </div>
+                  );
+                };
+
                 return (
                   <>
                     <EvidenceInspector focus={evidenceFocus} evidence={activeEvidence} onClose={() => setEvidenceFocus(null)} onOpenAsset={(asset) => setFullScreenshot(asset.url)} />
+
+                    {/* TOP SUMMARY METRIC CARDS */}
                     <div className="finding-summary-grid">
-                      <Panel title="Open Findings"><strong className="finding-number attention">{findings}</strong><small>responsive/layout findings</small></Panel>
-                      <Panel title="Retest Queue"><strong className="finding-number">{findings > 0 ? findings : 0}</strong><small>menunggu perbaikan UI</small></Panel>
-                      <Panel title="Current Branch"><strong className="finding-branch">{findings > 0 ? 'responsive-findings' : 'none'}</strong><small>branch milestone aktif</small></Panel>
+                      <Panel title="Total Open Findings">
+                        <strong className="finding-number attention">{findings}</strong>
+                        <small>{categoryCounts.critical > 0 ? `${categoryCounts.critical} temuan berprioritas KRITIS` : 'Semua prioritas kritis aman'}</small>
+                      </Panel>
+                      <Panel title="Kritis &amp; Fungsional">
+                        <strong className="finding-number" style={{ color: categoryCounts.critical > 0 ? 'var(--red)' : 'var(--cyan)' }}>
+                          {categoryCounts.critical + categoryCounts.functional}
+                        </strong>
+                        <small>{categoryCounts.critical} kritis (auth/error/network) · {categoryCounts.functional} data/form</small>
+                      </Panel>
+                      <Panel title="Visual &amp; Aksesibilitas">
+                        <strong className="finding-number" style={{ color: '#c084fc' }}>
+                          {categoryCounts.visual + categoryCounts.contrast + categoryCounts.accessibility}
+                        </strong>
+                        <small>{categoryCounts.visual} visual · {categoryCounts.contrast} kontras · {categoryCounts.accessibility} a11y</small>
+                      </Panel>
                     </div>
-                    <Panel title="Retest Workflow" description="Perbaiki temuan, jalankan retest, lalu milestone kembali menjadi clear.">
-                      <div className="finding-flow"><span className="finding-step active"><b>01</b>Open</span><i>→</i><span className="finding-step"><b>02</b>In Progress</span><i>→</i><span className="finding-step"><b>03</b>Ready for Retest</span><i>→</i><span className="finding-step"><b>04</b>Passed</span></div>
+
+                    {/* CATEGORY OVERVIEW CARDS (CLICKABLE) */}
+                    {findings > 0 && (
+                      <div className="finding-categories-overview">
+                        {categoryOrder.map((catKey) => {
+                          const conf = FINDING_CATEGORY_CONFIG[catKey];
+                          const count = categoryCounts[catKey];
+                          if (count === 0) return null;
+                          const isActive = findingCategoryFilter === catKey;
+
+                          const subAreas = Object.keys(areaCounts).filter((a) => classifyFindingCategory(a) === catKey);
+
+                          return (
+                            <button
+                              key={catKey}
+                              type="button"
+                              className={`finding-cat-card ${catKey} ${isActive ? 'active' : ''}`}
+                              onClick={() => {
+                                setFindingCategoryFilter((prev) => (prev === catKey ? 'all' : catKey));
+                                setFindingAreaFilter('all');
+                              }}
+                            >
+                              <div>
+                                <div className="finding-cat-card-header">
+                                  <span className={`finding-cat-tag ${catKey}`}>{conf.badgeLabel}</span>
+                                  {isActive && <small style={{ color: 'var(--cyan)', fontWeight: 700, fontSize: 10 }}>● FILTER AKTIF</small>}
+                                </div>
+                                <div className="finding-cat-count">{count}</div>
+                                <div className="finding-cat-label">{conf.label}</div>
+                                <div className="finding-cat-desc">{conf.description}</div>
+                              </div>
+                              <div className="finding-cat-subbreakdown">
+                                {subAreas.map((sa) => (
+                                  <span key={sa}>
+                                    {getAreaReadableName(sa)}: {areaCounts[sa]}
+                                  </span>
+                                ))}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* WORKFLOW BAR */}
+                    <Panel title="Retest Workflow" description="Perbaiki temuan dimulai dari prioritas Kritis, jalankan retest, hingga status audit menjadi Passed.">
+                      <div className="finding-flow">
+                        <span className="finding-step active"><b>01</b>Open</span><i>→</i>
+                        <span className="finding-step"><b>02</b>In Progress</span><i>→</i>
+                        <span className="finding-step"><b>03</b>Ready for Retest</span><i>→</i>
+                        <span className="finding-step"><b>04</b>Passed</span>
+                      </div>
                     </Panel>
-                    {findings > 0 ? <Panel title="Live Findings" description={responsive?.summary || 'Finding diambil langsung dari check report yang berstatus failed.'}>
-                      <div className="finding-list">{activeOpenFindings.map((item, index) => {
-                        const key = `${item.groupId || 'finding'}-${item.route || ''}-${item.name || ''}-${index}`;
-                        const expanded = expandedFindingKey === key;
-                        return <div className={`finding-item ${expanded ? 'expanded' : ''}`} key={key}>
-                          <button type="button" className="finding-row finding-row-toggle" aria-expanded={expanded} onClick={() => setExpandedFindingKey(expanded ? null : key)}>
-                            <span className="finding-severity">{(item.area || 'OPEN').replace(/-/g, ' ').toUpperCase()}</span>
-                            <span className="finding-row-copy"><strong>{item.name || 'Quality check failed'}</strong><small>{[item.route, item.viewport, item.browser].filter(Boolean).join(' · ') || 'Lokasi tidak tersedia'}</small></span>
-                            <span className="finding-row-status">{item.workflowStatus.replace('_', ' ')}</span>
-                            <span className="finding-expand-label">{expanded ? 'Tutup' : 'Lihat bukti'} <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={13} /></span>
+
+                    {/* CONTROLS & FILTER TOOLBAR */}
+                    {findings > 0 && (
+                      <div className="finding-controls-bar">
+                        <div className="finding-filter-pills">
+                          <button
+                            type="button"
+                            className={`finding-pill ${findingCategoryFilter === 'all' && findingAreaFilter === 'all' ? 'active' : ''}`}
+                            onClick={() => {
+                              setFindingCategoryFilter('all');
+                              setFindingAreaFilter('all');
+                            }}
+                          >
+                            Semua ({findings})
                           </button>
-                          {flowSource === 'job' && <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 0 10px' }}><select aria-label={`Status finding ${item.name || key}`} value={item.workflowStatus} disabled={loading} onChange={(event) => void updateFindingStatus(item, event.target.value as FindingWorkflowStatus)}><option value="OPEN">Open</option><option value="IN_PROGRESS">In Progress</option><option value="READY_FOR_RETEST">Ready for Retest</option><option value="PASSED">Passed</option></select></div>}
-                          {expanded && <FindingEvidenceDropdown finding={item} evidence={activeEvidence} />}
-                        </div>;
-                      })}</div>
-                    </Panel> : <Empty title="Tidak ada finding terbuka">Semua hasil audit visual sudah clear atau belum ada audit yang dijalankan.</Empty>}
+                          {categoryOrder.map((catKey) => {
+                            const conf = FINDING_CATEGORY_CONFIG[catKey];
+                            const count = categoryCounts[catKey];
+                            if (count === 0) return null;
+                            const isActive = findingCategoryFilter === catKey;
+                            return (
+                              <button
+                                key={catKey}
+                                type="button"
+                                className={`finding-pill ${isActive ? 'active' : ''}`}
+                                onClick={() => {
+                                  setFindingCategoryFilter((prev) => (prev === catKey ? 'all' : catKey));
+                                  setFindingAreaFilter('all');
+                                }}
+                              >
+                                {conf.label} ({count})
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          {/* Sub-area filter dropdown */}
+                          <select
+                            style={{ fontSize: 11, padding: '5px 8px', borderRadius: 4, background: 'var(--bg-panel)', color: 'var(--text-main)', border: '1px solid var(--border)' }}
+                            value={findingAreaFilter}
+                            onChange={(e) => setFindingAreaFilter(e.target.value)}
+                            aria-label="Filter sub-kategori masalah"
+                          >
+                            <option value="all">Semua Sub-kategori ({findings})</option>
+                            {Object.keys(areaCounts).sort((a, b) => (areaCounts[b] || 0) - (areaCounts[a] || 0)).map((area) => (
+                              <option key={area} value={area}>
+                                {getAreaReadableName(area)} ({areaCounts[area]})
+                              </option>
+                            ))}
+                          </select>
+
+                          {/* Search input */}
+                          <div className="finding-search-wrap">
+                            <input
+                              type="text"
+                              className="finding-search-input"
+                              placeholder="Cari route / error..."
+                              value={findingSearchQuery}
+                              onChange={(e) => setFindingSearchQuery(e.target.value)}
+                            />
+                          </div>
+
+                          {/* View mode toggle */}
+                          <div className="finding-view-modes">
+                            <button
+                              type="button"
+                              className={`tool-btn ${findingViewMode === 'grouped' ? 'active' : ''}`}
+                              onClick={() => setFindingViewMode('grouped')}
+                              title="Tampilkan per kategori masalah"
+                            >
+                              <Icon name="overview" size={13} /> Grup
+                            </button>
+                            <button
+                              type="button"
+                              className={`tool-btn ${findingViewMode === 'list' ? 'active' : ''}`}
+                              onClick={() => setFindingViewMode('list')}
+                              title="Tampilkan daftar terurut prioritas"
+                            >
+                              <Icon name="flows" size={13} /> Daftar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* FINDINGS CONTENT */}
+                    {findings === 0 ? (
+                      <Empty title="Tidak ada finding terbuka">Semua hasil audit visual sudah clear atau belum ada audit yang dijalankan.</Empty>
+                    ) : filteredFindings.length === 0 ? (
+                      <Empty title="Tidak ada temuan yang cocok">
+                        Tidak ada temuan yang sesuai dengan filter atau kata kunci &quot;{findingSearchQuery}&quot;.
+                        <div style={{ marginTop: 12 }}>
+                          <button
+                            className="tool-btn"
+                            onClick={() => {
+                              setFindingCategoryFilter('all');
+                              setFindingAreaFilter('all');
+                              setFindingSearchQuery('');
+                            }}
+                          >
+                            Reset Filter
+                          </button>
+                        </div>
+                      </Empty>
+                    ) : findingViewMode === 'grouped' ? (
+                      /* GROUPED ACCORDION VIEW */
+                      <div className="finding-grouped-container">
+                        {categoryOrder.map((catKey) => {
+                          const conf = FINDING_CATEGORY_CONFIG[catKey];
+                          const catItems = filteredFindings.filter((f) => classifyFindingCategory(f.area) === catKey);
+                          if (catItems.length === 0) return null;
+                          const isCollapsed = Boolean(collapsedCategories[catKey]);
+
+                          return (
+                            <div className={`finding-group-block ${catKey}`} key={catKey}>
+                              <button
+                                type="button"
+                                className="finding-group-header"
+                                onClick={() =>
+                                  setCollapsedCategories((prev) => ({
+                                    ...prev,
+                                    [catKey]: !prev[catKey]
+                                  }))
+                                }
+                                aria-expanded={!isCollapsed}
+                              >
+                                <div className="finding-group-header-left">
+                                  <span className={`finding-cat-tag ${catKey}`}>{conf.badgeLabel}</span>
+                                  <div className="finding-group-title">
+                                    <strong>
+                                      {conf.label}
+                                      {catKey === 'critical' && <span style={{ color: 'var(--red)', fontSize: 11, fontWeight: 800 }}>● PRIORITAS TINGGI</span>}
+                                    </strong>
+                                    <small>{conf.description}</small>
+                                  </div>
+                                </div>
+                                <div className="finding-group-header-right">
+                                  <span className="finding-group-count-badge">{catItems.length} temuan</span>
+                                  <span style={{ color: 'var(--cyan)', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                    {isCollapsed ? 'Buka' : 'Tutup'} <Icon name={isCollapsed ? 'chevron-down' : 'chevron-up'} size={14} />
+                                  </span>
+                                </div>
+                              </button>
+
+                              {!isCollapsed && (
+                                <div className="finding-group-body">
+                                  <Paginated items={catItems} resetKey={`${catKey}-${findingAreaFilter}-${findingSearchQuery}`}>
+                                    {(pagedItems, start) => (
+                                      <div className="finding-list">
+                                        {pagedItems.map((item, localIdx) => renderFindingRow(item, start + localIdx))}
+                                      </div>
+                                    )}
+                                  </Paginated>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      /* SORTED FLAT LIST VIEW */
+                      <Panel
+                        title={`Live Findings (${filteredFindings.length})`}
+                        description="Daftar diurutkan otomatis dengan prioritas Kritis (Autentikasi, Network, Script Exception) di paling atas."
+                      >
+                        <Paginated items={filteredFindings} resetKey={`${findingCategoryFilter}-${findingAreaFilter}-${findingSearchQuery}`}>
+                          {(pagedItems, start) => (
+                            <div className="finding-list">
+                              {pagedItems.map((item, localIdx) => renderFindingRow(item, start + localIdx))}
+                            </div>
+                          )}
+                        </Paginated>
+                      </Panel>
+                    )}
                   </>
                 );
               })()}
@@ -2267,7 +3001,7 @@ export function App() {
 
                     {/* STATUS MATRIX: PAGES & SCENARIOS */}
                     <Panel title="Audit Matrix: Verifikasi Halaman & Skenario (Clear vs Bugs)">
-                      <div className="table-wrap">
+                      <Paginated items={results}>{(resultsPage, start) => <div className="table-wrap">
                         <table>
                           <thead>
                             <tr>
@@ -2279,7 +3013,7 @@ export function App() {
                             </tr>
                           </thead>
                           <tbody>
-                            {results.map((res, i) => {
+                            {resultsPage.map((res, i) => {
                               const flowObj = activeJob.flows?.find(f => f.id === res.flowId);
                               const screenshotArtifact = (res.artifacts || []).find((a: any) =>
                                 typeof a === 'string' ? a.endsWith('.png') : (a?.type === 'screenshot' || a?.path?.endsWith('.png') || a?.url)
@@ -2291,7 +3025,7 @@ export function App() {
                                 : null;
 
                               return (
-                                <tr key={i}>
+                                <tr key={start + i}>
                                   <td>
                                     <strong>{flowObj?.name || res.flowId}</strong>
                                     <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
@@ -2390,7 +3124,7 @@ export function App() {
                             })}
                           </tbody>
                         </table>
-                      </div>
+                      </div>}</Paginated>
                     </Panel>
 
                     {/* BUG & DEFECT DETAIL LEDGER */}
@@ -2418,7 +3152,7 @@ export function App() {
                         </div>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                          {allFailedSteps.map((b, idx) => (
+                          <Paginated items={allFailedSteps}>{(failedPage, start) => failedPage.map((b, idx) => (
                             <div
                               key={idx}
                               style={{
@@ -2430,7 +3164,7 @@ export function App() {
                             >
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                                 <strong style={{ color: '#FF5A79', fontSize: 13 }}>
-                                  Defect #{idx + 1}: Flow "{b.flowId}" (Step: {b.step.action})
+                                  Defect #{start + idx + 1}: Flow "{b.flowId}" (Step: {b.step.action})
                                 </strong>
                                 <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Run: {b.runId}</span>
                               </div>
@@ -2446,14 +3180,14 @@ export function App() {
                                 {b.step.errorMessage || 'Unknown execution failure'}
                               </pre>
                             </div>
-                          ))}
+                          ))}</Paginated>
                         </div>
                       )}
                     </Panel>
 
                     {/* APPLICATION MAP & ROUTE INVENTORY */}
                     <Panel title="Application Map &amp; Screen Inventory">
-                      <div className="table-wrap">
+                      <Paginated items={pages}>{(visiblePages, start) => <div className="table-wrap">
                         <table>
                           <thead>
                             <tr>
@@ -2465,8 +3199,8 @@ export function App() {
                             </tr>
                           </thead>
                           <tbody>
-                            {pages.map((p, idx) => (
-                              <tr key={idx}>
+                            {visiblePages.map((p, idx) => (
+                              <tr key={start + idx}>
                                 <td><strong>{p.title}</strong></td>
                                 <td><code style={{ color: 'var(--cyan)' }}>{p.path}</code></td>
                                 <td>{p.status || '—'}</td>
@@ -2476,7 +3210,7 @@ export function App() {
                             ))}
                           </tbody>
                         </table>
-                      </div>
+                      </div>}</Paginated>
                     </Panel>
                   </div>
                 );
@@ -2526,7 +3260,7 @@ export function App() {
                   <EvidenceInspector focus={evidenceFocus} evidence={activeEvidence} onClose={() => setEvidenceFocus(null)} onOpenAsset={(asset) => setFullScreenshot(asset.url)} />
 
                   <div className="evidence-groups">
-                    {activeEvidence.groups.filter((group) => evidenceGroupFilter === 'all' || group.category === evidenceGroupFilter).map((group) => (
+                    <Paginated items={activeEvidence.groups.filter((group) => evidenceGroupFilter === 'all' || group.category === evidenceGroupFilter)} resetKey={evidenceGroupFilter}>{(visibleGroups) => visibleGroups.map((group) => (
                       <Panel key={group.id} className="evidence-group-panel">
                         <div className="evidence-group-heading">
                           <div>
@@ -2545,34 +3279,22 @@ export function App() {
                         {group.videos.length > 0 && (
                           <div className="evidence-section">
                             <div className="evidence-section-title"><span>VIDEO FLOW</span><small>{group.videos.length} file</small></div>
-                            <div className="evidence-video-grid">
-                              {group.videos.map((asset: EvidenceAsset) => (
+                            <Paginated items={group.videos} resetKey={group.id}>{(videos) => <div className="evidence-video-grid">
+                              {videos.map((asset: EvidenceAsset) => (
                                 <div className="evidence-video-card" key={asset.relativePath}>
                                   <video controls preload="metadata" src={asset.url} onClick={() => setEvidenceFocus({ groupId: group.id, asset })} />
                                   <div className="evidence-asset-footer"><div><strong>{asset.label}</strong><small>{asset.relativePath}</small></div><a href={asset.url} download>Download</a></div>
                                 </div>
                               ))}
-                            </div>
+                            </div>}</Paginated>
                           </div>
                         )}
 
-                        {group.screenshots.length > 0 && (
-                          <details className="evidence-section evidence-screenshot-details">
-                            <summary><span>SCREENSHOT CHECKPOINT</span><small>{group.screenshots.length} file · klik untuk buka semua</small></summary>
-                            <div className="evidence-screenshot-grid">
-                              {group.screenshots.map((asset: EvidenceAsset) => (
-                                  <button className={`evidence-screenshot-card ${evidenceFocus?.asset?.relativePath === asset.relativePath ? 'selected' : ''}`} key={asset.relativePath} onClick={() => { setEvidenceFocus({ groupId: group.id, asset }); setFullScreenshot(asset.url); }} title="Klik untuk melihat screenshot dan konteks temuan">
-                                  <img src={asset.url} alt={asset.label} loading="lazy" />
-                                  <span>{asset.name}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </details>
-                        )}
+                        {group.screenshots.length > 0 && <ScreenshotGallery assets={group.screenshots} selectedPath={evidenceFocus?.asset?.relativePath} onOpen={(asset) => { setEvidenceFocus({ groupId: group.id, asset }); setFullScreenshot(asset.url); }} collapsible resetToken={group.id} />}
 
                         <div className="evidence-asset-count"><span>{group.assets.length} total artifact terindeks</span><span>Updated {date(group.report?.updatedAt || group.assets[0]?.updatedAt)}</span></div>
                       </Panel>
-                    ))}
+                    ))}</Paginated>
                   </div>
                 </>
               )}
@@ -2636,9 +3358,9 @@ export function App() {
             </div>
           )}
 
-          {/* VIEW: LIVE VIEWPORT */}
+          {/* VIEW: MEDIA & REKAMAN (MEDIA GALLERY) */}
           {currentView === 'live' && (
-            <LiveViewport job={flowSource === 'job' ? activeJob : null} evidence={flowSource === 'zannora' ? zannoraEvidence : null} />
+            <LiveViewport job={flowSource === 'job' ? activeJob : null} evidence={flowSource === 'zannora' ? zannoraEvidence : targetEvidence} />
           )}
         </main>
       </div>
