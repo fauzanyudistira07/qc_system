@@ -3,8 +3,8 @@ import { Icon } from './ui';
 import { setAuthSession } from './api';
 
 export function AdminLoginView({ onLoginSuccess }: { onLoginSuccess: (token: string, user: { email: string; name: string; role: string }) => void }) {
-  const [email, setEmail] = useState('admin@qcmaestro.com');
-  const [password, setPassword] = useState('admin12345');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -12,7 +12,7 @@ export function AdminLoginView({ onLoginSuccess }: { onLoginSuccess: (token: str
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password) {
-      setError('Email dan password wajib diisi.');
+      setError('Email dan kata sandi wajib diisi.');
       return;
     }
 
@@ -146,7 +146,8 @@ export function AdminLoginView({ onLoginSuccess }: { onLoginSuccess: (token: str
                 required
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="admin@qcmaestro.com"
+                placeholder="nama@domain.com"
+                autoComplete="email"
                 style={{
                   width: '100%',
                   padding: '10px 14px',
@@ -189,7 +190,8 @@ export function AdminLoginView({ onLoginSuccess }: { onLoginSuccess: (token: str
                 required
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="Masukkan kata sandi"
+                autoComplete="current-password"
                 style={{
                   width: '100%',
                   padding: '10px 14px',
@@ -242,42 +244,14 @@ export function AdminLoginView({ onLoginSuccess }: { onLoginSuccess: (token: str
           </button>
         </form>
 
-        {/* Staging Helper Info Card */}
+        {/* Security Notice Footer */}
         <div style={{
           marginTop: 24,
-          padding: '12px 14px',
-          background: 'rgba(15, 23, 42, 0.5)',
-          borderRadius: 8,
-          border: '1px dashed rgba(148, 163, 184, 0.2)',
+          textAlign: 'center',
           fontSize: '0.78rem',
-          color: '#94a3b8'
+          color: '#64748b'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-            <span style={{ color: '#cbd5e1', fontWeight: 600 }}>💡 Kredensial Default Staging:</span>
-            <button
-              type="button"
-              onClick={() => {
-                setEmail('admin@qcmaestro.com');
-                setPassword('admin12345');
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#38bdf8',
-                fontSize: '0.72rem',
-                cursor: 'pointer',
-                fontWeight: 600,
-                padding: 0
-              }}
-            >
-              Autofill
-            </button>
-          </div>
-          <div>Email: <code style={{ color: '#38bdf8' }}>admin@qcmaestro.com</code></div>
-          <div>Password: <code style={{ color: '#38bdf8' }}>admin12345</code></div>
-          <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 4 }}>
-            *Dapat diubah melalui file <code>.env</code> variabel <code>QC_ADMIN_EMAIL</code> dan <code>QC_ADMIN_PASSWORD</code>.
-          </div>
+          Sistem Terlindungi — Akses dibatasi khusus administrator.
         </div>
       </div>
     </div>

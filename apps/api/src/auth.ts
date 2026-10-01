@@ -17,8 +17,7 @@ export function isAuthEnabled(): boolean {
 
 export function getAdminConfig() {
   return {
-    enabled: authEnabled,
-    defaultEmail: adminEmail
+    enabled: authEnabled
   };
 }
 
