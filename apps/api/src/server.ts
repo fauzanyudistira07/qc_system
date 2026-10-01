@@ -20,6 +20,7 @@ import { buildReport } from './report/report-builder.ts';
 import { buildJsonReport } from './report/report-json.ts';
 import { generatePdfReport } from './report/report-pdf.ts';
 import { cleanupRetention, runtimePolicy } from './runtime-policy.ts';
+import { isAuthEnabled, getAdminConfig, verifyAdminCredentials, createToken, verifyToken, type AdminUser } from './auth.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '../../..');
@@ -103,6 +104,46 @@ app.addContentTypeParser(
     done(null, body);
   }
 );
+
+// Admin Staging Auth Hook
+app.addHook('onRequest', async (request, reply) => {
+  if (!isAuthEnabled()) return;
+
+  const rawUrl = request.url;
+  const pathOnly = rawUrl.split('?')[0];
+
+  // Allow health check, static web assets, and public auth endpoints
+  if (
+    pathOnly === '/health' ||
+    pathOnly.startsWith('/assets/') ||
+    pathOnly === '/' ||
+    pathOnly.startsWith('/api/v1/auth/login') ||
+    pathOnly.startsWith('/api/v1/auth/config')
+  ) {
+    return;
+  }
+
+  // Protect all /api/ endpoints
+  if (pathOnly.startsWith('/api/')) {
+    const authHeader = request.headers.authorization;
+    let token = '';
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7).trim();
+    } else if ((request.query as any)?.token) {
+      token = String((request.query as any).token).trim();
+    }
+
+    const admin = verifyToken(token);
+    if (!admin) {
+      return reply.code(401).send({
+        error: 'Unauthorized: Sesi admin tidak valid atau telah berakhir. Silakan login kembali.',
+        code: 'AUTH_REQUIRED'
+      });
+    }
+    (request as any).adminUser = admin;
+  }
+});
+
 const stateFile = path.join(artifactRoot, 'qc-state.json');
 let persistQueue = Promise.resolve();
 let persistTimer: NodeJS.Timeout | undefined;
@@ -740,6 +781,39 @@ app.get('/health', async () => ({
     timeStyle: 'long'
   }).format(new Date())
 }));
+
+// Admin Staging Auth Endpoints
+app.get('/api/v1/auth/config', async () => getAdminConfig());
+
+app.post<{ Body: { email?: string; password?: string } }>('/api/v1/auth/login', async (request, reply) => {
+  const { email, password } = request.body || {};
+  if (!email || !password) {
+    return reply.code(400).send({ success: false, error: 'Email dan password admin wajib diisi.' });
+  }
+
+  const admin = verifyAdminCredentials(email, password);
+  if (!admin) {
+    return reply.code(401).send({ success: false, error: 'Email atau password administrator salah.' });
+  }
+
+  const token = createToken(admin);
+  return reply.send({
+    success: true,
+    token,
+    user: admin
+  });
+});
+
+app.get('/api/v1/auth/me', async (request, reply) => {
+  const user = (request as any).adminUser;
+  if (!user) {
+    return reply.code(401).send({ success: false, error: 'Sesi admin tidak ditemukan.' });
+  }
+  return reply.send({ success: true, user });
+});
+
+app.post('/api/v1/auth/logout', async () => ({ success: true }));
+
 app.get('/api/v1/config', async () => ({ features: { github: Boolean(process.env.GITHUB_APP_ID || process.env.GITHUB_TOKEN), soluAi: process.env.SOLU_AI_ENABLED === 'true', playwright: true, maestro: true, maestroExecution: true, managedLocalExecution: true }, version: '0.1.0' }));
 app.get('/api/v1/projects', async () => projects);
 app.post<{ Body: Partial<Omit<Project, 'id' | 'createdAt'>> & { name: string } }>('/api/v1/projects', async (request, reply) => {

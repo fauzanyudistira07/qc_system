@@ -5,7 +5,8 @@ import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, Evi
 import { Icon, Badge, Panel, Metric, Progress, Notice, Empty } from './ui';
 import { Wizard } from './wizard';
 import { LiveViewport } from './live-viewport';
-import { request, send, jobPath, artifactUrl, downloadReport, date, duration, errorText } from './api';
+import { request, send, jobPath, artifactUrl, downloadReport, date, duration, errorText, getAuthToken, getAdminUser, clearAuthSession } from './api';
+import { AdminLoginView } from './login';
 
 type ProcessNode = {
   id: string;
@@ -695,6 +696,18 @@ export function App() {
     };
     return routeViews[window.location.pathname.replace(/\/$/, '') || '/'] ?? 'overview';
   });
+
+  const [authToken, setAuthToken] = useState<string | null>(getAuthToken);
+  const [adminUser, setAdminUser] = useState(getAdminUser);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setAuthToken(null);
+      setAdminUser(null);
+    };
+    window.addEventListener('qc:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('qc:unauthorized', handleUnauthorized);
+  }, []);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<Job | null>(null);
@@ -1274,6 +1287,13 @@ export function App() {
     return timeStr.split('T')[1]?.slice(0, 8) || timeStr;
   };
 
+  if (!authToken) {
+    return <AdminLoginView onLoginSuccess={(token, user) => {
+      setAuthToken(token);
+      setAdminUser(user);
+    }} />;
+  }
+
   return (
     <div className="app-shell">
       {/* SIDEBAR */}
@@ -1432,12 +1452,46 @@ export function App() {
               <span style={{ fontWeight: 600, color: 'var(--cyan)' }}>🕒 {wibClock}</span>
             </div>
 
+            {/* Admin Profile & Logout */}
             <div style={{
-              width: 34, height: 34, borderRadius: '50%',
-              background: 'linear-gradient(135deg, #35D0BA 0%, #8B7CFF 100%)',
-              color: '#070B14', fontWeight: 800, display: 'grid', placeItems: 'center', fontSize: 12
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '3px 10px',
+              borderRadius: 20,
+              background: 'var(--bg-panel-sub)',
+              border: '1px solid var(--border)'
             }}>
-              QA
+              <div style={{
+                width: 22, height: 22, borderRadius: '50%',
+                background: 'linear-gradient(135deg, #0284c7 0%, #6366f1 100%)',
+                color: '#ffffff', fontWeight: 800, display: 'grid', placeItems: 'center', fontSize: 11
+              }}>
+                A
+              </div>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-main)', fontWeight: 600 }}>
+                {adminUser?.email || 'admin@qcmaestro.com'}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  clearAuthSession();
+                  setAuthToken(null);
+                  setAdminUser(null);
+                }}
+                className="quiet danger-text"
+                style={{
+                  fontSize: '0.74rem',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  background: 'rgba(239, 68, 68, 0.08)'
+                }}
+                title="Keluar dari sesi Admin"
+              >
+                Sign Out
+              </button>
             </div>
           </div>
         </header>
