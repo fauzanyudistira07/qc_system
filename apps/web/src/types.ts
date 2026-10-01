@@ -1,5 +1,5 @@
-// Feature flag: set to false to hide mobile features until ready for production
-export const ENABLE_MOBILE_SUPPORT = false;
+// Feature flag: enable mobile support
+export const ENABLE_MOBILE_SUPPORT = true;
 
 export type Service = { id: string; name: string; kind: 'frontend' | 'backend' | 'worker' | 'database' | 'custom'; workingDir: string; installCommand: string; startCommand: string; healthCheck: string; port?: number; dependsOn: string[]; runtimeImage?: string };
 export type Account = { name: string; email: string; password: string; role: string };
