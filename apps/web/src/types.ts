@@ -1,3 +1,6 @@
+// Feature flag: set to false to hide mobile features until ready for production
+export const ENABLE_MOBILE_SUPPORT = false;
+
 export type Service = { id: string; name: string; kind: 'frontend' | 'backend' | 'worker' | 'database' | 'custom'; workingDir: string; installCommand: string; startCommand: string; healthCheck: string; port?: number; dependsOn: string[]; runtimeImage?: string };
 export type Account = { name: string; email: string; password: string; role: string };
 export type QualityAuditBrowser = 'chromium' | 'firefox' | 'webkit';
@@ -117,7 +120,7 @@ export const initialConfig = (): Config => ({
     submitSelector: "button[type='submit'], .btn-primary",
     successUrl: '/dashboard',
   },
-  platform: 'android',
+  platform: ENABLE_MOBILE_SUPPORT ? 'android' : 'web',
   executeFlows: true,
   businessFlowReview: { mode: 'auto' },
   qualityAudit: {

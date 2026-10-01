@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
-import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus, FeatureContractPlan, BusinessFlowMap } from './types';
+import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus, FeatureContractPlan, BusinessFlowMap, ENABLE_MOBILE_SUPPORT } from './types';
 import { Icon, Badge, Panel, Metric, Progress, Notice, Empty } from './ui';
 import { Wizard } from './wizard';
 import { LiveViewport } from './live-viewport';
@@ -1394,12 +1394,14 @@ export function App() {
                 {system?.docker.available ? 'Ready' : 'Off'}
               </small>
             </div>
-            <div className="engine-row">
-              <span><span className={`status-dot ${system?.maestro.available ? 'active' : 'warning'}`} /> Maestro Mobile</span>
-              <small style={{ color: system?.maestro.available ? 'var(--green)' : 'var(--text-dim)' }}>
-                {system?.maestro.available ? 'Ready' : 'Not installed'}
-              </small>
-            </div>
+            {ENABLE_MOBILE_SUPPORT && (
+              <div className="engine-row">
+                <span><span className={`status-dot ${system?.maestro.available ? 'active' : 'warning'}`} /> Maestro Mobile</span>
+                <small style={{ color: system?.maestro.available ? 'var(--green)' : 'var(--text-dim)' }}>
+                  {system?.maestro.available ? 'Ready' : 'Not installed'}
+                </small>
+              </div>
+            )}
           </div>
         </div>
       </aside>
@@ -3388,26 +3390,30 @@ export function App() {
                   </small>
                 </Panel>
 
-                <Panel title="Maestro CLI">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <strong>Mobile UI Automation</strong>
-                    <Badge value={system?.maestro.available ? 'ready' : 'unavailable'} />
-                  </div>
-                  <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>{system?.maestro.message || 'Mengecek Maestro CLI...'}</p>
-                </Panel>
+                {ENABLE_MOBILE_SUPPORT && (
+                  <>
+                    <Panel title="Maestro CLI">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <strong>Mobile UI Automation</strong>
+                        <Badge value={system?.maestro.available ? 'ready' : 'unavailable'} />
+                      </div>
+                      <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>{system?.maestro.message || 'Mengecek Maestro CLI...'}</p>
+                    </Panel>
 
-                <Panel title="Android Debug Bridge (ADB)">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <strong>Connected Devices</strong>
-                    <Badge value={system?.adb.available ? 'ready' : 'unavailable'} />
-                  </div>
-                  <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>{system?.adb.message || 'Mengecek ADB...'}</p>
-                  {system?.adb.devices && system.adb.devices.length > 0 && (
-                    <ul style={{ marginTop: 12, paddingLeft: 18, color: 'var(--cyan)' }}>
-                      {system.adb.devices.map(d => <li key={d}><code>{d}</code></li>)}
-                    </ul>
-                  )}
-                </Panel>
+                    <Panel title="Android Debug Bridge (ADB)">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <strong>Connected Devices</strong>
+                        <Badge value={system?.adb.available ? 'ready' : 'unavailable'} />
+                      </div>
+                      <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>{system?.adb.message || 'Mengecek ADB...'}</p>
+                      {system?.adb.devices && system.adb.devices.length > 0 && (
+                        <ul style={{ marginTop: 12, paddingLeft: 18, color: 'var(--cyan)' }}>
+                          {system.adb.devices.map(d => <li key={d}><code>{d}</code></li>)}
+                        </ul>
+                      )}
+                    </Panel>
+                  </>
+                )}
               </div>
             </div>
           )}

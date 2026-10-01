@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { errorText, send } from './api';
-import { Config, initialConfig, Job, SystemStatus } from './types';
+import { Config, initialConfig, Job, SystemStatus, ENABLE_MOBILE_SUPPORT } from './types';
 import { Badge, Field, Icon, Notice, Panel } from './ui';
 
 const steps = ['Target & Backend', 'Akun & Data Uji', 'Review & Jalankan'];
@@ -25,7 +25,7 @@ export function Wizard({
         ...cfg,
         name: initialJob.name || cfg.name || '',
         sourceType: cfg.sourceType ?? (cfg.runMode === 'managed-local' ? (cfg.backendMode === 'local' ? 'local-folder' : 'github') : 'existing-target'),
-        platform: cfg.platform ?? 'web',
+        platform: ENABLE_MOBILE_SUPPORT ? (cfg.platform ?? 'web') : 'web',
         baseUrl: cfg.baseUrl ?? '',
         backendUrl: cfg.backendUrl || (cfg.platform === 'android' ? cfg.baseUrl : '') || '',
         appId: cfg.appId || '',
@@ -86,7 +86,7 @@ export function Wizard({
         ...cfg,
         name: initialJob.name || cfg.name || '',
         sourceType: cfg.sourceType ?? (cfg.runMode === 'managed-local' ? (cfg.backendMode === 'local' ? 'local-folder' : 'github') : 'existing-target'),
-        platform: cfg.platform ?? 'web',
+        platform: ENABLE_MOBILE_SUPPORT ? (cfg.platform ?? 'web') : 'web',
         baseUrl: cfg.baseUrl ?? '',
         backendUrl: cfg.backendUrl || (cfg.platform === 'android' ? cfg.baseUrl : '') || '',
         appId: cfg.appId || '',
@@ -335,7 +335,9 @@ export function Wizard({
             </h2>
             <p>
               {[
-                'Tentukan aplikasi yang ingin diuji (Flutter Mobile APK atau Website) serta endpoint API backend-nya.',
+                ENABLE_MOBILE_SUPPORT
+                  ? 'Tentukan aplikasi yang ingin diuji (Flutter Mobile APK atau Website) serta endpoint API backend-nya.'
+                  : 'Tentukan aplikasi web yang ingin diuji serta konfigurasi backend dan database-nya.',
                 'Atur akun pengujian dan opsi database terhubung untuk eksekusi alur tes otomatis.',
                 'Periksa ringkasan konfigurasi sebelum autonomous engine mulai menjalankan pengujian.'
               ][step]}
@@ -352,56 +354,58 @@ export function Wizard({
                   <input
                     value={config.name}
                     onChange={e => patch({ name: e.target.value })}
-                    placeholder="Contoh: Tasdig Flutter Mobile QC atau Portal Sarpras Web"
+                    placeholder={ENABLE_MOBILE_SUPPORT ? "Contoh: Tasdig Flutter Mobile QC atau Portal Sarpras Web" : "Contoh: Jamaahku Travel Agent atau Portal Sarpras Web"}
                     maxLength={120}
                     autoFocus
                   />
                 </Field>
 
                 {/* PLATFORM SELECTOR (FLUTTER / MOBILE vs WEB) */}
-                <div className="field">
-                  <span>Platform Target Pengujian</span>
-                  <div className="platform-choice-grid">
-                    <button
-                      type="button"
-                      className={`choice-card ${config.platform === 'android' ? 'selected' : ''}`}
-                      onClick={() => patch({
-                        platform: 'android',
-                        baseUrl: config.backendUrl || 'http://10.0.2.2:8000',
-                      })}
-                    >
-                      <div className="choice-card-icon">
-                        <Icon name="android" size={26} />
-                      </div>
-                      <div className="choice-card-content">
-                        <strong>Mobile App (Flutter / Android APK)</strong>
-                        <p>Pengujian aplikasi mobile native pada Emulator atau Device fisik menggunakan Maestro Engine.</p>
-                      </div>
-                      {config.platform === 'android' && <span className="choice-check"><Icon name="check" size={14} /></span>}
-                    </button>
+                {ENABLE_MOBILE_SUPPORT && (
+                  <div className="field">
+                    <span>Platform Target Pengujian</span>
+                    <div className="platform-choice-grid">
+                      <button
+                        type="button"
+                        className={`choice-card ${config.platform === 'android' ? 'selected' : ''}`}
+                        onClick={() => patch({
+                          platform: 'android',
+                          baseUrl: config.backendUrl || 'http://10.0.2.2:8000',
+                        })}
+                      >
+                        <div className="choice-card-icon">
+                          <Icon name="android" size={26} />
+                        </div>
+                        <div className="choice-card-content">
+                          <strong>Mobile App (Flutter / Android APK)</strong>
+                          <p>Pengujian aplikasi mobile native pada Emulator atau Device fisik menggunakan Maestro Engine.</p>
+                        </div>
+                        {config.platform === 'android' && <span className="choice-check"><Icon name="check" size={14} /></span>}
+                      </button>
 
-                    <button
-                      type="button"
-                      className={`choice-card ${config.platform === 'web' ? 'selected' : ''}`}
-                      onClick={() => patch({
-                        platform: 'web',
-                        baseUrl: config.baseUrl || 'http://localhost:3000',
-                      })}
-                    >
-                      <div className="choice-card-icon">
-                        <Icon name="globe" size={26} />
-                      </div>
-                      <div className="choice-card-content">
-                        <strong>Web Application / Portal</strong>
-                        <p>Pengujian website responsif pada browser Chromium headless/headful menggunakan Playwright.</p>
-                      </div>
-                      {config.platform === 'web' && <span className="choice-check"><Icon name="check" size={14} /></span>}
-                    </button>
+                      <button
+                        type="button"
+                        className={`choice-card ${config.platform === 'web' ? 'selected' : ''}`}
+                        onClick={() => patch({
+                          platform: 'web',
+                          baseUrl: config.baseUrl || 'http://localhost:3000',
+                        })}
+                      >
+                        <div className="choice-card-icon">
+                          <Icon name="globe" size={26} />
+                        </div>
+                        <div className="choice-card-content">
+                          <strong>Web Application / Portal</strong>
+                          <p>Pengujian website responsif pada browser Chromium headless/headful menggunakan Playwright.</p>
+                        </div>
+                        {config.platform === 'web' && <span className="choice-check"><Icon name="check" size={14} /></span>}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* TARGET SECTION: ANDROID APK */}
-                {config.platform === 'android' && (
+                {config.platform === 'android' && ENABLE_MOBILE_SUPPORT && (
                   <div className="target-card-section">
                     <div className="inline-heading">
                       <div>
@@ -1618,22 +1622,26 @@ export function Wizard({
               <span>Playwright Web</span>
               <Badge value={system?.playwright.available ? 'ready' : 'offline'} />
             </div>
-            <div>
-              <span>Maestro Mobile</span>
-              <Badge value={system?.maestro.available ? 'ready' : 'offline'} />
-            </div>
-            <div>
-              <span>ADB Devices</span>
-              <Badge
-                value={
-                  system?.adb?.available
-                    ? system.adb.devices?.length
-                      ? `${system.adb.devices.length} Online`
-                      : 'ready'
-                    : 'offline'
-                }
-              />
-            </div>
+            {ENABLE_MOBILE_SUPPORT && (
+              <>
+                <div>
+                  <span>Maestro Mobile</span>
+                  <Badge value={system?.maestro.available ? 'ready' : 'offline'} />
+                </div>
+                <div>
+                  <span>ADB Devices</span>
+                  <Badge
+                    value={
+                      system?.adb?.available
+                        ? system.adb.devices?.length
+                          ? `${system.adb.devices.length} Online`
+                          : 'ready'
+                        : 'offline'
+                    }
+                  />
+                </div>
+              </>
+            )}
           </div>
         </aside>
       </div>
