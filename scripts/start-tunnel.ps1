@@ -5,7 +5,8 @@
 # agar GitHub dapat mengirim event push webhook ke laptop server secara otomatis.
 # ==============================================================================
 
-$Port = 4100
+# Mengekspos port 4180 (Web UI Nginx) yang otomatis mem-proxy /api ke backend 4100
+$Port = 4180
 $ToolsDir = Join-Path $PSScriptRoot "..\tools"
 $CloudflaredExe = Join-Path $ToolsDir "cloudflared.exe"
 
@@ -32,13 +33,11 @@ if ($SystemCloudflared) {
 }
 
 Write-Host "`n========================================================" -ForegroundColor Cyan
-Write-Host "  QC MAESTRO AUTONOMOUS WEBHOOK TUNNEL (PORT $Port)" -ForegroundColor Cyan
+Write-Host "  QC MAESTRO AUTONOMOUS REMOTE ACCESS & WEBHOOK TUNNEL" -ForegroundColor Cyan
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host "1. Tunggu hingga URL *.trycloudflare.com muncul di bawah."
-Write-Host "2. Buka GitHub Repo Proyek -> Settings -> Webhooks -> Add webhook"
-Write-Host "3. Payload URL : https://[SUBDOMAIN].trycloudflare.com/api/v1/webhooks/github"
-Write-Host "4. Content type: application/json"
-Write-Host "5. Events      : Just the push event"
+Write-Host "2. Buka URL tersebut di browser HP / Laptop luar jaringan untuk akses Dashboard UI."
+Write-Host "3. Untuk Webhook GitHub, gunakan URL: https://[SUBDOMAIN].trycloudflare.com/api/v1/webhooks/github"
 Write-Host "========================================================`n" -ForegroundColor Yellow
 
 # Gunakan protocol http2 (TCP) agar kebal dari pemblokiran UDP/QUIC oleh ISP atau router WiFi
