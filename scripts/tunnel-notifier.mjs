@@ -14,7 +14,9 @@ function loadEnv() {
   const config = {
     FONNTE_TOKEN: 'eE8DG7vGPArkv1SewzJd',
     FONNTE_TARGET: '08882017549',
-    PORT: '4180'
+    PORT: '4180',
+    QC_ADMIN_EMAIL: 'admin@qcmaestro.com',
+    QC_ADMIN_PASSWORD: 'admin12345'
   };
 
   if (fs.existsSync(envPath)) {
@@ -49,7 +51,7 @@ function getLocalIp() {
 }
 
 // 3. Kirim pesan WhatsApp via Fonnte
-async function sendWhatsAppNotification(token, target, publicUrl, localIp) {
+async function sendWhatsAppNotification(token, target, publicUrl, localIp, adminEmail = 'admin@qcmaestro.com', adminPassword = 'admin12345') {
   if (!token || !target) {
     console.log('[TunnelNotifier] Token atau target Fonnte belum dikonfigurasi di .env');
     return;
@@ -58,19 +60,17 @@ async function sendWhatsAppNotification(token, target, publicUrl, localIp) {
   const now = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
   const message = `🚀 *[QC MAESTRO — SERVER READY]*
 -----------------------------------------
-Laptop Server aktif dan siap diakses kapan saja!
+Laptop Server aktif dan siap diakses bersama!
 
-🌐 *Akses Luar (Internet / HP Luar):*
+🌐 *Link Akses Dashboard:*
 ${publicUrl}
 
-🏠 *Akses Lokal (1 Wi-Fi Kantor / Rumah):*
+🏠 *Akses Lokal (1 Wi-Fi):*
 http://${localIp}:4180
 
-🔗 *GitHub Webhook URL:*
-${publicUrl}/api/v1/webhooks/github
-
-🔑 *Admin Credentials:*
-Password: admin12345
+🔑 *Akun Login Dashboard:*
+Email: ${adminEmail}
+Password: ${adminPassword}
 -----------------------------------------
 Status: *ONLINE*
 Waktu: ${now} WIB`;
@@ -184,7 +184,7 @@ async function runTunnelSession(cloudflaredExe, env, localIp) {
           console.log('======================================================\n');
 
           fs.writeFileSync(path.join(rootDir, 'active-tunnel-url.txt'), publicUrl, 'utf8');
-          sendWhatsAppNotification(env.FONNTE_TOKEN, env.FONNTE_TARGET, publicUrl, localIp);
+          sendWhatsAppNotification(env.FONNTE_TOKEN, env.FONNTE_TARGET, publicUrl, localIp, env.QC_ADMIN_EMAIL, env.QC_ADMIN_PASSWORD);
         }
       }
     };
