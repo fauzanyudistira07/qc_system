@@ -703,7 +703,7 @@ export function App() {
 
   const [currentView, setCurrentView] = useState<View>(() => {
     const routeViews: Record<string, View> = {
-      '/': 'overview', '/overview': 'overview', '/process': 'process', '/projects': 'projects',
+      '/': 'overview', '/overview': 'overview', '/process': 'overview', '/projects': 'overview',
       '/discovery': 'discovery', '/discovery/new': 'new', '/map': 'map', '/flows': 'flows',
       '/runs': 'runs', '/findings': 'findings', '/reports': 'reports', '/evidence': 'evidence',
       '/settings': 'settings', '/live': 'live'
@@ -713,11 +713,18 @@ export function App() {
       return routeViews[path];
     }
     const saved = localStorage.getItem('qc_maestro_current_view') as View | null;
-    if (saved && Object.values(routeViews).includes(saved)) {
+    if (saved && saved !== ('process' as any) && Object.values(routeViews).includes(saved)) {
       return saved;
     }
     return 'overview';
   });
+
+  // Guard: alihkan jika ada sisa state 'process' lama langsung ke 'overview'
+  useEffect(() => {
+    if ((currentView as string) === 'process') {
+      setCurrentView('overview');
+    }
+  }, [currentView]);
 
   useEffect(() => {
     localStorage.setItem('qc_maestro_current_view', currentView);
@@ -2328,35 +2335,17 @@ export function App() {
             )
           )}
 
-          {/* VIEW: QC PROCESS MAP */}
-          {currentView === 'process' && (
-            <div>
-              <MilestoneFlow nodes={processNodes} progress={processProgress} centralStatus={centralProcessStatus} sourceLabel={flowSourceLabel} isLive={Boolean(flowJob && (flowJob.status === 'RUNNING' || flowJob.status === 'QUEUED' || flowJob.status === 'WAITING_REVIEW'))} selectedNodeId={selectedMilestone?.id || null} onSelect={setSelectedMilestone} onNavigate={setCurrentView} />
-              {selectedMilestone && (
-                <div className="milestone-floating-layer">
-                  <button className="milestone-floating-backdrop" aria-label="Tutup detail milestone" onClick={() => setSelectedMilestone(null)} />
-                  <MilestoneDetails node={selectedMilestone} activeJob={flowJob} evidence={flowEvidence} onClose={() => setSelectedMilestone(null)} onNavigate={setCurrentView} onOpenEvidenceGroup={openEvidenceGroup} />
-                </div>
-              )}
-              <div className="milestone-status-strip">
-                <div><span className="milestone-status-dot clear" /><strong>{processNodes.filter((node) => node.status === 'CLEAR').length} clear</strong><small>milestone selesai tanpa temuan</small></div>
-                <div><span className="milestone-status-dot running" /><strong>{processNodes.filter((node) => node.status === 'RUNNING').length} berjalan</strong><small>{activeJob?.phase?.replace(/_/g, ' ') || 'Tidak ada run aktif'}</small></div>
-                <div><span className="milestone-status-dot attention" /><strong>{processNodes.filter((node) => node.status === 'ATTENTION' || node.status === 'RETEST').length} perlu tindak lanjut</strong><small>lihat findings dan retest</small></div>
-              </div>
-            </div>
-          )}
-
           {/* VIEW: NEW DISCOVERY WIZARD */}
           {currentView === 'new' && (
             <div>
               <Wizard
                 system={system}
                 initialJob={editingJob}
-                onCancelEdit={editingJob ? () => { setEditingJob(null); setCurrentView('projects'); } : undefined}
+                onCancelEdit={editingJob ? () => { setEditingJob(null); setCurrentView('overview'); } : undefined}
                 onCreated={(newJob) => {
                   setEditingJob(null);
                   setActiveJobId(newJob.id);
-                  setCurrentView('process');
+                  setCurrentView('discovery');
                   void refreshJobs();
                 }}
               />
