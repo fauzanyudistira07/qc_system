@@ -1,5 +1,5 @@
 # Stage 1: Build Frontend
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ RUN npm install
 COPY apps/web ./apps/web
 
 WORKDIR /app/apps/web
-RUN npm run build
+RUN npx vite build
 
 # Stage 2: Serve via Nginx
 FROM nginx:alpine
