@@ -5,13 +5,23 @@ import { detectCapabilities } from '../discovery/capability-model.ts';
 
 /**
  * Menghasilkan raw Maestro YAML commands untuk login.
- * Jika form login sudah terisi akun/tersimpan (atau tombol Masuk terlihat), langsung tap Masuk.
- * Jika aplikasi sudah berada di dashboard (Beranda), perintah dilewati tanpa error.
+ * - Dismiss dialog izin notifikasi Android (Don't allow) jika muncul
+ * - Tap field NIS, isi NIS, tap field Password, isi password, tap Masuk
+ * Semua optional agar jika sudah login tidak error.
  */
-function buildLoginYamlCommands(_nis: string, _password: string): object[] {
+function buildLoginYamlCommands(nis: string, password: string): object[] {
   return [
+    // Dismiss dialog izin notifikasi Android jika muncul (urutan: Don't allow dulu)
+    { tapOn: { text: "Don't allow", optional: true } },
+    { tapOn: { text: "Don\u2019t allow", optional: true } },
+    { waitForAnimationToEnd: { timeout: 1500 } },
+    // Isi form login
+    { tapOn: { text: 'NIS / NISN', optional: true } },
+    { inputText: nis || '12345678' },
+    { tapOn: { text: 'Password', optional: true } },
+    { inputText: password || '123456' },
     { tapOn: { text: 'Masuk', optional: true } },
-    { waitForAnimationToEnd: { timeout: 3000 } }
+    { waitForAnimationToEnd: { timeout: 5000 } }
   ];
 }
 

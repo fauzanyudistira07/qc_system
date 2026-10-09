@@ -94,6 +94,11 @@ export interface StructuredJsonReport {
         path: string;
         url: string;
       }>;
+      videos: Array<{
+        name: string;
+        path: string;
+        url: string;
+      }>;
       logs: Array<{
         name: string;
         path: string;
@@ -143,44 +148,84 @@ export function buildJsonReport(
 
     const flows = results.map(r => {
       const flowDef = job.flows.find(f => f.id === r.flowId);
-      const steps = (r.steps || []).map((s: any) => ({
-        action: s.action || '',
-        status: s.status || '',
-        durationMs: s.durationMs || 0,
-        errorMessage: s.errorMessage || undefined
-      }));
+      const steps = (r.steps || []).map((s: any) => {
+        const rawMsg = s.errorMessage || '';
+        const lowerMsg = rawMsg.toLowerCase();
+        const isEngine = s.errorOrigin === 'qc_maestro_engine' ||
+          r.status === 'INFRA_ERROR' ||
+          lowerMsg.includes('driver error') ||
+          lowerMsg.includes('playwright internal') ||
+          lowerMsg.includes('spawn enoent') ||
+          lowerMsg.includes('socket hang up') ||
+          lowerMsg.includes('daemon crashed') ||
+          lowerMsg.includes('runner internal');
+        const errorOrigin = s.status === 'FAILED' ? (isEngine ? 'qc_maestro_engine' : 'user_target_application') : undefined;
+
+        return {
+          action: s.action || '',
+          status: s.status || '',
+          durationMs: s.durationMs || 0,
+          errorMessage: s.errorMessage || undefined,
+          errorOrigin
+        };
+      });
       const totalDuration = steps.reduce((sum: number, s: any) => sum + s.durationMs, 0);
 
       const screenshots: Array<{ name: string; path: string; url: string }> = [];
+      const videos: Array<{ name: string; path: string; url: string }> = [];
       const logs: Array<{ name: string; path: string; url: string }> = [];
 
       for (const a of r.artifacts || []) {
         const aPath = typeof a === 'string' ? a : a.path || '';
         const aName = typeof a === 'string' ? a.split(/[/\\]/).pop() || 'artifact' : a.name || aPath.split(/[/\\]/).pop() || 'artifact';
+        
+        // Bersihkan path relatif dari root artifact job agar valid di browser
+        const jobMarker = `/jobs/${job.id}/`;
+        const normalized = aPath.replace(/\\/g, '/');
+        const markerIdx = normalized.indexOf(jobMarker);
+        const relPath = markerIdx !== -1 
+          ? normalized.slice(markerIdx + jobMarker.length) 
+          : normalized.split('/').slice(-2).join('/');
+        const cleanRel = relPath.replace(/^\/+/, '');
+
         const item = {
           name: aName,
-          path: aPath,
-          url: `${artifactPrefix}${aPath}`
+          path: cleanRel,
+          url: `${artifactPrefix}${cleanRel}`
         };
-        if (aPath.toLowerCase().endsWith('.png') || aPath.toLowerCase().endsWith('.jpg') || (typeof a !== 'string' && a.type === 'screenshot')) {
+        const lower = cleanRel.toLowerCase();
+        if (lower.endsWith('.mp4') || lower.endsWith('.webm') || (typeof a !== 'string' && (a as any).type === 'video')) {
+          videos.push(item);
+        } else if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || (typeof a !== 'string' && (a as any).type === 'screenshot')) {
           screenshots.push(item);
         } else {
           logs.push(item);
         }
       }
 
+      const hasFailedStep = steps.some((s: any) => s.status === 'FAILED');
+      const isEngineFlow = r.status === 'INFRA_ERROR' || steps.some((s: any) => s.errorOrigin === 'qc_maestro_engine');
+      const errorOrigin = (r.status !== 'PASSED' || hasFailedStep)
+        ? (isEngineFlow ? 'qc_maestro_engine' : 'user_target_application')
+        : undefined;
+
       return {
         flowId: r.flowId,
         flowName: flowDef?.name || r.flowId,
         status: r.status,
+        errorOrigin,
         runId: r.runId,
         finishedAt: r.finishedAt,
         durationMs: totalDuration,
         steps,
         screenshots,
+        videos,
         logs
       };
     });
+
+    const userAppErrors = flows.filter(f => f.errorOrigin === 'user_target_application').length;
+    const qcEngineErrors = flows.filter(f => f.errorOrigin === 'qc_maestro_engine').length;
 
     return {
       id: att.id,
@@ -191,7 +236,11 @@ export function buildJsonReport(
       startedAt: att.startedAt,
       finishedAt: att.finishedAt,
       durationMs: att.durationMs,
-      metrics: att.metrics,
+      metrics: {
+        ...att.metrics,
+        userAppErrors,
+        qcEngineErrors
+      },
       flows
     };
   });

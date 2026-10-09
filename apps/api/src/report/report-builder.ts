@@ -646,7 +646,7 @@ export function buildReport(job: DiscoveryJob, artifactPrefix = '', options?: { 
   </div>
 
   <!-- METRICS SCORECARDS -->
-  <div class="metrics-grid">
+  <div class="metrics-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
     <div class="metric-card">
       <div class="metric-header">
         <span>QA HEALTH SCORE</span>
@@ -676,11 +676,20 @@ export function buildReport(job: DiscoveryJob, artifactPrefix = '', options?: { 
 
     <div class="metric-card">
       <div class="metric-header">
-        <span>DEFECT / GAGAL</span>
-        <span>❌</span>
+        <span>BUG KODE USER</span>
+        <span>🐞</span>
       </div>
-      <div class="metric-val" id="kpi-failed" style="color: var(--danger)">0</div>
-      <div class="metric-sub" id="kpi-failed-sub">0 Issue terdeteksi</div>
+      <div class="metric-val" id="kpi-user-bugs" style="color: var(--danger)">0</div>
+      <div class="metric-sub" id="kpi-user-bugs-sub">Aplikasi target pengguna</div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-header">
+        <span>ISU RUNNER QC</span>
+        <span>⚙️</span>
+      </div>
+      <div class="metric-val" id="kpi-engine-issues" style="color: var(--warning)">0</div>
+      <div class="metric-sub" id="kpi-engine-issues-sub">Infrastruktur driver/daemon</div>
     </div>
   </div>
 
@@ -855,11 +864,20 @@ ${JSON.stringify(structuredData)}
     document.getElementById('kpi-total').textContent = totalCount;
     document.getElementById('kpi-passed').textContent = passedCount;
 
-    const failedEl = document.getElementById('kpi-failed');
-    failedEl.textContent = failedCount;
-    failedEl.style.color = failedCount === 0 ? 'var(--success)' : 'var(--danger)';
+    const userAppErrors = allFlowsInAttempt.filter(f => f.errorOrigin === 'user_target_application').length;
+    const qcEngineErrors = allFlowsInAttempt.filter(f => f.errorOrigin === 'qc_maestro_engine').length;
 
-    document.getElementById('kpi-failed-sub').textContent = failedCount === 0 ? 'Status Clean (Bebas Bug)' : 'Perlu diperbaiki';
+    const userBugsEl = document.getElementById('kpi-user-bugs');
+    if (userBugsEl) {
+      userBugsEl.textContent = userAppErrors;
+      userBugsEl.style.color = userAppErrors === 0 ? 'var(--success)' : 'var(--danger)';
+    }
+
+    const engineIssuesEl = document.getElementById('kpi-engine-issues');
+    if (engineIssuesEl) {
+      engineIssuesEl.textContent = qcEngineErrors;
+      engineIssuesEl.style.color = qcEngineErrors === 0 ? 'var(--text-muted)' : 'var(--warning)';
+    }
 
     // Filter by Status
     let displayFlows = allFlowsInAttempt;
@@ -881,27 +899,37 @@ ${JSON.stringify(structuredData)}
         ? '<span class="status-badge badge-passed">✓ PASSED</span>'
         : '<span class="status-badge badge-failed">✕ FAILED</span>';
 
+      const originBadge = !isPassed && flow.errorOrigin
+        ? (flow.errorOrigin === 'qc_maestro_engine'
+            ? '<span class="status-badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);margin-right:8px;">● RUNNER QC</span>'
+            : '<span class="status-badge" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);margin-right:8px;">● KODE USER</span>')
+        : '';
+
       html += '<div class="flow-card ' + (isPassed ? 'flow-passed' : 'flow-failed') + '">';
       html += '  <div class="flow-header">';
       html += '    <div>';
       html += '      <div class="flow-title">' + escapeHtml(flow.flowName || flow.flowId) + '</div>';
       html += '      <div class="flow-meta">Sesi: <strong>' + escapeHtml(flow.attemptName || '') + '</strong> · Run ID: <code>' + escapeHtml(flow.runId) + '</code> · Selesai: ' + escapeHtml(flow.finishedAt) + '</div>';
       html += '    </div>';
-      html += '    <div>' + statusBadge + '</div>';
+      html += '    <div style="display:flex;align-items:center;gap:6px;">' + originBadge + statusBadge + '</div>';
       html += '  </div>';
 
       // Step table
       if (flow.steps && flow.steps.length) {
         html += '  <div class="steps-table-wrap">';
         html += '    <table class="steps-table">';
-        html += '      <thead><tr><th>#</th><th>Aksi / Perintah</th><th>Status</th><th>Durasi</th><th>Pesan</th></tr></thead>';
+        html += '      <thead><tr><th>#</th><th>Aksi / Perintah</th><th>Status</th><th>Asal Error</th><th>Durasi</th><th>Pesan</th></tr></thead>';
         html += '      <tbody>';
         flow.steps.forEach((st, sIdx) => {
           const stPass = st.status === 'PASSED';
+          const originCell = !stPass && st.errorOrigin
+            ? (st.errorOrigin === 'qc_maestro_engine' ? '<span style="color:#f59e0b;font-weight:700">RUNNER QC</span>' : '<span style="color:#ef4444;font-weight:700">KODE USER</span>')
+            : '<span style="color:var(--text-dim)">—</span>';
           html += '      <tr>';
           html += '        <td style="color:var(--text-dim)">' + (sIdx + 1) + '</td>';
           html += '        <td><code class="step-code">' + escapeHtml(st.action) + '</code></td>';
           html += '        <td><span style="color:' + (stPass ? 'var(--success)' : 'var(--danger)') + ';font-weight:700">' + escapeHtml(st.status) + '</span></td>';
+          html += '        <td>' + originCell + '</td>';
           html += '        <td style="color:var(--text-muted)">' + (st.durationMs || 0) + ' ms</td>';
           html += '        <td style="color:var(--danger)">' + escapeHtml(st.errorMessage || '') + '</td>';
           html += '      </tr>';
@@ -918,6 +946,19 @@ ${JSON.stringify(structuredData)}
           html += '    <div class="gallery-card" onclick="openLightbox(\\'' + encodeURI(sc.url) + '\\', \\'' + escapeHtml(sc.name) + '\\')">';
           html += '      <img class="gallery-img" src="' + escapeHtml(sc.url) + '" alt="' + escapeHtml(sc.name) + '" loading="lazy">';
           html += '      <div class="gallery-caption">📸 ' + escapeHtml(sc.name) + '</div>';
+          html += '    </div>';
+        });
+        html += '  </div>';
+      }
+
+      // Video recording
+      if (flow.videos && flow.videos.length) {
+        html += '  <div style="margin-top: 16px;">';
+        html += '    <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px; color: var(--primary);">🎬 Rekaman Video Eksekusi:</div>';
+        flow.videos.forEach(v => {
+          html += '    <div style="margin-bottom: 12px; background: var(--bg-card-inner); padding: 12px; border-radius: var(--radius); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 8px;">';
+          html += '      <video controls playsinline preload="metadata" style="width: 100%; max-width: 480px; max-height: 480px; border-radius: 8px; background: #000;" src="' + escapeHtml(v.url) + '"></video>';
+          html += '      <div><a href="' + escapeHtml(v.url) + '" target="_blank" download style="color: var(--primary); font-size: 12px; text-decoration: none; font-weight: 600;">⬇️ Unduh Video (' + escapeHtml(v.name) + ')</a></div>';
           html += '    </div>';
         });
         html += '  </div>';

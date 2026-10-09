@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
+import './tailwind.css';
 import './styles.css';
+import './polish.css';
 import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus, FeatureContractPlan, BusinessFlowMap, ENABLE_MOBILE_SUPPORT } from './types';
 import { Icon, Badge, Panel, Metric, Progress, Notice, Empty } from './ui';
 import { Wizard } from './wizard';
 import { LiveViewport } from './live-viewport';
 import { request, send, jobPath, artifactUrl, downloadReport, date, duration, errorText, getAuthToken, getAdminUser, clearAuthSession } from './api';
 import { AdminLoginView } from './login';
+import { ProjectSwitcher } from './project-switcher';
+import { BusinessFlowVisualizer } from './business-flow-visualizer';
 
 type ProcessNode = {
   id: string;
@@ -36,7 +40,7 @@ function Paginated<T>({ items, resetKey, children }: { items: T[]; resetKey?: st
     {children(items.slice(start, start + pageSize), start)}
     {pageCount > 1 && <nav className="evidence-pagination" aria-label="Navigasi halaman data">
       <button className="quiet" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Sebelumnya</button>
-      <span aria-live="polite">{start + 1}–{Math.min(start + pageSize, items.length)} dari {items.length} · halaman {page + 1}/{pageCount}</span>
+      <span aria-live="polite">{start + 1}â€“{Math.min(start + pageSize, items.length)} dari {items.length} · halaman {page + 1}/{pageCount}</span>
       <button className="quiet" disabled={page >= pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>Berikutnya</button>
     </nav>}
   </>;
@@ -60,7 +64,7 @@ function CapabilityProfilePanel({ profile }: { profile?: CapabilityProfile }) {
         <Paginated items={profile.capabilities}>{(capabilities) => capabilities.map((capability) => (
           <details key={capability.id} style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-panel-sub)' }}>
             <summary style={{ cursor: 'pointer', padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ color: capability.status === 'detected' ? 'var(--green)' : 'var(--yellow)' }}>●</span>
+              <span style={{ color: capability.status === 'detected' ? 'var(--green)' : 'var(--yellow)' }}>● </span>
               <strong style={{ flex: 1 }}>{capability.label}</strong>
               <small style={{ color: 'var(--text-dim)' }}>{Math.round(capability.confidence * 100)}%</small>
             </summary>
@@ -174,16 +178,26 @@ function MilestoneFlow({ nodes, progress, centralStatus, sourceLabel, isLive, se
     <section className="milestone-flow" aria-label="QC Maestro milestone flow">
       <div className="milestone-flow-header">
         <div>
-          <div className="milestone-kicker">LIVE MILESTONE FLOW / {nodes.length} CHECKPOINTS</div>
-          <h2>Website Milestone Flow</h2>
-          <p>Alur QC dari input website sampai final report. Klik milestone untuk melihat substep, cabang, dan outputnya.</p>
+          <div className="milestone-kicker">{nodes.length} CHECKPOINTS · PIPELINE ORCHESTRATION</div>
+          <h2>Milestone Flow</h2>
+          <p>Alur QC aktif dari discovery hingga final report. Klik checkpoint untuk melihat substep, cabang verifikasi, dan output evidence.</p>
         </div>
-        <div className={`milestone-live-badge ${isLive ? 'is-live' : 'is-snapshot'}`}><span className="milestone-live-dot" /><div><strong>{isLive ? 'LIVE MILESTONE FLOW' : 'EVIDENCE SNAPSHOT'}</strong><small>{sourceLabel}</small></div></div>
+        <div className="milestone-flow-actions">
+          <div className={`milestone-live-badge ${isLive ? 'is-live' : 'is-snapshot'}`}>
+            <span className="milestone-live-dot" />
+            <div>
+              <strong>{isLive ? 'LIVE RUN' : 'VERIFIED PIPELINE'}</strong>
+              <small>{completion}/{nodes.length} Checkpoints Clear</small>
+            </div>
+          </div>
+          <button type="button" className="primary" onClick={() => onNavigate('evidence')}>
+            <Icon name="reports" size={15} /> Evidence Center
+          </button>
+        </div>
       </div>
 
       <div className="milestone-flow-canvas">
         <div className="milestone-grid" />
-        <div className="milestone-watermark">WEBSITE PROJECT MILESTONE FLOW</div>
         <svg className="milestone-connectors" viewBox="0 0 1000 760" preserveAspectRatio="none" aria-hidden="true">
           {nodes.slice(1).map((node, index) => {
             const from = nodes[index];
@@ -267,7 +281,7 @@ function ScreenshotGrid({ assets, selectedPath, onOpen, resetToken }: { assets: 
     </div>
     {pageCount > 1 && <nav className="evidence-pagination" aria-label="Halaman screenshot">
       <button className="quiet" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0}>Sebelumnya</button>
-      <span aria-live="polite">{pageStart + 1}–{Math.min(pageStart + pageSize, assets.length)} dari {assets.length} gambar · halaman {page + 1}/{pageCount}</span>
+      <span aria-live="polite">{pageStart + 1}â€“{Math.min(pageStart + pageSize, assets.length)} dari {assets.length} gambar · halaman {page + 1}/{pageCount}</span>
       <button className="quiet" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page + 1 >= pageCount}>Berikutnya</button>
     </nav>}
   </>;
@@ -475,7 +489,7 @@ function FindingEvidenceDropdown({ finding, evidence }: { finding: EvidenceFindi
         <div><span>AREA</span><strong>{finding.area || 'UI quality'}</strong></div>
       </div>
       <div className="finding-evidence-body">
-        {screenshot ? <a className="finding-evidence-image" href={screenshot.url} target="_blank" rel="noreferrer"><img src={screenshot.url} alt={`Screenshot bukti ${finding.name || 'finding'}`} /><span>Buka screenshot penuh ↗</span></a> : <div className="finding-evidence-no-image">Screenshot untuk checkpoint ini belum tersedia.</div>}
+        {screenshot ? <a className="finding-evidence-image" href={screenshot.url} target="_blank" rel="noreferrer"><img src={screenshot.url} alt={`Screenshot bukti ${finding.name || 'finding'}`} /><span>Buka screenshot penuh ← —</span></a> : <div className="finding-evidence-no-image">Screenshot untuk checkpoint ini belum tersedia.</div>}
         <div className="finding-evidence-copy"><span className="evidence-group-kicker">KESIMPULAN MASALAH</span><strong className="finding-evidence-summary">{findingDescription(finding)}</strong><span className="evidence-group-kicker finding-detail-kicker">DETAIL ENGINE / ELEMEN TERDETEKSI</span><p>{finding.detail || 'Engine menandai pemeriksaan ini sebagai failed.'}</p>{screenshot && <small>{screenshot.relativePath}</small>}</div>
       </div>
     </div>
@@ -534,14 +548,14 @@ function ZannoraOverview({ evidence, onNavigate, onOpenEvidence }: { evidence: Z
   const findings = zannoraFindings(evidence).length;
   return (
     <div>
-      <div className="view-header"><div><h1>Project Summary · Zannora</h1><p>Snapshot real dari evidence QC terakhir. Semua angka di bawah berasal dari report yang tersimpan.</p></div><div className="header-actions"><button className="quiet" onClick={() => onNavigate('process')}><Icon name="map" size={15} /> Milestone Flow</button><button className="primary" onClick={() => onNavigate('evidence')}><Icon name="reports" size={15} /> Evidence Center</button></div></div>
+      <div className="view-header"><div><h1>Project Summary</h1><p>Snapshot real dari evidence QC terakhir. Semua angka di bawah berasal dari report yang tersimpan.</p></div><div className="header-actions"><button className="quiet" onClick={() => onNavigate('process')}><Icon name="map" size={15} /> Milestone Flow</button><button className="primary" onClick={() => onNavigate('evidence')}><Icon name="reports" size={15} /> Evidence Center</button></div></div>
       <div className="metric-grid">
         <Metric tone="cyan" label="Route Terpetakan" value={routes.length} note="route pada quality scope" icon="map" onClick={() => onNavigate('map')} />
         <Metric tone="violet" label="Test Design Suites" value={designGroups.length} note={designGroups.reduce((n, group) => n + evidenceMetric(group).total, 0) + ' assertion'} icon="flows" onClick={() => onNavigate('flows')} />
         <Metric tone="yellow" label="Execution Checks" value={executionMetric.total} note={executionMetric.passed + ' passed · ' + (executionMetric.total - executionMetric.passed) + ' failed'} icon="runs" onClick={() => onNavigate('runs')} />
         <Metric tone="green" label="Pass Rate" value={passRate + '%'} note={findings + ' open finding'} icon="warning" onClick={() => onNavigate('findings')} />
       </div>
-      <Panel title="Zannora Evidence Snapshot" description={'Generated ' + date(evidence.generatedAt) + ' · ' + evidence.totals.assets + ' artifact terindeks'}>
+      <Panel title="Evidence Snapshot" description={'Generated ' + date(evidence.generatedAt) + ' · ' + evidence.totals.assets + ' artifact terindeks'}>
         <Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Suite</th><th>Status</th><th>Coverage</th><th>Evidence</th><th>Action</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.category}</small></td><td><Badge value={group.status} /></td><td>{metric.passed}/{metric.total}</td><td>{group.screenshots.length} screenshot · {group.videos.length} video</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div>}</Paginated>
       </Panel>
     </div>
@@ -550,19 +564,19 @@ function ZannoraOverview({ evidence, onNavigate, onOpenEvidence }: { evidence: Z
 
 function ZannoraDiscovery({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
   const routes = zannoraRoutes(evidence);
-  return <div><div className="view-header"><div><h1>Discovery &amp; Inventory · Zannora</h1><p>Inventory diambil dari scope quality/responsive dan suite yang benar-benar dijalankan.</p></div><span className="evidence-project-chip">LIVE EVIDENCE SNAPSHOT</span></div><div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.25fr) minmax(280px, .75fr)', gap: 18 }}><Panel title={'Evidence pipeline (' + evidence.groups.length + ' suites)'}><Paginated items={evidence.groups}>{(groups) => <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{groups.map((group) => { const metric = evidenceMetric(group); return <button key={group.id} className="milestone-related-evidence-card" onClick={() => onOpenEvidence(group.id)}><span><strong>{group.title}</strong><small>{metric.passed}/{metric.total} checks · {group.assets.length} asset · {date(group.report?.updatedAt)}</small></span><Badge value={group.status} /><Icon name="arrow" size={13} /></button>; })}</div>}</Paginated></Panel><Panel title={'Route scope (' + routes.length + ')'}><Paginated items={routes}>{(visibleRoutes) => <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{visibleRoutes.length ? visibleRoutes.map((route) => <code key={route} style={{ color: 'var(--cyan)', padding: '8px 10px', background: 'var(--bg-panel)', borderRadius: 6 }}>{route}</code>) : <Empty title="Route scope belum tersedia">Report suite belum membawa daftar route.</Empty>}</div>}</Paginated></Panel></div></div>;
+  return <div><div className="view-header"><div><h1>Discovery &amp; Inventory</h1><p>Inventory diambil dari scope quality/responsive dan suite yang benar-benar dijalankan.</p></div><span className="evidence-project-chip">LIVE EVIDENCE SNAPSHOT</span></div><div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.25fr) minmax(280px, .75fr)', gap: 18 }}><Panel title={'Evidence pipeline (' + evidence.groups.length + ' suites)'}><Paginated items={evidence.groups}>{(groups) => <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{groups.map((group) => { const metric = evidenceMetric(group); return <button key={group.id} className="milestone-related-evidence-card" onClick={() => onOpenEvidence(group.id)}><span><strong>{group.title}</strong><small>{metric.passed}/{metric.total} checks · {group.assets.length} asset · {date(group.report?.updatedAt)}</small></span><Badge value={group.status} /><Icon name="arrow" size={13} /></button>; })}</div>}</Paginated></Panel><Panel title={'Route scope (' + routes.length + ')'}><Paginated items={routes}>{(visibleRoutes) => <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{visibleRoutes.length ? visibleRoutes.map((route) => <code key={route} style={{ color: 'var(--cyan)', padding: '8px 10px', background: 'var(--bg-panel)', borderRadius: 6 }}>{route}</code>) : <Empty title="Route scope belum tersedia">Report suite belum membawa daftar route.</Empty>}</div>}</Paginated></Panel></div></div>;
 }
 
 function ZannoraAppMap({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
   const routes = zannoraRoutes(evidence);
   const quality = evidence.groups.find((group) => group.id === 'quality');
   const qualityGroups = evidence.groups.filter((group) => group.category === 'UI Quality');
-  return <div><div className="view-header"><div><h1>App Map · Zannora</h1><p>Route inventory real dari report quality, dengan browser, viewport, dan status evidence.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Inspect quality evidence</button></div><div className="split-view"><div className="list-pane"><div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>Routes ({routes.length})</div><Paginated items={routes}>{(visibleRoutes) => visibleRoutes.map((route) => <div key={route} style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}><strong>{route}</strong><small style={{ display: 'block', marginTop: 5, color: 'var(--text-dim)' }}>covered by quality audit · desktop / tablet / mobile</small></div>)}</Paginated></div><div className="detail-pane"><Panel title="Inventory source" description={quality?.summary}><div className="evidence-inline-meta"><Badge value={quality?.status ?? 'UNKNOWN'} /><span>{quality?.metadata?.browsers?.join(' · ') || 'browser scope unavailable'}</span><span>{quality?.metadata?.viewports?.join(' · ') || 'viewport scope unavailable'}</span></div><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>App Map ini memakai daftar route yang tersimpan di report; bukan data demo atau hasil hitungan statis.</p></Panel><Panel title="Quality coverage"><Paginated items={qualityGroups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Area</th><th>Checks</th><th>Status</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td>{group.title}</td><td>{metric.passed}/{metric.total}</td><td><Badge value={group.status} /></td></tr>; })}</tbody></table></div>}</Paginated></Panel></div></div></div>;
+  return <div><div className="view-header"><div><h1>App Map</h1><p>Route inventory real dari report quality, dengan browser, viewport, dan status evidence.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Inspect quality evidence</button></div><div className="split-view"><div className="list-pane"><div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>Routes ({routes.length})</div><Paginated items={routes}>{(visibleRoutes) => visibleRoutes.map((route) => <div key={route} style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}><strong>{route}</strong><small style={{ display: 'block', marginTop: 5, color: 'var(--text-dim)' }}>covered by quality audit · desktop / tablet / mobile</small></div>)}</Paginated></div><div className="detail-pane"><Panel title="Inventory source" description={quality?.summary}><div className="evidence-inline-meta"><Badge value={quality?.status ?? 'UNKNOWN'} /><span>{quality?.metadata?.browsers?.join(' · ') || 'browser scope unavailable'}</span><span>{quality?.metadata?.viewports?.join(' · ') || 'viewport scope unavailable'}</span></div><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>App Map ini memakai daftar route yang tersimpan di report; bukan data demo atau hasil hitungan statis.</p></Panel><Panel title="Quality coverage"><Paginated items={qualityGroups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Area</th><th>Checks</th><th>Status</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td>{group.title}</td><td>{metric.passed}/{metric.total}</td><td><Badge value={group.status} /></td></tr>; })}</tbody></table></div>}</Paginated></Panel></div></div></div>;
 }
 
 function ZannoraTestDesign({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
   const groups = evidence.groups.filter((group) => ['API & CRUD', 'Web Flow'].includes(group.category));
-  return <div><div className="view-header"><div><h1>Test Design · Zannora</h1><p>Suite nyata yang menjadi dasar test design: API, CRUD, role access, navigation, dan full flow.</p></div><button className="quiet" onClick={() => onOpenEvidence('api-e2e')}><Icon name="reports" size={15} /> Open source evidence</button></div><Paginated items={groups}>{(visibleGroups) => <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>{visibleGroups.map((group) => { const metric = evidenceMetric(group); return <Panel key={group.id} title={group.title} description={group.summary} actions={<Badge value={group.status} />}><div className="evidence-inline-meta"><strong>{metric.passed}/{metric.total}</strong><span>{group.category}</span></div><div className="evidence-asset-count"><span>{group.assets.length} artifact</span><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Detail &amp; evidence <Icon name="arrow" size={12} /></button></div></Panel>; })}</div>}</Paginated></div>;
+  return <div><div className="view-header"><div><h1>Test Design</h1><p>Suite nyata yang menjadi dasar test design: API, CRUD, role access, navigation, dan full flow.</p></div><button className="quiet" onClick={() => onOpenEvidence('api-e2e')}><Icon name="reports" size={15} /> Open source evidence</button></div><Paginated items={groups}>{(visibleGroups) => <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>{visibleGroups.map((group) => { const metric = evidenceMetric(group); return <Panel key={group.id} title={group.title} description={group.summary} actions={<Badge value={group.status} />}><div className="evidence-inline-meta"><strong>{metric.passed}/{metric.total}</strong><span>{group.category}</span></div><div className="evidence-asset-count"><span>{group.assets.length} artifact</span><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Detail &amp; evidence <Icon name="arrow" size={12} /></button></div></Panel>; })}</div>}</Paginated></div>;
 }
 
 function CrudCoveragePanel({ plan }: { plan?: import('./types').CrudPlan }) {
@@ -624,10 +638,10 @@ function BusinessFlowReviewPanel({ map, onApprove }: { map?: BusinessFlowMap; on
             <div style={{ display: 'grid', gap: 12, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
               <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 12 }}>{flow.summary}</p>
               <div style={{ display: 'grid', gap: 6 }}><strong>Actors &amp; trigger</strong><span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{flow.actors.join(', ')} · {flow.trigger}</span></div>
-              <div style={{ display: 'grid', gap: 6 }}><strong>Urutan kandidat</strong>{flow.steps.map((step) => <div key={step.order} style={{ display: 'grid', gridTemplateColumns: '24px 1fr', gap: 8, color: 'var(--text-muted)', fontSize: 12 }}><span style={{ color: 'var(--cyan)' }}>{step.order}.</span><span>{step.action}{step.route ? ` · ${step.route}` : ''} → {step.expected}</span></div>)}</div>
+              <div style={{ display: 'grid', gap: 6 }}><strong>Urutan kandidat</strong>{flow.steps.map((step) => <div key={step.order} style={{ display: 'grid', gridTemplateColumns: '24px 1fr', gap: 8, color: 'var(--text-muted)', fontSize: 12 }}><span style={{ color: 'var(--cyan)' }}>{step.order}.</span><span>{step.action}{step.route ? ` · ${step.route}` : ''} ← ’ {step.expected}</span></div>)}</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-                <div><strong>Expected outcome</strong>{flow.expectedOutcome.slice(0, 5).map((item) => <small key={item} style={{ display: 'block', color: 'var(--text-muted)', marginTop: 4 }}>• {item}</small>)}</div>
-                <div><strong>Negative / recovery</strong>{flow.negativeScenarios.slice(0, 3).concat(flow.recoveryScenarios.slice(0, 2)).map((item) => <small key={item} style={{ display: 'block', color: 'var(--text-muted)', marginTop: 4 }}>• {item}</small>)}</div>
+                <div><strong>Expected outcome</strong>{flow.expectedOutcome.slice(0, 5).map((item) => <small key={item} style={{ display: 'block', color: 'var(--text-muted)', marginTop: 4 }}>â€¢ {item}</small>)}</div>
+                <div><strong>Negative / recovery</strong>{flow.negativeScenarios.slice(0, 3).concat(flow.recoveryScenarios.slice(0, 2)).map((item) => <small key={item} style={{ display: 'block', color: 'var(--text-muted)', marginTop: 4 }}>â€¢ {item}</small>)}</div>
               </div>
               {flow.limitations.length > 0 && <small style={{ color: 'var(--yellow)' }}>Catatan: {flow.limitations.join(' · ')}</small>}
             </div>
@@ -667,12 +681,12 @@ function BusinessFlowEditorPanel({ map, onApprove, onUpdate }: { map?: BusinessF
 }
 
 function ZannoraRuns({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
-  return <div><div className="view-header"><div><h1>Execution Runs · Zannora</h1><p>Ringkasan eksekusi yang dirakit dari report JSON terbaru tiap suite.</p></div><span className="evidence-project-chip">{evidence.totals.passed}/{evidence.totals.groups} SUITES PASSED</span></div><Panel title="Real execution ledger"><Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Run</th><th>Passed / Total</th><th>Failed</th><th>Artifacts</th><th>Report</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.id}</small></td><td>{metric.passed}/{metric.total}</td><td>{metric.failed}</td><td>{group.assets.length}</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div>}</Paginated></Panel></div>;
+  return <div><div className="view-header"><div><h1>Execution Runs</h1><p>Ringkasan eksekusi yang dirakit dari report JSON terbaru tiap suite.</p></div><span className="evidence-project-chip">{evidence.totals.passed}/{evidence.totals.groups} SUITES PASSED</span></div><Panel title="Real execution ledger"><Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Run</th><th>Passed / Total</th><th>Failed</th><th>Artifacts</th><th>Report</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.id}</small></td><td>{metric.passed}/{metric.total}</td><td>{metric.failed}</td><td>{group.assets.length}</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div>}</Paginated></Panel></div>;
 }
 
 function ZannoraReport({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
   const total = evidence.groups.reduce((acc, group) => { const metric = evidenceMetric(group); return { passed: acc.passed + metric.passed, total: acc.total + metric.total }; }, { passed: 0, total: 0 });
-  return <div><div className="view-header"><div><h1>Final Report · Zannora</h1><p>Executive summary live dari seluruh report dan evidence yang tersedia.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Open quality report</button></div><div className="metric-grid"><Metric tone="green" label="Suite Clear" value={evidence.totals.passed + '/' + evidence.totals.groups} note="evidence groups" icon="check" /><Metric tone="cyan" label="Checks Passed" value={total.passed + '/' + total.total} note="across all reports" icon="runs" /><Metric tone="violet" label="Screenshots" value={evidence.totals.screenshots} note="checkpoint evidence" icon="reports" /><Metric tone="yellow" label="Videos" value={evidence.totals.videos} note="flow recording" icon="discovery" /></div><Panel title="Report index"><Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Category</th><th>Summary</th><th>Folder</th><th>Open</th></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td><Badge value={group.category} /></td><td>{group.summary}</td><td><code>{group.folder}</code></td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Evidence <Icon name="arrow" size={12} /></button></td></tr>)}</tbody></table></div>}</Paginated></Panel></div>;
+  return <div><div className="view-header"><div><h1>Final Report</h1><p>Executive summary live dari seluruh report dan evidence yang tersedia.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Open quality report</button></div><div className="metric-grid"><Metric tone="green" label="Suite Clear" value={evidence.totals.passed + '/' + evidence.totals.groups} note="evidence groups" icon="check" /><Metric tone="cyan" label="Checks Passed" value={total.passed + '/' + total.total} note="across all reports" icon="runs" /><Metric tone="violet" label="Screenshots" value={evidence.totals.screenshots} note="checkpoint evidence" icon="reports" /><Metric tone="yellow" label="Videos" value={evidence.totals.videos} note="flow recording" icon="discovery" /></div><Panel title="Report index"><Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Category</th><th>Summary</th><th>Folder</th><th>Open</th></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td><Badge value={group.category} /></td><td>{group.summary}</td><td><code>{group.folder}</code></td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Evidence <Icon name="arrow" size={12} /></button></td></tr>)}</tbody></table></div>}</Paginated></Panel></div>;
 }
 
 export function App() {
@@ -694,8 +708,20 @@ export function App() {
       '/runs': 'runs', '/findings': 'findings', '/reports': 'reports', '/evidence': 'evidence',
       '/settings': 'settings', '/live': 'live'
     };
-    return routeViews[window.location.pathname.replace(/\/$/, '') || '/'] ?? 'overview';
+    const path = window.location.pathname.replace(/\/$/, '') || '/';
+    if (path !== '/' && routeViews[path]) {
+      return routeViews[path];
+    }
+    const saved = localStorage.getItem('qc_maestro_current_view') as View | null;
+    if (saved && Object.values(routeViews).includes(saved)) {
+      return saved;
+    }
+    return 'overview';
   });
+
+  useEffect(() => {
+    localStorage.setItem('qc_maestro_current_view', currentView);
+  }, [currentView]);
 
   const [authToken, setAuthToken] = useState<string | null>(getAuthToken);
   const [adminUser, setAdminUser] = useState(getAdminUser);
@@ -708,9 +734,42 @@ export function App() {
     window.addEventListener('qc:unauthorized', handleUnauthorized);
     return () => window.removeEventListener('qc:unauthorized', handleUnauthorized);
   }, []);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [activeJob, setActiveJob] = useState<Job | null>(null);
+
+  // Instant Cache Hydration: Data tampil instan saat refresh tanpa menunggu network round-trip
+  const [jobs, setJobs] = useState<Job[]>(() => {
+    try {
+      const c = sessionStorage.getItem('qc_maestro_jobs_cache');
+      return c ? JSON.parse(c) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [activeJobId, setActiveJobId] = useState<string | null>(() => {
+    return localStorage.getItem('qc_maestro_active_job_id');
+  });
+  const [activeJob, setActiveJob] = useState<Job | null>(() => {
+    try {
+      const c = sessionStorage.getItem('qc_maestro_active_job_cache');
+      return c ? JSON.parse(c) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (activeJobId) {
+      localStorage.setItem('qc_maestro_active_job_id', activeJobId);
+    }
+  }, [activeJobId]);
+
+  useEffect(() => {
+    if (activeJob) {
+      try {
+        sessionStorage.setItem('qc_maestro_active_job_cache', JSON.stringify(activeJob));
+      } catch {}
+    }
+  }, [activeJob]);
+
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const [apiConnected, setApiConnected] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -733,12 +792,27 @@ export function App() {
   const [logFilter, setLogFilter] = useState<string>('all');
   const [logSearch, setLogSearch] = useState<string>('');
 
+  // Business Flow approval check (Targeted exclusively on Skenario Test)
+  const hasFlowsToApprove = useMemo(() => {
+    if (!activeJob) return false;
+    // Jika job sedang RUNNING, COMPLETED, atau dalam fase eksekusi Playwright, approval sudah selesai!
+    if (activeJob.status === 'RUNNING' || activeJob.status === 'COMPLETED' || activeJob.phase === 'EXECUTING_TESTS') return false;
+    if (activeJob.status === 'WAITING_REVIEW' || activeJob.phase === 'BUSINESS_FLOW_REVIEW') return true;
+    if (activeJob.businessFlowMap) {
+      if (activeJob.businessFlowMap.status === 'AWAITING_REVIEW' || activeJob.businessFlowMap.status === 'PARTIAL') return true;
+      return activeJob.businessFlowMap.flows.some(f => f.status !== 'APPROVED');
+    }
+    return false;
+  }, [activeJob]);
+
   // Edit job state
   const [editingJob, setEditingJob] = useState<Job | null>(null);
 
   // Report view filters
   const [reportAttempt, setReportAttempt] = useState<string>('latest');
   const [reportStatusFilter, setReportStatusFilter] = useState<'all' | 'PASSED' | 'FAILED'>('all');
+  const [reportSubTab, setReportSubTab] = useState<'summary' | 'gallery' | 'document' | 'videos'>('summary');
+  const [galleryFilter, setGalleryFilter] = useState<string>('all');
 
   // Curated Zannora evidence state
   const [zannoraEvidence, setZannoraEvidence] = useState<ZannoraEvidence | null>(null);
@@ -747,9 +821,41 @@ export function App() {
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState('');
   const [evidenceGroupFilter, setEvidenceGroupFilter] = useState('all');
+  const [evidenceSubTab, setEvidenceSubTab] = useState<'gallery' | 'audit'>('gallery');
   const [evidenceFocus, setEvidenceFocus] = useState<EvidenceFocus>(null);
   const [flowSource, setFlowSource] = useState<'zannora' | 'job'>('job');
   const [findingStatuses, setFindingStatuses] = useState<Record<string, FindingWorkflowStatus>>({});
+  const lastAutoFlowJobIdRef = useRef<string | null>(null);
+
+  // Failure Diagnostic Memo — Ekstrak detail kegagalan sistem secara presisi
+  const failureErrorText = useMemo(() => {
+    if (!activeJob) return '';
+    if (activeJob.message && activeJob.message.trim()) return activeJob.message;
+    const reversed = [...(activeJob.logs || [])].reverse();
+    const errorLog = reversed.find(l => 
+      l.category === 'SYSTEM' || 
+      l.message.toLowerCase().includes('gagal') || 
+      l.message.toLowerCase().includes('failed') || 
+      l.message.toLowerCase().includes('error') ||
+      l.message.toLowerCase().includes('exit 1')
+    );
+    if (errorLog) return errorLog.message;
+    return 'Proses discovery terhenti karena kegagalan pada runtime environment atau service target.';
+  }, [activeJob]);
+
+  const failureRecommendation = useMemo(() => {
+    const text = (failureErrorText + ' ' + (activeJob?.phase || '')).toLowerCase();
+    if (text.includes('install dependency') || text.includes('npm') || text.includes('node-app') || text.includes('yarn') || text.includes('pnpm')) {
+      return 'Gagal saat instalasi package dependency (npm install) di server runner. Jika aplikasi website Anda sudah berjalan di port lokal (misal http://localhost:3000), Anda dapat mengklik "Ubah Konfigurasi" dan memilih Target Frontend: "Jalankan di Server" diubah ke "Local URL (Sudah Berjalan)" sehingga QC Maestro dapat langsung melakukan crawling dan testing tanpa menginstal ulang modul.';
+    }
+    if (text.includes('database') || text.includes('mysql') || text.includes('postgres') || text.includes('sql') || text.includes('connection')) {
+      return 'Koneksi database atau eksekusi seed SQL gagal. Periksa format skrip seed.sql atau pastikan service database (MySQL/PostgreSQL) aktif dan dapat menerima koneksi.';
+    }
+    if (text.includes('git') || text.includes('clone') || text.includes('repository')) {
+      return 'Gagal melakukan clone repositori GitHub. Pastikan link repository valid dan Personal Access Token (GITHUB_TOKEN) di .env memiliki hak akses pembacaan repositori.';
+    }
+    return 'Periksa log terminal di bawah untuk rincian traceback sistem. Anda dapat mengubah konfigurasi target atau mengklik "Jalankan Ulang (Retry)".';
+  }, [failureErrorText, activeJob?.phase]);
 
   // Live WIB Clock
   const formatCurrentWIB = () => new Intl.DateTimeFormat('id-ID', {
@@ -775,7 +881,9 @@ export function App() {
       const data = await request<Job[]>('/api/v1/discovery/jobs');
       setJobs(data);
       if (data.length > 0 && !activeJobId) {
-        setActiveJobId(data[0].id);
+        // Prioritaskan project web terlebih dahulu agar mobile run tidak membingungkan
+        const webJob = data.find(j => (j.config?.platform || 'web') === 'web');
+        setActiveJobId(webJob ? webJob.id : data[0].id);
         setFlowSource('job');
       } else if (!data.length) {
         setFlowSource('zannora');
@@ -796,15 +904,16 @@ export function App() {
     }
   }, []);
 
-  // Initial loads
+  // Initial loads (re-run once authenticated, otherwise first requests 401 and the UI stays empty)
   useEffect(() => {
+    if (!authToken) return;
     void refreshSystem();
     void refreshJobs();
     const interval = setInterval(() => {
       void refreshSystem();
     }, 10000);
     return () => clearInterval(interval);
-  }, [refreshSystem, refreshJobs]);
+  }, [authToken, refreshSystem, refreshJobs]);
 
   const refreshZannoraEvidence = useCallback(async () => {
     setEvidenceLoading(true);
@@ -822,6 +931,7 @@ export function App() {
   const refreshTargetEvidence = useCallback(async (jobId: string | null = activeJobId) => {
     if (!jobId) {
       setTargetEvidence(null);
+      setEvidenceError('');
       return;
     }
     setEvidenceLoading(true);
@@ -851,17 +961,22 @@ export function App() {
   }, [activeJobId]);
 
   useEffect(() => {
+    if (!authToken) return;
     void refreshZannoraEvidence();
-  }, [refreshZannoraEvidence]);
+  }, [authToken, refreshZannoraEvidence]);
 
   useEffect(() => {
+    if (!authToken) return;
     if (flowSource !== 'job') return;
-    void refreshTargetEvidence(activeJobId);
-    void refreshRunHistory(activeJobId);
-  }, [activeJobId, flowSource, refreshRunHistory, refreshTargetEvidence]);
+    if (activeJobId) {
+      void refreshTargetEvidence(activeJobId);
+      void refreshRunHistory(activeJobId);
+    }
+  }, [authToken, activeJobId, flowSource, refreshRunHistory, refreshTargetEvidence]);
 
   // Keep the selected evidence source live. Zannora is the default source, so its report-backed nav data refreshes too.
   useEffect(() => {
+    if (!authToken) return;
     if (flowSource === 'zannora') {
       const timer = window.setInterval(() => void refreshZannoraEvidence(), 5000);
       return () => clearInterval(timer);
@@ -869,7 +984,7 @@ export function App() {
     if (!activeJobId || !activeJob || (activeJob.status !== 'RUNNING' && activeJob.status !== 'QUEUED' && currentView !== 'findings')) return;
     const timer = window.setInterval(() => { void refreshTargetEvidence(activeJobId); void refreshRunHistory(activeJobId); }, 5000);
     return () => clearInterval(timer);
-  }, [activeJob, activeJobId, currentView, flowSource, refreshRunHistory, refreshTargetEvidence, refreshZannoraEvidence]);
+  }, [authToken, activeJob, activeJobId, currentView, flowSource, refreshRunHistory, refreshTargetEvidence, refreshZannoraEvidence]);
 
   // Poll active job details
   useEffect(() => {
@@ -887,6 +1002,12 @@ export function App() {
         const job = await request<Job>(jobPath(activeJobId));
         if (cancelled) return;
         setActiveJob(job);
+        // Otomatis arahkan ke halaman Skenario Test saat pemetaan alur bisnis selesai dan menunggu approval user
+        if (job.status === 'WAITING_REVIEW' && lastAutoFlowJobIdRef.current !== job.id) {
+          lastAutoFlowJobIdRef.current = job.id;
+          setFlowSource('job');
+          setCurrentView('flows');
+        }
         if (job.status === 'RUNNING' || job.status === 'QUEUED' || job.status === 'WAITING_REVIEW') {
           timer = window.setTimeout(() => void pollJob(), 500);
         } else {
@@ -941,10 +1062,19 @@ export function App() {
     const elementsCount = activeJob?.inventory?.pages.reduce((acc, p) => acc + (p.elements?.length || 0), 0) ?? 0;
     const flowsCount = activeJob?.flows?.length ?? 0;
     const results = activeJob?.results ?? [];
-    const passedCount = results.filter(r => r.status === 'PASSED').length;
-    const failedCount = results.filter(r => r.status === 'FAILED' || r.status === 'INFRA_ERROR').length;
-    return { pagesCount, elementsCount, flowsCount, passedCount, failedCount, totalRuns: results.length };
-  }, [activeJob]);
+    let passedCount = results.filter(r => r.status === 'PASSED').length;
+    let failedCount = results.filter(r => r.status === 'FAILED' || r.status === 'INFRA_ERROR').length;
+    let totalRuns = results.length;
+
+    // Fallback ke runHistory jika array results internal job kosong (misal hasil Playwright E2E standalone)
+    if (totalRuns === 0 && runHistory && runHistory.length > 0) {
+      totalRuns = runHistory.length;
+      passedCount = runHistory.filter(r => r.status === 'COMPLETED' || r.status === 'PASSED' || r.quality?.status === 'PASSED').length;
+      failedCount = runHistory.filter(r => r.status === 'FAILED' || r.status === 'WARNING' || r.quality?.status === 'FAILED').length;
+    }
+
+    return { pagesCount, elementsCount, flowsCount, passedCount, failedCount, totalRuns };
+  }, [activeJob, runHistory]);
 
   const flowJob = flowSource === 'job' ? activeJob : null;
   const flowEvidence = flowSource === 'zannora' ? zannoraEvidence : targetEvidence;
@@ -1098,14 +1228,22 @@ export function App() {
     try {
       const updated = await send<Job>(`/api/v1/discovery/jobs/${activeJobId}/business-flows/approve`, {}, 'POST');
       setActiveJob(updated);
-      setActionSuccess('Business Flow Map disetujui. Eksekusi akan dilanjutkan otomatis.');
+      setActionSuccess('Seluruh Business Flow disetujui! Eksekusi Playwright E2E & perekaman video dimulai...');
       setTimeout(() => setActionSuccess(''), 4000);
+      if (updated.status !== 'RUNNING') {
+        try {
+          await send<Job>(`/api/v1/discovery/jobs/${activeJobId}/run`, {}, 'POST');
+        } catch (runErr) {
+          console.warn('Run flows trigger notice:', runErr);
+        }
+      }
     } catch (err) {
       setActionError(errorText(err));
     } finally {
       setLoading(false);
     }
   };
+
 
   const handleUpdateBusinessFlow = async (flowId: string, patch: Record<string, unknown>) => {
     if (!activeJobId) return;
@@ -1114,7 +1252,19 @@ export function App() {
     try {
       const updated = await send<Job>(`/api/v1/discovery/jobs/${activeJobId}/business-flows/${flowId}`, patch, 'PUT');
       setActiveJob(updated);
-      setActionSuccess('Business flow diperbarui dan menunggu approval ulang.');
+      if (patch.status === 'APPROVED') {
+        const remaining = updated.businessFlowMap?.flows.filter(f => f.status !== 'APPROVED').length ?? 0;
+        if (remaining === 0) {
+          setActionSuccess('Seluruh business flow telah disetujui. Melanjutkan proses eksekusi di terminal...');
+          setCurrentView('discovery');
+        } else {
+          setActionSuccess(`Alur berhasil disetujui (${remaining} alur tersisa).`);
+        }
+      } else if (patch.status === 'NEEDS_REVIEW') {
+        setActionSuccess('Persetujuan alur dibatalkan.');
+      } else {
+        setActionSuccess('Business flow diperbarui.');
+      }
       setTimeout(() => setActionSuccess(''), 3000);
     } catch (err) {
       setActionError(errorText(err));
@@ -1254,10 +1404,12 @@ export function App() {
   const terminalBottomRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback((smooth = false) => {
-    if (terminalBottomRef.current) {
-      terminalBottomRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
-    } else if (terminalBodyRef.current) {
-      terminalBodyRef.current.scrollTop = terminalBodyRef.current.scrollHeight;
+    if (terminalBodyRef.current) {
+      if (smooth) {
+        terminalBodyRef.current.scrollTo({ top: terminalBodyRef.current.scrollHeight, behavior: 'smooth' });
+      } else {
+        terminalBodyRef.current.scrollTop = terminalBodyRef.current.scrollHeight;
+      }
     }
   }, []);
 
@@ -1311,98 +1463,128 @@ export function App() {
         <button
           className="new-job-btn"
           onClick={() => { setCurrentView('new'); }}
+          title="Mulai Skenario Quality Control Baru"
         >
           <Icon name="plus" size={16} />
-          New QC Run
+          <span>New QC Run</span>
         </button>
 
         <div className="nav-menu">
-          <div className="nav-context-card">
-            <span className="nav-context-label">CURRENT PROJECT</span>
-            <strong>{flowSource === 'zannora' ? 'Zannora Evidence' : activeJob?.name || 'No active project'}</strong>
-            <small>{activeJob ? `${activeJob.status} · ${activeJob.workspace?.runLabel || 'latest run'}` : 'Input website untuk memulai QC'}</small>
-          </div>
+          <ProjectSwitcher
+            jobs={jobs}
+            activeJobId={activeJobId}
+            activeJob={activeJob}
+            flowSource={flowSource}
+            onSelectJob={(jobId) => {
+              setFlowSource('job');
+              setActiveJobId(jobId);
+              setSelectedMilestone(null);
+            }}
+            onSelectZannora={() => {
+              setFlowSource('zannora');
+              setSelectedMilestone(null);
+            }}
+            onNewJob={() => {
+              setCurrentView('new');
+            }}
+          />
 
-          <div className="nav-section-title">WORKSPACE</div>
-          <button className={`nav-item ${currentView === 'process' ? 'active' : ''}`} onClick={() => setCurrentView('process')}>
-            <div className="nav-item-left"><Icon name="map" size={18} /><span>Milestone Flow</span></div><span className="nav-badge">{processProgress}%</span>
-          </button>
+          <div className="nav-section-title">MENU UTAMA</div>
           <button className={`nav-item ${currentView === 'overview' ? 'active' : ''}`} onClick={() => setCurrentView('overview')}>
             <div className="nav-item-left"><Icon name="overview" size={18} /><span>Project Summary</span></div>
           </button>
-          <button className={`nav-item ${currentView === 'projects' ? 'active' : ''}`} onClick={() => setCurrentView('projects')}>
-            <div className="nav-item-left"><Icon name="projects" size={18} /><span>Project Library</span></div><span className="nav-badge">{jobs.length}</span>
-          </button>
-
-          <div className="nav-section-title" style={{ marginTop: 12 }}>ANALYSIS</div>
           <button className={`nav-item ${currentView === 'discovery' ? 'active' : ''}`} onClick={() => setCurrentView('discovery')}>
-            <div className="nav-item-left"><Icon name="discovery" size={18} /><span>Discovery &amp; Inventory</span></div>{(activeJob?.status === 'RUNNING' || activeJob?.status === 'WAITING_REVIEW' || (flowSource === 'zannora' && evidenceLoading)) && <span className="status-dot active" />}
+            <div className="nav-item-left"><Icon name="terminal" size={18} /><span>Live Terminal</span></div>
+            {activeJob?.status === 'RUNNING' ? (
+              <span className="nav-badge nav-badge-running" title="Terminal sedang berjalan">
+                <span className="pulsing-green-dot" />
+                <span>LIVE</span>
+              </span>
+            ) : (
+              <span className="nav-badge">{activeJob?.logs?.length ?? 0}</span>
+            )}
           </button>
           <button className={`nav-item ${currentView === 'map' ? 'active' : ''}`} onClick={() => setCurrentView('map')}>
-            <div className="nav-item-left"><Icon name="map" size={18} /><span>App Map</span></div><span className="nav-badge">{flowSource === 'zannora' ? zannoraRouteCount : activeJob?.inventory?.pages.length ?? 0}</span>
+            <div className="nav-item-left"><Icon name="map" size={18} /><span>App Map &amp; Halaman</span></div>
+            <span className="nav-badge">{activeJob?.inventory?.pages.length ?? 0}</span>
           </button>
-          <button className={`nav-item ${currentView === 'flows' ? 'active' : ''}`} onClick={() => setCurrentView('flows')}>
-            <div className="nav-item-left"><Icon name="flows" size={18} /><span>Test Design</span></div><span className="nav-badge">{flowSource === 'zannora' ? zannoraDesignGroups.length : activeJob?.flows?.length ?? 0}</span>
+          <button className={`nav-item ${currentView === 'flows' ? 'active' : ''}`} onClick={() => { setCurrentView('flows'); if (activeJob) setFlowSource('job'); }}>
+            <div className="nav-item-left">
+              <Icon name="flows" size={18} />
+              <span>Skenario Test</span>
+              {hasFlowsToApprove && (
+                <span className="pulsing-green-dot" title="Skenario siap diapprove" style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981', boxShadow: '0 0 8px #10B981', marginLeft: 6 }} />
+              )}
+            </div>
+            {hasFlowsToApprove ? (
+              <span className="nav-badge" style={{ background: '#10B981', color: '#042F1A', fontWeight: 800, fontSize: 10, padding: '2px 8px', borderRadius: 999 }}>
+                APPROVE
+              </span>
+            ) : (
+              <span className="nav-badge">{activeJob?.flows?.length ?? (activeJob?.businessFlowMap?.flows?.length ?? 0)}</span>
+            )}
           </button>
-
-          <div className="nav-section-title" style={{ marginTop: 12 }}>EXECUTION</div>
           <button className={`nav-item ${currentView === 'runs' ? 'active' : ''}`} onClick={() => setCurrentView('runs')}>
-            <div className="nav-item-left"><Icon name="runs" size={18} /><span>Execution Runs</span></div><span className="nav-badge">{flowSource === 'zannora' ? zannoraExecutionTotal : activeJob?.results?.length ?? 0}</span>
+            <div className="nav-item-left"><Icon name="runs" size={18} /><span>Execution Runs</span></div>
+            <span className="nav-badge">{(activeJob?.results?.length || runHistory.length) ?? 0}</span>
           </button>
-          <button className={`nav-item ${currentView === 'live' ? 'active' : ''}`} onClick={() => setCurrentView('live')}>
-            <div className="nav-item-left"><Icon name="media" size={18} /><span>Media &amp; Rekaman</span></div><span className="nav-live-badge">MEDIA</span>
-          </button>
-
-          <div className="nav-section-title" style={{ marginTop: 12 }}>QUALITY &amp; OUTPUT</div>
-          <button className={`nav-item ${currentView === 'findings' ? 'active' : ''}`} onClick={() => setCurrentView('findings')}>
-            <div className="nav-item-left"><Icon name="warning" size={18} /><span>Findings &amp; Retest</span></div><span className="nav-badge nav-badge-warning">{activeOpenFindings.length}</span>
-          </button>
-          <button className={`nav-item ${currentView === 'evidence' ? 'active' : ''}`} onClick={() => { setCurrentView('evidence'); if (flowSource === 'zannora') void refreshZannoraEvidence(); else void refreshTargetEvidence(activeJobId); }}>
-            <div className="nav-item-left"><Icon name="reports" size={18} /><span>Evidence Center</span></div><span className="nav-badge">{activeEvidence?.totals.assets ?? 0}</span>
+          <button className={`nav-item ${currentView === 'evidence' ? 'active' : ''}`} onClick={() => { setCurrentView('evidence'); void refreshTargetEvidence(activeJobId); }}>
+            <div className="nav-item-left"><Icon name="reports" size={18} /><span>Media</span></div>
+            <span className="nav-badge">{activeEvidence?.totals.assets ?? (activeJob?.results?.length ? 'Live' : 0)}</span>
           </button>
           <button className={`nav-item ${currentView === 'reports' ? 'active' : ''}`} onClick={() => setCurrentView('reports')}>
-            <div className="nav-item-left"><Icon name="reports" size={18} /><span>Final Report</span></div><span className="nav-badge">{activeEvidence?.totals.failed ?? 0}</span>
-          </button>
-
-          <div className="nav-section-title" style={{ marginTop: 12 }}>SYSTEM</div>
-          <button
-            className={`nav-item ${currentView === 'settings' ? 'active' : ''}`}
-            onClick={() => setCurrentView('settings')}
-          >
-            <div className="nav-item-left">
-              <Icon name="settings" size={18} />
-              <span>Settings &amp; Engines</span>
-            </div>
+            <div className="nav-item-left"><Icon name="shield" size={18} /><span>Laporan Final</span></div>
+            <span className="nav-badge">{activeEvidence?.totals.passed ?? 0}</span>
           </button>
         </div>
 
-        <div className="sidebar-footer">
-          <div className="engine-health-card">
-            <div className="engine-health-header">
-              <span>Engine Status</span>
-              <span style={{ color: 'var(--cyan)' }}>LIVE</span>
+        {/* BOTTOM LEFT: ADMIN ACCOUNT */}
+        <div className="sidebar-footer" style={{
+          padding: '12px 14px',
+          borderTop: '1px solid var(--border-subtle)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          background: 'rgba(0, 0, 0, 0.15)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #0284c7 0%, #6366f1 100%)',
+              color: '#ffffff', fontWeight: 800, display: 'grid', placeItems: 'center', fontSize: 12,
+              flexShrink: 0
+            }}>
+              A
             </div>
-            <div className="engine-row">
-              <span><span className={`status-dot ${system?.playwright.available ? 'active' : 'danger'}`} /> Playwright</span>
-              <small style={{ color: system?.playwright.available ? 'var(--green)' : 'var(--red)' }}>
-                {system?.playwright.available ? 'Ready' : 'Offline'}
-              </small>
-            </div>
-            <div className="engine-row">
-              <span><span className={`status-dot ${system?.docker.available ? 'active' : 'warning'}`} /> Docker Engine</span>
-              <small style={{ color: system?.docker.available ? 'var(--green)' : 'var(--yellow)' }}>
-                {system?.docker.available ? 'Ready' : 'Off'}
-              </small>
-            </div>
-            {ENABLE_MOBILE_SUPPORT && (
-              <div className="engine-row">
-                <span><span className={`status-dot ${system?.maestro.available ? 'active' : 'warning'}`} /> Maestro Mobile</span>
-                <small style={{ color: system?.maestro.available ? 'var(--green)' : 'var(--text-dim)' }}>
-                  {system?.maestro.available ? 'Ready' : 'Not installed'}
-                </small>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-main)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {adminUser?.email || 'admin@qcmaestro.com'}
               </div>
-            )}
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Administrator</div>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              clearAuthSession();
+              setAuthToken(null);
+              setAdminUser(null);
+            }}
+            className="quiet danger-text"
+            style={{
+              fontSize: '0.74rem',
+              padding: '4px 8px',
+              borderRadius: 6,
+              cursor: 'pointer',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              background: 'rgba(239, 68, 68, 0.08)',
+              flexShrink: 0
+            }}
+            title="Keluar dari sesi Admin"
+          >
+            Sign Out
+          </button>
         </div>
       </aside>
 
@@ -1411,90 +1593,26 @@ export function App() {
         {/* TOPBAR */}
         <header className="topbar">
           <div className="topbar-left">
-            <div className="project-select-pill">
-              <span className="project-monogram" style={{ width: 26, height: 26, fontSize: 11, borderRadius: 6 }}>
-                {flowSource === 'zannora' ? 'ZA' : activeJob?.name?.slice(0, 2).toUpperCase() || 'QC'}
+            <div className="topbar-breadcrumbs">
+              <span className="crumb-root">
+                <span>Workspace</span>
               </span>
-              <select
-                value={flowSource === 'zannora' ? 'zannora-evidence' : activeJobId ?? ''}
-                onChange={(e) => {
-                  if (e.target.value === 'zannora-evidence') setFlowSource('zannora');
-                  else { setFlowSource('job'); setActiveJobId(e.target.value); }
-                  setSelectedMilestone(null);
-                }}
-                style={{ background: 'transparent', border: 'none', fontWeight: 600, color: '#FFFFFF', outline: 'none', cursor: 'pointer' }}
-              >
-                <option value="zannora-evidence" style={{ background: '#0F172A', color: '#FFF' }}>Zannora · latest evidence</option>
-                {jobs.map(j => (
-                  <option key={j.id} value={j.id} style={{ background: '#0F172A', color: '#FFF' }}>
-                    {j.name} ({j.config?.runMode})
-                  </option>
-                ))}
-              </select>
+              <span className="crumb-sep">/</span>
+              <span className="crumb-view">
+                {currentView === 'overview' ? 'Project Summary' :
+                 currentView === 'discovery' ? 'Live Terminal' :
+                 currentView === 'map' ? 'App Map' :
+                 currentView === 'flows' ? 'Skenario Test' :
+                 currentView === 'runs' ? 'Execution Runs' :
+                 currentView === 'evidence' ? 'Media' :
+                 currentView === 'reports' ? 'Final Report' :
+                 currentView === 'new' ? 'New QC Run' : 'Workspace'}
+              </span>
             </div>
-
-            {flowSource === 'zannora' ? <Badge value="EVIDENCE ARCHIVE" /> : activeJob && <><Badge value={activeJob.config?.platform ?? 'web'} /><Badge value={activeJob.status} /></>}
           </div>
 
           <div className="topbar-right">
-            <button
-              type="button"
-              className="theme-toggle-btn"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? 'Beralih ke Light Mode' : 'Beralih ke Dark Mode'}
-            >
-              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
-              <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
-            </button>
-
-            <div className="live-beacon" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <span className="status-dot active" />
-              <span>Engine 4100</span>
-              <span style={{ opacity: 0.35 }}>•</span>
-              <span style={{ fontWeight: 600, color: 'var(--cyan)' }}>🕒 {wibClock}</span>
-            </div>
-
-            {/* Admin Profile & Logout */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '3px 10px',
-              borderRadius: 20,
-              background: 'var(--bg-panel-sub)',
-              border: '1px solid var(--border)'
-            }}>
-              <div style={{
-                width: 22, height: 22, borderRadius: '50%',
-                background: 'linear-gradient(135deg, #0284c7 0%, #6366f1 100%)',
-                color: '#ffffff', fontWeight: 800, display: 'grid', placeItems: 'center', fontSize: 11
-              }}>
-                A
-              </div>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-main)', fontWeight: 600 }}>
-                {adminUser?.email || 'admin@qcmaestro.com'}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  clearAuthSession();
-                  setAuthToken(null);
-                  setAdminUser(null);
-                }}
-                className="quiet danger-text"
-                style={{
-                  fontSize: '0.74rem',
-                  padding: '2px 8px',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  border: '1px solid rgba(239, 68, 68, 0.25)',
-                  background: 'rgba(239, 68, 68, 0.08)'
-                }}
-                title="Keluar dari sesi Admin"
-              >
-                Sign Out
-              </button>
-            </div>
+            {/* Live Terminal & Theme toggle buttons removed as requested */}
           </div>
         </header>
 
@@ -1503,184 +1621,330 @@ export function App() {
           {actionError && <Notice error>{actionError}</Notice>}
           {actionSuccess && <Notice>{actionSuccess}</Notice>}
 
-          {/* VIEW: OVERVIEW */}
+          {/* VIEW: OVERVIEW (PROJECT SUMMARY) */}
           {currentView === 'overview' && (
-            flowSource === 'zannora' && zannoraEvidence ? <ZannoraOverview evidence={zannoraEvidence} onNavigate={setCurrentView} onOpenEvidence={openEvidenceGroup} /> : (
-            <div>
-              <div className="view-header">
-                <div>
-                  <h1>Project Summary</h1>
-                  <p>Ringkasan project dan run aktif. Buka Milestone Flow untuk melihat alur QC lengkap dari input website sampai final report.</p>
-                </div>
-                <div className="header-actions">
-                  <button className="quiet" onClick={() => setCurrentView('process')}>
-                    <Icon name="map" size={16} /> Open Milestone Flow
-                  </button>
-                  <button className="primary" onClick={() => handleRunFlows()} disabled={loading || !activeJob?.flows?.length}>
-                    <Icon name="runs" size={16} /> Run Regression Test
-                  </button>
-                </div>
-              </div>
-
-              <div className="metric-grid">
-                <Metric
-                  tone="cyan"
-                  label="Halaman Diamati"
-                  value={stats.pagesCount}
-                  note={`${activeJob?.inventory?.routes?.length ?? 0} route statis`}
-                  icon="map"
-                  onClick={() => setCurrentView('map')}
-                />
-                <Metric
-                  tone="violet"
-                  label="Elemen Interaktif"
-                  value={stats.elementsCount}
-                  note="Form, Button, Input, Link"
-                  icon="discovery"
-                  onClick={() => setCurrentView('map')}
-                />
-                <Metric
-                  tone="yellow"
-                  label="Skenario Canonical"
-                  value={stats.flowsCount}
-                  note="Playwright & Maestro ready"
-                  icon="flows"
-                  onClick={() => setCurrentView('flows')}
-                />
-                <Metric
-                  tone="green"
-                  label="Tingkat Kelulusan"
-                  value={stats.totalRuns ? `${Math.round((stats.passedCount / stats.totalRuns) * 100)}%` : '—'}
-                  note={`${stats.passedCount} passed / ${stats.failedCount} failed`}
-                  icon="runs"
-                  onClick={() => setCurrentView('runs')}
-                />
-              </div>
-
-              {activeJob && (
-                <Panel
-                  title={`Project Aktif: ${activeJob.name}`}
-                  description={`Mode: ${activeJob.config?.runMode} · Target: ${activeJob.config?.baseUrl} · Dibuat ${date(activeJob.createdAt)}`}
-                  actions={
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="quiet" onClick={() => setCurrentView('map')}>
-                        Buka App Map
-                      </button>
-                      <button className="quiet" onClick={() => setCurrentView('reports')}>
-                        Laporan Kualitas
-                      </button>
+            flowSource === 'zannora' && zannoraEvidence ? (
+              <ZannoraOverview evidence={zannoraEvidence} onNavigate={setCurrentView} onOpenEvidence={openEvidenceGroup} />
+            ) : (
+              <div className="summary-dashboard-container">
+                {/* 1. Single Hero Header: Identitas & Status Utama Target */}
+                <div className="summary-hero-header">
+                  <div className="hero-left">
+                    <div className="hero-target-row">
+                      <div className="hero-platform-badge">
+                        <Icon name={activeJob?.config?.platform === 'android' ? 'android' : 'globe'} size={12} />
+                        <span>{(activeJob?.config?.platform || 'web').toUpperCase()}</span>
+                      </div>
+                      <h1 className="hero-title">{activeJob?.name || 'Project Summary'}</h1>
+                      <span className={`hero-status-pill status-${(activeJob?.status || 'ready').toLowerCase()}`}>
+                        <span className="led-dot" />
+                        <span>{(activeJob?.status || 'READY').replace(/_/g, ' ')}</span>
+                      </span>
                     </div>
-                  }
-                >
-                  <div style={{ margin: '14px 0' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }}>
-                      <strong>Phase: {activeJob.phase.replace(/_/g, ' ')}</strong>
-                      <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{activeJob.progress}%</span>
+                    <div className="hero-meta-row">
+                      <span className="hero-meta-item">
+                        <Icon name="globe" size={13} />
+                        <code>{activeJob?.config?.baseUrl || activeJob?.config?.appId || 'http://localhost:5174'}</code>
+                      </span>
+                      <span className="hero-meta-sep">â€¢</span>
+                      <span className="hero-meta-item">
+                        Mode: <strong>{activeJob?.config?.runMode || 'existing-target'}</strong>
+                      </span>
+                      <span className="hero-meta-sep">â€¢</span>
+                      <span className="hero-meta-item">
+                        Diuji: <strong>{date(activeJob?.createdAt || '')}</strong>
+                      </span>
                     </div>
-                    <Progress value={activeJob.progress} label="Discovery Progress" />
                   </div>
 
-                  <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 12 }}>
-                    {activeJob.message || 'Engine siap menjalankan penjelajahan dan eksekusi uji.'}
-                  </p>
-                </Panel>
-              )}
+                  <div className="hero-right">
+                    <div className="hero-telemetry-stamp">
+                      <div className="telemetry-stamp-label">ENVIRONMENT AUDIT</div>
+                      <div className="telemetry-stamp-val">
+                        <span className="led-dot" />
+                        <span>TARGET VERIFIED</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-              <Panel title="Daftar Target &amp; Discovery Runs">
-                {jobs.length === 0 ? (
-                  <Empty title="Belum Ada Target Pengujian" action={<button className="primary" onClick={() => setCurrentView('new')}>Mulai Discovery Pertama</button>}>
-                    Hubungkan repository GitHub atau jalankan aplikasi demo lokal.
-                  </Empty>
-                ) : (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Project Name</th>
-                          <th>Platform</th>
-                          <th>Run Mode</th>
-                          <th>Status</th>
-                          <th>Pages</th>
-                          <th>Flows</th>
-                          <th>Created At</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <Paginated items={jobs}>{(visibleJobs) => visibleJobs.map(j => (
-                          <tr key={j.id}>
-                            <td><strong>{j.name}</strong></td>
-                            <td><Badge value={j.config?.platform ?? 'web'} /></td>
-                            <td><code style={{ color: 'var(--cyan)' }}>{j.config?.runMode}</code></td>
-                            <td><Badge value={j.status} /></td>
-                            <td>{j.inventory?.pages?.length ?? 0}</td>
-                            <td>{j.flows?.length ?? 0}</td>
-                            <td style={{ color: 'var(--text-dim)' }}>{date(j.createdAt)}</td>
-                            <td>
-                              <div style={{ display: 'flex', gap: 6 }}>
-                                <button
-                                  className="quiet"
-                                  style={{ padding: '4px 10px', fontSize: 12 }}
-                                  onClick={() => { setActiveJobId(j.id); setCurrentView('map'); }}
-                                >
-                                  Map
-                                </button>
-                                <button
-                                  className="quiet"
-                                  style={{ padding: '4px 10px', fontSize: 12 }}
-                                  onClick={() => { setActiveJobId(j.id); setCurrentView('flows'); }}
-                                >
-                                  Flows
-                                </button>
-                                <button
-                                  className="quiet"
-                                  style={{ padding: '4px 10px', fontSize: 12 }}
-                                  onClick={() => handleRestartJob(j.id)}
-                                  title="Jalankan Ulang"
-                                >
-                                  <Icon name="refresh" size={14} />
-                                </button>
-                                <button
-                                  className="quiet"
-                                  style={{ padding: '4px 10px', fontSize: 12 }}
-                                  onClick={() => handleEditJob(j)}
-                                  title="Edit Suite"
-                                >
-                                  <Icon name="edit" size={14} />
-                                </button>
-                                <button
-                                  className="quiet"
-                                  style={{ padding: '4px 10px', fontSize: 12, color: 'var(--red)' }}
-                                  onClick={() => handleDeleteJob(j.id)}
-                                  title="Hapus"
-                                >
-                                  <Icon name="trash" size={14} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}</Paginated>
-                      </tbody>
-                    </table>
+                {/* 2. Executive KPI Metrics: 4 Metrik Tunggal Berkarakter Linear */}
+                <div className="summary-kpis">
+                  <div className="summary-kpi-card" onClick={() => setCurrentView('map')} role="button" tabIndex={0} title="Buka App Map & Struktur Halaman">
+                    <div className="kpi-top">
+                      <span className="kpi-label">01 // CAKUPAN HALAMAN</span>
+                      <div className="kpi-icon-wrap">
+                        <Icon name="map" size={15} />
+                      </div>
+                    </div>
+                    <span className="kpi-val tabular-nums">{stats.pagesCount}</span>
+                    <div className="kpi-sub-row">
+                      <span className="kpi-sub">{activeJob?.inventory?.routes?.length ?? stats.pagesCount} route terpetakan</span>
+                      <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
+                    </div>
+                  </div>
+
+                  <div className="summary-kpi-card" onClick={() => setCurrentView('map')} role="button" tabIndex={0} title="Buka Detail Komponen Interaktif">
+                    <div className="kpi-top">
+                      <span className="kpi-label">02 // ELEMEN INTERAKTIF</span>
+                      <div className="kpi-icon-wrap">
+                        <Icon name="discovery" size={15} />
+                      </div>
+                    </div>
+                    <span className="kpi-val tabular-nums">{stats.elementsCount}</span>
+                    <div className="kpi-sub-row">
+                      <span className="kpi-sub">Form, button, input &amp; navigasi</span>
+                      <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
+                    </div>
+                  </div>
+
+                  <div className="summary-kpi-card" onClick={() => setCurrentView('flows')} role="button" tabIndex={0} title="Buka Skenario Regresi & Flow">
+                    <div className="kpi-top">
+                      <span className="kpi-label">03 // SKENARIO REGRESI</span>
+                      <div className="kpi-icon-wrap">
+                        <Icon name="flows" size={15} />
+                      </div>
+                    </div>
+                    <span className="kpi-val tabular-nums">{stats.flowsCount}</span>
+                    <div className="kpi-sub-row">
+                      <span className="kpi-sub">Playwright &amp; Maestro otomatis</span>
+                      <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
+                    </div>
+                  </div>
+
+                  <div className="summary-kpi-card" onClick={() => setCurrentView('runs')} role="button" tabIndex={0} title="Buka Histori & Status Run">
+                    <div className="kpi-top">
+                      <span className="kpi-label">04 // TINGKAT KELULUSAN</span>
+                      <div className="kpi-icon-wrap">
+                        <Icon name="runs" size={15} />
+                      </div>
+                    </div>
+                    {(() => {
+                      const ev = activeEvidence?.totals;
+                      const evTotal = ev ? ev.passed + ev.failed : 0;
+                      const total = stats.totalRuns || evTotal;
+                      const passed = stats.totalRuns ? stats.passedCount : (ev?.passed ?? 0);
+                      const failed = stats.totalRuns ? stats.failedCount : (ev?.failed ?? 0);
+                      const unit = stats.totalRuns ? 'run' : 'suite';
+                      return (
+                        <>
+                          <span className="kpi-val tabular-nums">
+                            {total ? `${Math.round((passed / total) * 100)}%` : 'N/A'}
+                          </span>
+                          <div className="kpi-sub-row">
+                            <span className="kpi-sub">{total ? `${passed} lulus · ${failed} gagal (${unit})` : 'Belum ada eksekusi atau bukti uji'}</span>
+                            <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* 3. Sleek Engine Telemetry Readout */}
+                {activeJob && (
+                  <div className="summary-engine-bar">
+                    <div className="engine-log-strip">
+                      <span className="terminal-prompt">$</span>
+                      <span className="terminal-msg">
+                        {activeJob.message || 'Engine QC Maestro siap menjalankan penjelajahan dan eksekusi uji otomatis.'}
+                      </span>
+                      <span className="engine-telemetry-status">
+                        <span className="led-dot" />
+                        <span>{activeJob.progress >= 100 ? 'System Ready' : `${activeJob.progress}% Active`}</span>
+                      </span>
+                    </div>
                   </div>
                 )}
-              </Panel>
-            </div>
+
+                {/* 4. Split 2-Column QA View: Direktori Seluruh Navigasi Modul & Spesifikasi Target */}
+                <div className="summary-split-grid">
+                  {/* Panel Kiri: Direktori Seluruh Navigasi Proyek (Menggantikan Kapabilitas Terbatas) */}
+                  <div className="summary-split-panel">
+                    <div className="split-panel-header">
+                      <div className="split-panel-title-group">
+                        <Icon name="overview" size={15} />
+                        <h2 className="split-panel-title">Direktori Modul &amp; Status Navigasi</h2>
+                        <span className="split-count-pill tabular-nums">6 MODUL</span>
+                      </div>
+                    </div>
+
+                    <div className="nav-modules-directory">
+                      {[
+                        {
+                          id: 'discovery',
+                          num: '01',
+                          icon: 'terminal',
+                          title: 'Live Terminal',
+                          badge: `${activeJob?.logs?.length ?? 0} LOGS`,
+                          status: activeJob?.status === 'RUNNING' ? 'STREAMING' : 'READY',
+                          statusTone: activeJob?.status === 'RUNNING' ? 'running' : 'ready',
+                          desc: 'Stream telemetri runtime worker, event log Playwright/Maestro langsung',
+                          onClick: () => setCurrentView('discovery'),
+                        },
+                        {
+                          id: 'map',
+                          num: '02',
+                          icon: 'map',
+                          title: 'App Map & Halaman',
+                          badge: `${stats.pagesCount} HALAMAN · ${activeJob?.inventory?.routes?.length ?? stats.pagesCount} RUTE`,
+                          status: stats.pagesCount > 0 ? 'MAPPED' : 'EMPTY',
+                          statusTone: stats.pagesCount > 0 ? 'passed' : 'ready',
+                          desc: 'Topologi struktur rute navigasi, pohon layout & inventaris elemen interaktif',
+                          onClick: () => setCurrentView('map'),
+                        },
+                        {
+                          id: 'flows',
+                          num: '03',
+                          icon: 'flows',
+                          title: 'Skenario Test',
+                          badge: `${stats.flowsCount} SKENARIO`,
+                          status: stats.flowsCount > 0 ? 'COMPILED' : 'DRAFT',
+                          statusTone: stats.flowsCount > 0 ? 'passed' : 'ready',
+                          desc: 'Kompilasi skrip regresi otomatis E2E, alur autentikasi & validasi business journey',
+                          onClick: () => setCurrentView('flows'),
+                        },
+                        {
+                          id: 'runs',
+                          num: '04',
+                          icon: 'runs',
+                          title: 'Execution Runs',
+                          badge: stats.totalRuns > 0 ? `${stats.passedCount} PASS / ${stats.failedCount} FAIL` : '0 RUNS',
+                          status: stats.totalRuns > 0 ? (stats.failedCount === 0 ? 'PASSED' : 'ATTENTION') : 'QUEUED',
+                          statusTone: stats.totalRuns > 0 ? (stats.failedCount === 0 ? 'passed' : 'attention') : 'ready',
+                          desc: 'Riwayat assertion eksekusi pengujian, duration benchmark & laporan kelulusan',
+                          onClick: () => setCurrentView('runs'),
+                        },
+                        {
+                          id: 'evidence',
+                          num: '05',
+                          icon: 'reports',
+                          title: 'Media & Bukti Visual',
+                          badge: `${activeEvidence?.totals.assets ?? (activeJob?.results?.length ? 'Live' : 0)} MEDIA`,
+                          status: (activeEvidence?.totals.assets ?? 0) > 0 ? 'RECORDED' : 'READY',
+                          statusTone: (activeEvidence?.totals.assets ?? 0) > 0 ? 'passed' : 'ready',
+                          desc: 'Tangkapan layar hasil inspeksi visual, snapshot DOM & rekaman video defect',
+                          onClick: () => { setCurrentView('evidence'); void refreshTargetEvidence(activeJobId); },
+                        },
+                        {
+                          id: 'reports',
+                          num: '06',
+                          icon: 'shield',
+                          title: 'Laporan Final',
+                          badge: `${activeEvidence?.totals.passed ?? 0} AUDIT PASSED`,
+                          status: (activeEvidence?.totals.passed ?? 0) > 0 ? 'CERTIFIED' : 'READY',
+                          statusTone: (activeEvidence?.totals.passed ?? 0) > 0 ? 'passed' : 'ready',
+                          desc: 'Dokumen sertifikasi mutu akhir, rekapitulasi temuan defect & status rilis',
+                          onClick: () => setCurrentView('reports'),
+                        },
+                      ].map((mod) => (
+                        <div
+                          key={mod.id}
+                          className="nav-module-row"
+                          onClick={mod.onClick}
+                          role="button"
+                          tabIndex={0}
+                          title={`Buka modul ${mod.title}`}
+                        >
+                          <span className="nav-module-num tabular-nums">{mod.num}</span>
+                          <div className="nav-module-icon">
+                            <Icon name={mod.icon} size={15} />
+                          </div>
+                          <div className="nav-module-body">
+                            <div className="nav-module-heading">
+                              <span className="nav-module-title">{mod.title}</span>
+                              <span className="nav-module-badge tabular-nums">{mod.badge}</span>
+                            </div>
+                            <p className="nav-module-desc">{mod.desc}</p>
+                          </div>
+                          <div className="nav-module-action">
+                            <span className={`nav-module-status status-${mod.statusTone}`}>
+                              <span className="led-dot" />
+                              <span>{mod.status}</span>
+                            </span>
+                            <span className="nav-module-arrow">
+                              <Icon name="arrow" size={13} />
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <span className="split-panel-info-note">
+                      Klik modul untuk langsung bernavigasi ke halaman detail dalam proyek ini.
+                    </span>
+                  </div>
+
+                  {/* Panel Kanan: Spesifikasi & Telemetri Lingkungan Target */}
+                  <div className="summary-split-panel">
+                    <div className="split-panel-header">
+                      <div className="split-panel-title-group">
+                        <Icon name="terminal" size={15} />
+                        <h2 className="split-panel-title">Spesifikasi &amp; Lingkungan Target</h2>
+                        <span className="split-count-pill">SPEC TEKNIS</span>
+                      </div>
+                    </div>
+
+                    <div className="summary-spec-list">
+                      <div className="summary-spec-row">
+                        <span className="summary-spec-key">Runner Engine</span>
+                        <span className="summary-spec-val">
+                          {activeJob?.config?.platform === 'android' ? 'Maestro Mobile Engine' : 'Playwright Chromium Runner'}
+                        </span>
+                      </div>
+
+                      <div className="summary-spec-row">
+                        <span className="summary-spec-key">Target Host / ID</span>
+                        <span className="summary-spec-val">
+                          <code>{activeJob?.config?.baseUrl || activeJob?.config?.appId || (activeJob?.config?.platform === 'android' ? 'com.taskia.digital' : 'http://localhost:5174')}</code>
+                        </span>
+                      </div>
+
+                      <div className="summary-spec-row">
+                        <span className="summary-spec-key">Arsitektur Pengujian</span>
+                        <span className="summary-spec-val">
+                          Autonomous E2E &amp; Regresi
+                        </span>
+                      </div>
+
+                      <div className="summary-spec-row">
+                        <span className="summary-spec-key">Struktur Halaman</span>
+                        <span className="summary-spec-val tabular-nums">
+                          {stats.pagesCount} Halaman ({activeJob?.inventory?.routes?.length ?? stats.pagesCount} rute terpetakan)
+                        </span>
+                      </div>
+
+                      <div className="summary-spec-row">
+                        <span className="summary-spec-key">Komponen Terpantau</span>
+                        <span className="summary-spec-val tabular-nums">
+                          {stats.elementsCount} Elemen (Form, Tombol, Field)
+                        </span>
+                      </div>
+
+                      <div className="summary-spec-row">
+                        <span className="summary-spec-key">Status Jaminan Mutu</span>
+                        <span className="summary-spec-val">
+                          {stats.totalRuns ? (
+                            <span style={{ color: '#15803D' }}>{Math.round((stats.passedCount / stats.totalRuns) * 100)}% Lulus ({stats.passedCount}/{stats.totalRuns})</span>
+                          ) : (
+                            <span style={{ color: '#14181D' }}>Siap Eksekusi Regresi</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    <span className="split-panel-info-note">
+                      Konfigurasi target tersinkronisasi otomatis dengan worker QC Maestro.
+                    </span>
+                  </div>
+                </div>
+              </div>
             )
           )}
 
           {/* VIEW: QC PROCESS MAP */}
           {currentView === 'process' && (
             <div>
-              <div className="view-header">
-                <div>
-                  <h1>Milestone Flow</h1>
-                  <p>Alur project QC aktif. Milestone yang belum dikerjakan dibuat redup, milestone aktif dianimasikan, dan setiap card membuka output lengkapnya.</p>
-                </div>
-                <div className="header-actions">
-                  <button className="primary" onClick={() => setCurrentView('evidence')}><Icon name="reports" size={15} /> Evidence Center</button>
-                </div>
-              </div>
               <MilestoneFlow nodes={processNodes} progress={processProgress} centralStatus={centralProcessStatus} sourceLabel={flowSourceLabel} isLive={Boolean(flowJob && (flowJob.status === 'RUNNING' || flowJob.status === 'QUEUED' || flowJob.status === 'WAITING_REVIEW'))} selectedNodeId={selectedMilestone?.id || null} onSelect={setSelectedMilestone} onNavigate={setCurrentView} />
               {selectedMilestone && (
                 <div className="milestone-floating-layer">
@@ -1699,12 +1963,6 @@ export function App() {
           {/* VIEW: NEW DISCOVERY WIZARD */}
           {currentView === 'new' && (
             <div>
-              <div className="view-header">
-                <div>
-                  <h1>{editingJob ? `Edit QC Run: ${editingJob.name}` : 'Start New QC Run'}</h1>
-                  <p>{editingJob ? 'Perbarui konfigurasi project dan jalankan ulang milestone dari awal.' : 'Input website, repository, environment, akun, lalu QC Maestro akan membuat project/run folder dan menjalankan milestone secara berurutan.'}</p>
-                </div>
-              </div>
               <Wizard
                 system={system}
                 initialJob={editingJob}
@@ -1789,309 +2047,433 @@ export function App() {
                   <p>Pelacakan real-time eksekusi static analysis, database container, dan dynamic Playwright crawler.</p>
                 </div>
                 <div className="header-actions">
-                  <button className="quiet" style={{ color: 'var(--cyan)', borderColor: 'rgba(53, 208, 186, 0.4)' }} onClick={() => setCurrentView('live')}>
-                    <Icon name="media" size={16} /> Media &amp; Rekaman
-                  </button>
                   {(activeJob?.status === 'RUNNING' || activeJob?.status === 'WAITING_REVIEW') && (
                     <button className="quiet" style={{ color: 'var(--red)', borderColor: 'rgba(255, 107, 122, 0.4)' }} onClick={handleCancelJob}>
                       Batalkan Discovery
                     </button>
                   )}
-                  {activeJob?.status === 'COMPLETED' && (
-                    <>
-                      <button className="tool-btn" style={{ color: 'var(--cyan)', borderColor: 'rgba(53, 208, 186, 0.4)' }} onClick={() => activeJobId && downloadReport(activeJobId, 'pdf')} title="Unduh Dokumen Laporan Mutu PDF">
-                        <Icon name="download" size={15} /> Unduh PDF
-                      </button>
-                      <button className="primary" onClick={() => setCurrentView('reports')}>
-                        <Icon name="reports" size={15} /> Lihat Laporan Akhir
-                      </button>
-                      <button className="quiet" onClick={() => setCurrentView('map')}>
-                        Peta Aplikasi <Icon name="arrow" size={14} />
-                      </button>
-                    </>
-                  )}
                 </div>
               </div>
-
-              {flowSource === 'job' && activeJob?.businessFlowMap && <div style={{ marginBottom: 18 }}><BusinessFlowEditorPanel map={activeJob.businessFlowMap} onApprove={() => void handleApproveBusinessFlows()} onUpdate={handleUpdateBusinessFlow} /></div>}
 
               {flowSource === 'zannora' && zannoraEvidence ? (
                 <ZannoraDiscovery evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
               ) : !activeJob ? (
                 <Empty title="Tidak Ada Job Terpilih">Pilih project atau buat discovery baru.</Empty>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24 }}>
-                  {activeJob.status === 'COMPLETED' && (() => {
-                    const results = activeJob.results || [];
-                    const passed = results.filter(r => r.status === 'PASSED').length;
-                    const failed = results.filter(r => r.status === 'FAILED').length;
-                    const total = results.length || 1;
-                    const score = Math.round((passed / total) * 100);
+                <>
+                  {/* TOP: Horizontal Milestone Pipeline & Failure Diagnostics */}
+                  {(() => {
+                    const isMobile = activeJob.config?.platform === 'android';
+                    const isExisting = activeJob.config?.runMode === 'existing-target';
+                    const hasDb = activeJob.config?.database?.engine !== 'none';
+
+                    const mobileStages = [
+                      { title: '1. Project & Source Init', desc: `${activeJob.config?.repositoryUrl?.startsWith('http') ? 'Git clone' : 'Direktori lokal'} — deteksi framework mobile` },
+                      { title: '2. Static Code Scan', desc: 'Scan file .dart / .kt / .java — temukan Screen & Route' },
+                      { title: '3. Pemetaan Layar', desc: `Deteksi ${activeJob.inventory?.pages?.length ?? '?'} layar & form input` },
+                      { title: '4. Skenario Maestro YAML', desc: 'Generate flow: login, navigasi, dan smoke check' },
+                      { title: '5. Eksekusi Test & Laporan', desc: activeJob.config?.executeFlows ? 'Jalankan di perangkat ADB' : 'Siap untuk review' },
+                    ];
+
+                    const webStages = [
+                      { title: '1. Runtime & Project Init', desc: isExisting ? `Target: ${activeJob.config?.baseUrl}` : `Workspace preparation (${activeJob.config?.stack ?? 'auto'})` },
+                      { title: '2. Database Bootstrap', desc: hasDb ? `Container ${activeJob.config?.database?.engine} — isolasi data test` : 'Tidak ada database' },
+                      { title: '3. Static Source Code Scan', desc: 'Scan controllers, route, form, komponen' },
+                      { title: '4. Dynamic Playwright Crawl', desc: `Observasi DOM & selector — max ${activeJob.config?.rules?.maxPages ?? '?'} halaman` },
+                      { title: '5. Flow Synthesis & Laporan', desc: activeJob.config?.executeFlows ? 'Sintesis spec Playwright & skenario' : 'Sintesis alur — siap untuk review queue' },
+                      ...(activeJob.config?.qualityAudit?.enabled !== false ? [{ title: '6. Quality Audit & Evidence', desc: `${activeJob.config?.qualityAudit?.browsers?.join(', ') || 'chromium'} · ${activeJob.config?.qualityAudit?.viewports?.join(', ') || 'multi-viewport'} · screenshot & report` }] : []),
+                    ];
+
+                    const stages = isMobile ? mobileStages : webStages;
+                    const isJobFailed = activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR';
+                    const isRunning = activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW';
+                    const isCompleted = activeJob.status === 'COMPLETED';
+                    const statusTagClass = isJobFailed ? 'failed' : isRunning ? 'running' : isCompleted ? 'completed' : 'pending';
+
+                    // Deteksi tahap yang gagal jika isJobFailed
+                    let failedStepIdx = 0;
+                    if (isJobFailed) {
+                      const errLow = failureErrorText.toLowerCase();
+                      const phaseLow = (activeJob.phase || '').toLowerCase();
+                      if (errLow.includes('quality') || phaseLow.includes('quality')) {
+                        failedStepIdx = stages.length - 1;
+                      } else if (errLow.includes('flow') || errLow.includes('synthes') || phaseLow.includes('flow')) {
+                        failedStepIdx = 4;
+                      } else if (errLow.includes('crawl') || errLow.includes('playwright') || phaseLow.includes('crawl')) {
+                        failedStepIdx = 3;
+                      } else if (errLow.includes('static') || errLow.includes('ast') || phaseLow.includes('static')) {
+                        failedStepIdx = 2;
+                      } else if (errLow.includes('database') || errLow.includes('sql') || errLow.includes('mysql') || errLow.includes('postgres') || phaseLow.includes('database')) {
+                        failedStepIdx = 1;
+                      } else if (errLow.includes('runtime') || errLow.includes('install') || errLow.includes('node') || errLow.includes('package') || errLow.includes('npm') || phaseLow.includes('runtime') || phaseLow.includes('preparing')) {
+                        failedStepIdx = 0;
+                      } else {
+                        const stepSize = 100 / stages.length;
+                        failedStepIdx = Math.min(stages.length - 1, Math.max(0, Math.floor((activeJob.progress || 0) / stepSize)));
+                      }
+                    }
+
+                    const failedStepStageTitle = stages[failedStepIdx]?.title || 'Inisialisasi Lingkungan';
+
                     return (
-                      <div className="qc-completion-banner" style={{
-                        gridColumn: '1 / -1',
-                        padding: '18px 24px',
-                        borderRadius: 16,
-                        background: 'linear-gradient(135deg, rgba(53, 208, 186, 0.12), rgba(139, 124, 255, 0.08))',
-                        border: '1px solid rgba(53, 208, 186, 0.35)',
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 16,
-                        boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                          <div style={{
-                            width: 50,
-                            height: 50,
-                            borderRadius: '50%',
-                            background: 'rgba(53, 208, 186, 0.2)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: 24
-                          }}>
-                            🎉
-                          </div>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>
-                                Quality Control &amp; Audit Selesai
-                              </h3>
-                              <span style={{
-                                padding: '2px 10px',
-                                borderRadius: 999,
-                                fontSize: 12,
-                                fontWeight: 700,
-                                background: score >= 70 ? 'rgba(53, 208, 186, 0.2)' : 'rgba(255, 179, 0, 0.2)',
-                                color: score >= 70 ? 'var(--cyan)' : '#ffb300',
-                                border: '1px solid currentColor'
-                              }}>
-                                Skor Kualitas: {score}%
+                      <>
+                        <div className="horizontal-milestone-panel">
+                          <div className="horizontal-milestone-header">
+                            <div className="hm-header-left">
+                              <div className="hm-header-icon">
+                                <Icon name="discovery" size={17} />
+                              </div>
+                              <div>
+                                <h3 className="hm-panel-title">Discovery Pipeline Milestones</h3>
+                                <span className="hm-panel-sub">Tahapan eksekusi inisialisasi lingkungan, static scan, dynamic crawl, dan sintesis alur bisnis</span>
+                              </div>
+                            </div>
+                            <div className="hm-header-right">
+                              <div className="hm-platform-pill">
+                                <Icon name={isMobile ? 'android' : 'globe'} size={13} />
+                                <span>{isMobile ? 'Target Android / Flutter' : 'Target Web Application'}</span>
+                              </div>
+                              <span className={`hm-status-tag ${statusTagClass}`}>
+                                [{activeJob.status}] · {activeJob.progress}%
                               </span>
                             </div>
-                            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-dim)' }}>
-                              Pengujian otomatis Playwright &amp; inspeksi layar telah tuntas. <strong>{passed} flow lulus</strong>, <strong>{failed} temuan kendala</strong>, dari total <strong>{results.length} skenario bisnis</strong>.
-                            </p>
+                          </div>
+
+                          <div className="horizontal-pipeline-body">
+                            {/* Background Track Line with Smooth Standard Flowing Beam */}
+                            <div className="pipeline-track-line">
+                              <div
+                                className={`pipeline-progress-fill ${isJobFailed ? 'failed' : ''}`}
+                                style={{
+                                  width: isJobFailed
+                                    ? `${Math.max(14, Math.min(100, (failedStepIdx + 1) * (100 / stages.length)))}%`
+                                    : `${Math.min(100, Math.max(0, activeJob.progress))}%`
+                                }}
+                              />
+                              {!isJobFailed && isRunning && <div className="pipeline-flow-beam" />}
+                            </div>
+
+                            {/* Evenly Spaced Step Nodes */}
+                            <div className="pipeline-nodes-container">
+                              {stages.map((stepItem, idx) => {
+                                const stepSize = 100 / stages.length;
+                                let statusClass = 'pending';
+                                let isDone = false;
+                                let isCurrent = false;
+                                let isFailed = false;
+
+                                if (isJobFailed) {
+                                  if (idx < failedStepIdx) {
+                                    statusClass = 'done';
+                                    isDone = true;
+                                  } else if (idx === failedStepIdx) {
+                                    statusClass = 'failed';
+                                    isFailed = true;
+                                  } else {
+                                    statusClass = 'pending';
+                                  }
+                                } else {
+                                  isDone = activeJob.status === 'COMPLETED' || activeJob.progress > (idx + 1) * stepSize;
+                                  isCurrent = (activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW') && activeJob.progress >= idx * stepSize && activeJob.progress <= (idx + 1) * stepSize;
+                                  statusClass = isDone ? 'done' : isCurrent ? 'current' : 'pending';
+                                }
+
+                                return (
+                                  <div key={idx} className={`pipeline-step-node ${statusClass}`}>
+                                    <div className="pipeline-step-circle-wrap">
+                                      <div className="pipeline-step-circle">
+                                        {isFailed ? (
+                                          <Icon name="close" size={16} />
+                                        ) : isDone ? (
+                                          <Icon name="check" size={14} />
+                                        ) : (
+                                          <span>{idx + 1}</span>
+                                        )}
+                                        {isCurrent && <span className="pipeline-circle-spinner-ring" />}
+                                        {isFailed && <span className="pipeline-circle-failed-ring" />}
+                                      </div>
+                                    </div>
+                                    <div className="pipeline-step-label-card">
+                                      <h4 className="pipeline-step-title">{stepItem.title}</h4>
+                                      <p className="pipeline-step-desc">{stepItem.desc}</p>
+                                      {isCurrent && (
+                                        <div className="pipeline-step-active-tag">
+                                          <span className="terminal-spinner" style={{ width: 8, height: 8, borderWidth: 1.5 }} />
+                                          <span>Sedang Memproses...</span>
+                                        </div>
+                                      )}
+                                      {isFailed && (
+                                        <div className="pipeline-step-failed-tag">
+                                          <Icon name="warning" size={10} />
+                                          <span>Gagal di Tahap Ini</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <button
-                            className="tool-btn primary"
-                            style={{ padding: '9px 18px', fontWeight: 600 }}
-                            onClick={() => setCurrentView('reports')}
-                          >
-                            <Icon name="reports" size={15} /> Lihat Laporan Lengkap
-                          </button>
-                          <button
-                            className="tool-btn"
-                            style={{ padding: '9px 16px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)' }}
-                            onClick={() => activeJobId && downloadReport(activeJobId, 'pdf')}
-                            title="Unduh Berkas Laporan Resmi PDF"
-                          >
-                            <Icon name="download" size={15} /> Unduh PDF
-                          </button>
-                        </div>
-                      </div>
+
+                        {/* DIAGNOSTIK KEGAGALAN SISTEM — JELAS, TRANSPARAN, TIDAK MENGGANTUNG */}
+                        {isJobFailed && (
+                          <div className="discovery-failure-diagnostic-panel">
+                            <div className="dfp-header">
+                              <div className="dfp-title-group">
+                                <div className="dfp-badge-icon">
+                                  <Icon name="warning" size={24} />
+                                </div>
+                                <div>
+                                  <h3 className="dfp-title">
+                                    <span>Eksekusi Terhenti — Gagal di {failedStepStageTitle}</span>
+                                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#DC2626', color: '#FFFFFF', fontWeight: 850 }}>
+                                      STATUS: {activeJob.status}
+                                    </span>
+                                  </h3>
+                                  <p className="dfp-subtitle">
+                                    Proses discovery otomatis tidak dapat diselesaikan karena terjadi kendala teknis pada tahapan di atas. Berikut rincian log kesalahan sistem dan rekomendasi penanganan konkret:
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Rincian Pesan Error */}
+                            <div className="dfp-error-box">
+                              <div className="dfp-error-box-header">
+                                <span className="dfp-error-label">
+                                  <Icon name="terminal" size={12} />
+                                  <span>Rincian Kesalahan Runner / Traceback:</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  className="dfp-copy-btn"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(failureErrorText);
+                                    setActionSuccess('Pesan error disalin ke clipboard!');
+                                    setTimeout(() => setActionSuccess(''), 2500);
+                                  }}
+                                  title="Salin Pesan Error"
+                                >
+                                  <Icon name="copy" size={12} /> Salin Error
+                                </button>
+                              </div>
+                              <pre className="dfp-error-text">{failureErrorText}</pre>
+                            </div>
+
+                            {/* Rekomendasi Solusi */}
+                            <div className="dfp-recommendation-box">
+                              <div className="dfp-rec-icon">
+                                <Icon name="zap" size={18} />
+                              </div>
+                              <div>
+                                <strong style={{ fontSize: 12.5, color: '#92400E', display: 'block', marginBottom: 2 }}>
+                                  Rekomendasi Langkah Penyelesaian:
+                                </strong>
+                                <p className="dfp-rec-text">{failureRecommendation}</p>
+                              </div>
+                            </div>
+
+                            {/* Tombol Aksi Nyata */}
+                            <div className="dfp-actions">
+                              <button
+                                type="button"
+                                className="dfp-btn-retry"
+                                onClick={() => handleRestartJob(activeJob.id)}
+                                disabled={loading}
+                              >
+                                <Icon name="refresh" size={14} />
+                                <span>{loading ? 'Memulai Ulang...' : 'Jalankan Ulang (Retry Discovery)'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="dfp-btn-edit"
+                                onClick={() => handleEditJob(activeJob)}
+                              >
+                                <Icon name="settings" size={14} />
+                                <span>Ubah Konfigurasi Proyek (Buka Wizard)</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="dfp-btn-scroll"
+                                onClick={() => {
+                                  const terminalEl = document.querySelector('.extended-width-terminal');
+                                  if (terminalEl) {
+                                    terminalEl.scrollIntoView({ behavior: 'smooth' });
+                                  }
+                                }}
+                              >
+                                <Icon name="terminal" size={13} />
+                                <span>Lihat Seluruh Log di Terminal Bawah &darr;</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     );
                   })()}
-                  {/* Left: Timeline Stepper */}
-                  <Panel title="Discovery Stages">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                      {/* Detect platform from active job */}
-                      {(() => {
-                        const isMobile = activeJob.config?.platform === 'android';
-                        const isExisting = activeJob.config?.runMode === 'existing-target';
-                        const hasDb = activeJob.config?.database?.engine !== 'none';
 
-                        const mobileStages = [
-                          { title: '1. Project & Source Init', desc: `${activeJob.config?.repositoryUrl?.startsWith('http') ? 'Git clone' : 'Baca direktori lokal'} — deteksi framework mobile` },
-                          { title: '2. Static Code Analysis', desc: 'Scan file .dart / .kt / .java — temukan semua Screen, Widget, Route' },
-                          { title: '3. Pemetaan Layar & Navigasi', desc: `Deteksi ${activeJob.inventory?.pages?.length ?? '?'} layar, form input, tombol interaktif` },
-                          { title: '4. Skenario Maestro YAML', desc: 'Generate flow Maestro: launch, login, navigasi, dan smoke check' },
-                          { title: '5. Eksekusi Test & Laporan', desc: activeJob.config?.executeFlows ? 'Jalankan Maestro flow di perangkat ADB terhubung' : 'Flow siap untuk review & eksekusi manual' },
-                        ];
 
-                        const webStages = [
-                          { title: '1. Runtime & Project Init', desc: isExisting ? `Target: ${activeJob.config?.baseUrl}` : `Git workspace & service preparation (${activeJob.config?.stack ?? 'auto'})` },
-                          { title: '2. Database Bootstrap', desc: hasDb ? `Container ${activeJob.config?.database?.engine} — isolasi data test` : 'Tidak ada database — dilewati' },
-                          { title: '3. Static Source Code Scan', desc: 'Scan controllers, route, form, komponen (PHP/JS/Vue/React)' },
-                          { title: '4. Dynamic Playwright Crawl', desc: `Observasi DOM, login auth, selector — max ${activeJob.config?.rules?.maxPages ?? '?'} halaman` },
-                          { title: '5. Flow Synthesis & Laporan', desc: activeJob.config?.executeFlows ? 'Generate + run Playwright spec.ts, buat laporan QA' : 'Generate flow skenario — siap untuk review queue' },
-                          ...(activeJob.config?.qualityAudit?.enabled !== false ? [{ title: '6. Quality Audit & Evidence', desc: `${activeJob.config?.qualityAudit?.browsers?.join(', ') || 'browser default'} · ${activeJob.config?.qualityAudit?.viewports?.join(', ') || 'viewport default'} · screenshot & report` }] : []),
-                        ];
 
-                        const stages = isMobile ? mobileStages : webStages;
-                        const platformBadge = isMobile
-                          ? { label: '📱 ANDROID / FLUTTER', color: 'rgba(139, 124, 255, 0.2)', border: 'rgba(139, 124, 255, 0.5)', text: 'var(--violet)' }
-                          : { label: '🌐 WEB APPLICATION', color: 'rgba(53, 208, 186, 0.15)', border: 'rgba(53, 208, 186, 0.4)', text: 'var(--cyan)' };
-
-                        return (
-                          <>
-                            {/* Platform badge */}
-                            <div style={{
-                              background: platformBadge.color,
-                              border: `1px solid ${platformBadge.border}`,
-                              borderRadius: 8,
-                              padding: '6px 12px',
-                              fontSize: 11,
-                              fontWeight: 700,
-                              letterSpacing: '0.05em',
-                              color: platformBadge.text,
-                              textAlign: 'center',
-                              marginBottom: 4
-                            }}>
-                              {platformBadge.label}
+                      {/* BOTTOM: Modern High-tech Authentic Terminal (Extended Full Width) */}
+                      <div className="terminal modern-terminal extended-width-terminal">
+                        <div className="terminal-modern-bar">
+                          <div className="terminal-bar-left-group">
+                            <div className="terminal-dots-monochrome">
+                              <span className="terminal-dot red" title="Tutup Sesi" />
+                              <span className="terminal-dot yellow" title="Minimize" />
+                              <span className="terminal-dot green" title="Maximize" />
                             </div>
 
-                            {stages.map((stepItem, idx) => {
-                              const stepSize = 100 / stages.length;
-                              const isDone = activeJob.status === 'COMPLETED' || activeJob.progress > (idx + 1) * stepSize;
-                              const isCurrent = (activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW') && activeJob.progress >= idx * stepSize && activeJob.progress <= (idx + 1) * stepSize;
-                              return (
-                                <div key={idx} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-                                  <div style={{
-                                    width: 26, height: 26, borderRadius: '50%',
-                                    background: isDone ? 'var(--green)' : isCurrent ? 'var(--cyan)' : 'var(--bg-panel-sub)',
-                                    color: isDone || isCurrent ? '#070B14' : 'var(--text-dim)',
-                                    display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 800, flexShrink: 0
-                                  }}>
-                                    {isDone ? '✓' : idx + 1}
-                                  </div>
-                                  <div>
-                                    <strong style={{ fontSize: 13, color: isDone ? 'var(--green)' : isCurrent ? '#FFFFFF' : 'var(--text-dim)' }}>
-                                      {stepItem.title}
-                                    </strong>
-                                    <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>{stepItem.desc}</p>
-                                    {isCurrent && (
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, color: 'var(--cyan)', fontSize: 11 }}>
-                                        <span className="terminal-spinner" style={{ width: 10, height: 10 }} />
-                                        <span>Sedang proses...</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </Panel>
+                            <div className="terminal-session-badge">
+                              <span className="term-user">maestro@engine</span>
+                              <span className="term-colon">:</span>
+                              <span className="term-dir">~/discovery</span>
+                              <span className="term-branch">(main:live)</span>
+                            </div>
 
-                  {/* Right: High-tech Terminal */}
-                  <div className="terminal">
-                    <div className="terminal-bar">
-                      <div className="terminal-dots">
-                        <span className="terminal-dot red" />
-                        <span className="terminal-dot yellow" />
-                        <span className="terminal-dot green" />
-                      </div>
+                            <span className="terminal-live-indicator">
+                              <span className="terminal-pulse-dot" />
+                              <span>LIVE</span>
+                            </span>
+                          </div>
 
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        {['all', 'system', 'runtime', 'database', 'discovery', 'browser', 'flow-builder', 'runner', 'quality'].map(cat => (
-                          <button
-                            key={cat}
-                            className={`quiet ${logFilter === cat ? 'primary' : ''}`}
-                            style={{ padding: '3px 9px', fontSize: 11, textTransform: 'capitalize' }}
-                            onClick={() => setLogFilter(cat)}
-                          >
-                            {cat}
-                          </button>
-                        ))}
-                      </div>
+                          <div className="terminal-category-tabs">
+                            {['all', 'system', 'runtime', 'database', 'discovery', 'browser', 'flow-builder', 'runner', 'quality'].map(cat => (
+                              <button
+                                key={cat}
+                                className={`terminal-tab-btn ${logFilter === cat ? 'active' : ''}`}
+                                onClick={() => setLogFilter(cat)}
+                              >
+                                {cat === 'all' ? '--all' : `--${cat}`}
+                              </button>
+                            ))}
+                          </div>
 
-                      <input
-                        placeholder="Filter log output..."
-                        value={logSearch}
-                        onChange={(e) => setLogSearch(e.target.value)}
-                        style={{
-                          background: '#050811', border: '1px solid var(--border)', borderRadius: 6,
-                          padding: '3px 8px', fontSize: 11, color: '#FFF', width: 140
-                        }}
-                      />
+                          <div className="terminal-bar-right-group">
+                            <div className="terminal-search-wrap">
+                              <Icon name="search" size={13} />
+                              <input
+                                className="terminal-search-input"
+                                placeholder="/ grep log..."
+                                value={logSearch}
+                                onChange={(e) => setLogSearch(e.target.value)}
+                              />
+                              {logSearch && (
+                                <button
+                                  className="terminal-search-clear"
+                                  onClick={() => setLogSearch('')}
+                                  title="Hapus filter pencarian"
+                                >
+                                  <Icon name="close" size={11} />
+                                </button>
+                              )}
+                            </div>
 
-                      <button
-                        className="quiet"
-                        style={{
-                          fontSize: 11,
-                          padding: '3px 8px',
-                          color: 'var(--cyan)',
-                          border: '1px solid rgba(53, 208, 186, 0.35)',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4
-                        }}
-                        onClick={() => scrollToBottom(true)}
-                        title="Scroll ke paling bawah (log terbaru)"
-                      >
-                        ↓ Paling Bawah
-                      </button>
-                    </div>
-
-                    <div className="terminal-body" ref={terminalBodyRef}>
-                      {filteredLogs.length === 0 ? (
-                        <div style={{ color: 'var(--text-dim)', textAlign: 'center', padding: 40 }}>
-                          Menunggu output stream dari engine...
+                            <button
+                              className="terminal-scroll-down-btn"
+                              onClick={() => scrollToBottom(true)}
+                              title="Scroll ke output paling baru"
+                            >
+                              <Icon name="arrow" size={12} />
+                              <span>Terbawah</span>
+                            </button>
+                          </div>
                         </div>
-                      ) : (
-                        <>
-                          {filteredLogs.map((log, i) => (
-                            <div key={i} className="log-row">
-                              <span className="log-time">{formatLogTime(log.time)}</span>
-                              <span className={`log-cat ${log.category}`}>{log.category}</span>
-                              <span className="log-text">{log.message}</span>
+
+                        {/* Shell prompt */}
+                        <div className="terminal-shell-prompt-bar">
+                          <span className="term-prompt-char">$</span>
+                          <span className="term-prompt-cmd">
+                            qc-maestro run --target="{activeJob.config?.baseUrl || 'http://localhost:5174/'}" --mode=crawl --output=stream
+                          </span>
+                          <span className="term-prompt-cursor">â–‹</span>
+                        </div>
+
+                        {/* Terminal Body */}
+                        <div className="terminal-body" ref={terminalBodyRef}>
+                          {filteredLogs.length === 0 ? (
+                            <div style={{ color: '#8E7C6C', textAlign: 'center', padding: 40, fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                              Menunggu output stream dari engine...
                             </div>
-                          ))}
-                          {(activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW') && (
-                            <div className="log-row running-indicator">
-                              <span className="terminal-spinner" />
-                              <span style={{ color: 'var(--cyan)', fontWeight: 600, fontSize: 11 }}>Sedang proses:</span>
-                              <span style={{ color: '#E2E8F0', fontSize: 12 }}>
-                                {(() => {
-                                  const isMobile = activeJob.config?.platform === 'android';
-                                  const phase = activeJob.phase || '';
-                                  switch (phase) {
-                                    case 'INITIALIZING': return 'Menginisialisasi pipeline discovery & environment...';
-                                    case 'CLONING': return 'Mengunduh repositori sumber project...';
-                                    case 'COPYING_SOURCE': return 'Menyiapkan berkas sumber dari direktori lokal...';
-                                    case 'DETECTING_STACK': return 'Menganalisis stack framework & dependency...';
-                                    case 'STARTING_DEMO_APP': return 'Menyiapkan & menyalakan server aplikasi demo...';
-                                    case 'PREPARING_RUNTIME': return 'Menyiapkan workspace runtime & service aplikasi...';
-                                    case 'STARTING_SERVICES': return 'Menyalakan dev server & service backend...';
-                                    case 'HEALTH_CHECK': return 'Memeriksa kesiapan port & endpoint aplikasi...';
-                                    case 'PREPARING_DATABASE': return 'Menyiapkan database isolated container...';
-                                    case 'SCANNING_SOURCE': return isMobile 
-                                      ? 'Scan berkas sumber Flutter/Dart (Screen, Route, Widget)...' 
-                                      : 'Scan berkas web (.tsx / .vue / .php / controllers / routes)...';
-                                    case 'PREPARING_MOBILE': return 'Menyiapkan target mobile ADB & verifikasi backend...';
-                                    case 'CRAWLING_UI': return 'Dynamic crawler Playwright menelusuri interaksi DOM & form...';
-                                    case 'BUILDING_INVENTORY': return 'Menyusun inventory layar, endpoint API & routes...';
-                                    case 'SYNTHESIZING_FLOWS':
-                                    case 'GENERATING_FLOWS': return isMobile 
-                                      ? 'Menghasilkan flow Maestro YAML untuk pengujian otomatis...' 
-                                      : 'Menghasilkan spec Playwright skenario otomatis...';
-                                    case 'WAITING_REVIEW':
-                                    case 'BUSINESS_FLOW_REVIEW': return 'Menunggu review alur bisnis oleh penguji...';
-                                    case 'EXECUTING_TESTS': return isMobile 
-                                      ? 'Menjalankan skenario test di perangkat Android...' 
-                                      : 'Menjalankan automated test di browser...';
-                                    case 'QUALITY_AUDIT': return 'Menjalankan Quality Audit: browser, viewport, rule UI, screenshot, dan report...';
-                                    default: return activeJob.message || 'Memproses langkah pengujian...';
-                                  }
-                                })()}
-                              </span>
-                            </div>
+                          ) : (
+                            <>
+                              {filteredLogs.map((log, i) => (
+                                <div key={i} className="log-row">
+                                  <span className="log-line-num">{String(i + 1).padStart(3, '0')}</span>
+                                  <span className="log-time">{formatLogTime(log.time)}</span>
+                                  <span className={`log-cat ${log.category}`}>{log.category}</span>
+                                  <span className="log-text">{log.message}</span>
+                                </div>
+                              ))}
+                              {(activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW') && (
+                                <div className="log-row running-indicator">
+                                  <span className="terminal-spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />
+                                  <span style={{ color: '#ECD8C3', fontWeight: 650, fontSize: 11 }}>Sedang proses:</span>
+                                  <span style={{ color: '#FAF6F0', fontSize: 12 }}>
+                                    {(() => {
+                                      const isMobile = activeJob.config?.platform === 'android';
+                                      const phase = activeJob.phase || '';
+                                      switch (phase) {
+                                        case 'INITIALIZING': return 'Menginisialisasi pipeline discovery & environment...';
+                                        case 'CLONING': return 'Mengunduh repositori sumber project...';
+                                        case 'COPYING_SOURCE': return 'Menyiapkan berkas sumber dari direktori lokal...';
+                                        case 'DETECTING_STACK': return 'Menganalisis stack framework & dependency...';
+                                        case 'STARTING_DEMO_APP': return 'Menyiapkan & menyalakan server aplikasi demo...';
+                                        case 'PREPARING_RUNTIME': return 'Menyiapkan workspace runtime & service aplikasi...';
+                                        case 'STARTING_SERVICES': return 'Menyalakan dev server & service backend...';
+                                        case 'HEALTH_CHECK': return 'Memeriksa kesiapan port & endpoint aplikasi...';
+                                        case 'PREPARING_DATABASE': return 'Menyiapkan database isolated container...';
+                                        case 'SCANNING_SOURCE': return isMobile 
+                                          ? 'Scan berkas sumber Flutter/Dart (Screen, Route, Widget)...' 
+                                          : 'Scan berkas web (.tsx / .vue / .php / controllers / routes)...';
+                                        case 'PREPARING_MOBILE': return 'Menyiapkan target mobile ADB & verifikasi backend...';
+                                        case 'CRAWLING_UI': return 'Dynamic crawler Playwright menelusuri interaksi DOM & form...';
+                                        case 'BUILDING_INVENTORY': return 'Menyusun inventory layar, endpoint API & routes...';
+                                        case 'SYNTHESIZING_FLOWS':
+                                        case 'GENERATING_FLOWS': return isMobile 
+                                          ? 'Menghasilkan flow Maestro YAML untuk pengujian otomatis...' 
+                                          : 'Menghasilkan spec Playwright skenario otomatis...';
+                                        case 'WAITING_REVIEW':
+                                        case 'BUSINESS_FLOW_REVIEW': return 'Menunggu review alur bisnis oleh penguji...';
+                                        case 'EXECUTING_TESTS': return isMobile 
+                                          ? 'Menjalankan skenario test di perangkat Android...' 
+                                          : 'Menjalankan automated test di browser...';
+                                        case 'QUALITY_AUDIT': return 'Menjalankan Quality Audit: browser, viewport, rule UI, screenshot, dan report...';
+                                        default: return activeJob.message || 'Memproses langkah pengujian...';
+                                      }
+                                    })()}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="log-row terminal-idle-stream-row">
+                                <span className="term-stream-bullet">â€º</span>
+                                <span className="term-stream-text">Output terminal sinkron dengan Playwright daemon</span>
+                                <span className="term-stream-cursor">_</span>
+                              </div>
+                              <div ref={terminalBottomRef} style={{ height: 1 }} />
+                            </>
                           )}
-                          <div ref={terminalBottomRef} style={{ height: 1 }} />
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                        </div>
+
+                        {/* Statusline Footer */}
+                        <div className="terminal-statusline-footer">
+                          <div className="term-statusline-left">
+                            <span className="term-status-pill">PLAYWRIGHT v1.42</span>
+                            <span className="term-status-pill">UTF-8</span>
+                            <span className="term-status-pill">BUFFER: {filteredLogs.length} LOGS</span>
+                          </div>
+                          <div className="term-statusline-right">
+                            <span className={`term-status-pill ${activeJob.status === 'RUNNING' ? 'running' : 'ready'}`}>
+                              ●  {activeJob.status}
+                            </span>
+                            <span className="term-status-pill">PING: ~12ms</span>
+                          </div>
+                        </div>
+                      </div>
+                </>
               )}
             </div>
           )}
@@ -2126,12 +2508,12 @@ export function App() {
                     placeholder="Search route or title..."
                     value={mapSearch}
                     onChange={(e) => setMapSearch(e.target.value)}
-                    style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', color: '#FFF', width: 220 }}
+                    style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', color: 'var(--text-main)', width: 220 }}
                   />
                   <select
                     value={mapFilter}
                     onChange={(e) => setMapFilter(e.target.value as any)}
-                    style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', color: '#FFF' }}
+                    style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', color: 'var(--text-main)' }}
                   >
                     <option value="all">Semua Kategori</option>
                     <option value="public">Publik</option>
@@ -2297,80 +2679,519 @@ export function App() {
                 </div>
               </div>
 
-              {flowSource === 'job' && activeJob?.businessFlowMap && <div style={{ marginBottom: 18 }}><BusinessFlowEditorPanel map={activeJob.businessFlowMap} onApprove={() => void handleApproveBusinessFlows()} onUpdate={handleUpdateBusinessFlow} /></div>}
-
-              {flowSource === 'zannora' && zannoraEvidence ? (
-                <ZannoraTestDesign evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
-              ) : !activeJob?.flows || activeJob.flows.length === 0 ? (
-                <Empty title="Belum Ada Flow Skenario">
-                  Jalankan discovery untuk menghasilkan flow atau buat skenario manual.
-                </Empty>
-              ) : (
-                <div className="split-view">
-                  {/* Left: Flow list */}
-                  <div className="list-pane">
-                    <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>
-                      Skenario Tergenerate ({activeJob.flows.length})
+              {/* DEDICATED APPROVAL BANNER ON SKENARIO TEST */}
+              {hasFlowsToApprove && (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(6, 182, 212, 0.06))',
+                  border: '1.5px solid #10B981',
+                  borderRadius: 12,
+                  padding: '18px 24px',
+                  marginBottom: 20,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 20,
+                  boxShadow: '0 6px 20px rgba(16, 185, 129, 0.12)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <div style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '50%',
+                      background: 'rgba(16, 185, 129, 0.2)',
+                      border: '2px solid #10B981',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#10B981',
+                      flexShrink: 0
+                    }}>
+                      <Icon name="check" size={22} />
                     </div>
                     <div>
-                      <Paginated items={activeJob.flows}>{(flows) => flows.map(f => (
-                        <div
-                          key={f.id}
-                          onClick={() => {
-                            setSelectedFlowId(f.id);
-                            setFlowEditorSource(f.source);
-                          }}
-                          style={{
-                            padding: '16px 18px',
-                            borderBottom: '1px solid var(--border-subtle)',
-                            cursor: 'pointer',
-                            background: selectedFlowId === f.id ? 'rgba(53, 208, 186, 0.08)' : undefined
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                            <strong>{f.name}</strong>
-                            <Badge value={f.status} />
-                          </div>
-                          <div style={{ fontSize: 12, color: 'var(--text-dim)', display: 'flex', gap: 8 }}>
-                            <span>Platform: {f.platform}</span>
-                            {f.reason && <span style={{ color: 'var(--yellow)' }}>• {f.reason}</span>}
-                          </div>
-                        </div>
-                      ))}</Paginated>
-                    </div>
-                  </div>
-
-                  {/* Right: Flow YAML Editor */}
-                  <div className="detail-pane">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <h3>Canonical Flow Definition</h3>
-                        <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 2 }}>
-                          Format canonical YAML deterministik untuk kompilasi multi-target.
-                        </p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <strong style={{ fontSize: 15, color: 'var(--text-primary)', fontWeight: 800 }}>
+                          Persetujuan Skenario Pengujian (Review Gate)
+                        </strong>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          background: '#10B981',
+                          color: '#042F1A'
+                        }}>
+                          SIAP DISETUJUI
+                        </span>
                       </div>
-                      <button className="primary" onClick={handleSaveFlow} disabled={loading}>
-                        Simpan Perubahan
-                      </button>
+                      <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                        Sebanyak <strong>{activeJob?.businessFlowMap?.flows?.length || activeJob?.flows?.length || 0} skenario pengujian</strong> telah siap. Tinjau alur di bawah ini dan klik tombol Approve untuk melanjutkan eksekusi Playwright End-to-End secara otomatis.
+                      </p>
                     </div>
-
-                    <textarea
-                      className="code-editor"
-                      value={flowEditorSource}
-                      onChange={(e) => setFlowEditorSource(e.target.value)}
-                    />
-
-                    {compiledPreview && (
-                      <Panel title={compiledPreview.title}>
-                        <pre style={{ background: '#050811', padding: 14, borderRadius: 8, overflowX: 'auto', fontSize: 12, color: '#CBD5E1' }}>
-                          {compiledPreview.content}
-                        </pre>
-                      </Panel>
-                    )}
                   </div>
+                  <button
+                    type="button"
+                    className="primary"
+                    style={{
+                      background: 'linear-gradient(135deg, #10B981, #059669)',
+                      borderColor: '#10B981',
+                      color: '#FFFFFF',
+                      fontWeight: 800,
+                      padding: '11px 22px',
+                      fontSize: 13.5,
+                      borderRadius: 8,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      flexShrink: 0,
+                      boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                      cursor: 'pointer'
+                    }}
+                    onClick={handleApproveBusinessFlows}
+                    disabled={loading}
+                  >
+                    <Icon name="check" size={15} />
+                    <span>{loading ? 'Menyetujui…' : 'Approve Skenario & Jalankan Test'}</span>
+                  </button>
                 </div>
               )}
-              {flowSource === 'job' && activeJob && <div style={{ display: 'grid', gap: 18, marginTop: 18 }}><FeatureContractPanel plan={activeJob.inventory?.featureContractPlan} /><CrudCoveragePanel plan={activeJob.inventory?.crudPlan} /><RoleActionPanel plan={activeJob.inventory?.roleActionPlan} /></div>}
+
+              {/* LIVE TEST EXECUTION RUNNING BANNER */}
+              {activeJob && (activeJob.status === 'RUNNING' || activeJob.phase === 'EXECUTING_TESTS') && (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.12), rgba(16, 185, 129, 0.08))',
+                  border: '1.5px solid #0284C7',
+                  borderRadius: 12,
+                  padding: '16px 24px',
+                  marginBottom: 20,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 16,
+                  boxShadow: '0 6px 20px rgba(2, 132, 199, 0.12)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <div style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '50%',
+                      background: 'rgba(2, 132, 199, 0.15)',
+                      border: '2px solid #0284C7',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#0284C7',
+                      flexShrink: 0
+                    }}>
+                      <span className="terminal-spinner" style={{ width: 18, height: 18, borderWidth: 2 }} />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <strong style={{ fontSize: 15, color: 'var(--text-primary)', fontWeight: 800 }}>
+                          Eksekusi Playwright E2E Sedang Berjalan ({activeJob.results?.length ?? 0}/{activeJob.flows?.length ?? 0})
+                        </strong>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          background: '#0284C7',
+                          color: '#FFFFFF'
+                        }}>
+                          LIVE RUNNING
+                        </span>
+                      </div>
+                      <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                        {activeJob.message || 'Merekam video full flow 720p 30 FPS dan mengeksekusi skenario browser otomatis...'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="tool-btn"
+                    onClick={() => setCurrentView('discovery')}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    <Icon name="terminal" size={13} />
+                    <span>Lihat Live Terminal &rarr;</span>
+                  </button>
+                </div>
+              )}
+
+              {/* ALL-IN-ONE UNIFIED PREPARATION & SYNTHESIS VIEW */}
+              {flowSource === 'job' && activeJob && !activeJob.businessFlowMap && (!activeJob.flows || activeJob.flows.length === 0) && (activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW' || activeJob.status === 'QUEUED') ? (
+                <div style={{
+                  background: '#FFFFFF',
+                  border: '1.5px solid #DBC4AC',
+                  borderRadius: 14,
+                  padding: '36px 32px',
+                  boxShadow: '0 8px 24px rgba(70, 50, 35, 0.07)',
+                  marginBottom: 24,
+                  textAlign: 'center'
+                }}>
+                  <div style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: '50%',
+                    background: '#FAF6F1',
+                    border: '2px solid #DBC4AC',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#0284C7',
+                    marginBottom: 16,
+                    boxShadow: '0 4px 14px rgba(2, 132, 199, 0.15)',
+                    position: 'relative'
+                  }}>
+                    <Icon name="flows" size={26} />
+                    <span className="pipeline-circle-spinner-ring" style={{ inset: -6 }} />
+                  </div>
+
+                  <h2 style={{ margin: '0 0 8px 0', fontSize: 18, fontWeight: 850, color: '#14181D' }}>
+                    Sintesis Skenario Test &amp; Alur Bisnis Sedang Berlangsung
+                  </h2>
+                  <p style={{ margin: '0 auto 20px auto', fontSize: 13, color: '#7B6858', maxWidth: 640, lineHeight: 1.55 }}>
+                    Server sedang mengekstrak rute, controller, skema database, dan interaksi form (DOM crawler). Seluruh alur bisnis, skenario pengujian canonical (E2E &amp; regresi), serta feature contract sedang disintesis dalam satu kesatuan.
+                  </p>
+
+                  {/* Live Progress Bar & Status Pill */}
+                  <div style={{ maxWidth: 520, margin: '0 auto 24px auto' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: 12 }}>
+                      <span style={{ fontWeight: 700, color: '#14181D', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className="terminal-spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />
+                        <span>Fase: {activeJob.phase || activeJob.status}</span>
+                      </span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#0284C7' }}>
+                        {activeJob.progress}%
+                      </span>
+                    </div>
+                    <div style={{ height: 6, background: '#EFE5D8', borderRadius: 999, overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%',
+                        width: `${Math.min(100, Math.max(0, activeJob.progress))}%`,
+                        background: 'linear-gradient(90deg, #10B981, #0284C7)',
+                        borderRadius: 999,
+                        transition: 'width 0.4s ease'
+                      }} />
+                    </div>
+                  </div>
+
+                  {/* All-in-One Checklist Telemetry Grid */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+                    gap: 12,
+                    maxWidth: 820,
+                    margin: '0 auto 22px auto',
+                    textAlign: 'left'
+                  }}>
+                    <div style={{
+                      background: '#FAF6F1',
+                      border: '1px solid #E2D3C4',
+                      borderRadius: 10,
+                      padding: '14px 16px',
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'flex-start'
+                    }}>
+                      <div style={{ color: '#0284C7', marginTop: 2 }}><Icon name="map" size={18} /></div>
+                      <div>
+                        <strong style={{ fontSize: 13, color: '#14181D', display: 'block' }}>1. Business Flow Architecture</strong>
+                        <span style={{ fontSize: 11.5, color: '#7B6858', display: 'block', marginTop: 2 }}>
+                          Pohon alur navigasi &amp; diagram logika bisnis untuk approval user (ACC Flow).
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      background: '#FAF6F1',
+                      border: '1px solid #E2D3C4',
+                      borderRadius: 10,
+                      padding: '14px 16px',
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'flex-start'
+                    }}>
+                      <div style={{ color: '#10B981', marginTop: 2 }}><Icon name="terminal" size={18} /></div>
+                      <div>
+                        <strong style={{ fontSize: 13, color: '#14181D', display: 'block' }}>2. Canonical Test Flows</strong>
+                        <span style={{ fontSize: 11.5, color: '#7B6858', display: 'block', marginTop: 2 }}>
+                          Skrip deterministik Playwright (.spec.ts) dan skenario regression YAML.
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      background: '#FAF6F1',
+                      border: '1px solid #E2D3C4',
+                      borderRadius: 10,
+                      padding: '14px 16px',
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'flex-start'
+                    }}>
+                      <div style={{ color: '#8B5CF6', marginTop: 2 }}><Icon name="shield" size={18} /></div>
+                      <div>
+                        <strong style={{ fontSize: 13, color: '#14181D', display: 'block' }}>3. Feature Contracts &amp; Roles</strong>
+                        <span style={{ fontSize: 11.5, color: '#7B6858', display: 'block', marginTop: 2 }}>
+                          Matriks expected state, operasi CRUD, dan hak akses aktor sistem.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer Action */}
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+                    <button
+                      type="button"
+                      className="quiet"
+                      style={{
+                        padding: '8px 16px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        border: '1px solid #DBC4AC',
+                        background: '#FAF6F1',
+                        color: '#14181D',
+                        borderRadius: 8
+                      }}
+                      onClick={() => setCurrentView('discovery')}
+                    >
+                      <Icon name="terminal" size={14} /> Pantau Log di Live Terminal &rarr;
+                    </button>
+                  </div>
+                </div>
+              ) : flowSource === 'job' && activeJob && (activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR') && (!activeJob.flows || activeJob.flows.length === 0) ? (
+                <div style={{
+                  background: '#FFFFFF',
+                  border: '1.5px solid #FCA5A5',
+                  borderLeft: '5px solid #DC2626',
+                  borderRadius: 14,
+                  padding: '36px 32px',
+                  boxShadow: '0 8px 24px rgba(220, 38, 38, 0.08)',
+                  marginBottom: 24,
+                  textAlign: 'center'
+                }}>
+                  <div style={{
+                    width: 58,
+                    height: 58,
+                    borderRadius: '50%',
+                    background: '#FEF2F2',
+                    border: '2px solid #EF4444',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#DC2626',
+                    marginBottom: 16,
+                    boxShadow: '0 4px 14px rgba(220, 38, 38, 0.2)',
+                    position: 'relative'
+                  }}>
+                    <Icon name="warning" size={28} />
+                    <span className="pipeline-circle-failed-ring" style={{ inset: -6 }} />
+                  </div>
+
+                  <h2 style={{ margin: '0 0 8px 0', fontSize: 18, fontWeight: 850, color: '#991B1B' }}>
+                    Sintesis Skenario Test Terhenti — Eksekusi Discovery Mengalami Kegagalan
+                  </h2>
+                  <p style={{ margin: '0 auto 20px auto', fontSize: 13, color: '#7F1D1D', maxWidth: 660, lineHeight: 1.55 }}>
+                    Alur bisnis otomatis dan skenario Playwright (.spec.ts) belum dapat disintesis karena proses persiapan runtime atau target mengalami kegagalan sebelum tahap observasi DOM / crawler selesai.
+                  </p>
+
+                  {/* Error Box */}
+                  <div style={{
+                    maxWidth: 720,
+                    margin: '0 auto 18px auto',
+                    background: '#140A0A',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    borderRadius: 8,
+                    padding: '14px 16px',
+                    textAlign: 'left'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: '#F87171', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Icon name="terminal" size={13} /> Log Kesalahan:
+                      </span>
+                      <button
+                        type="button"
+                        className="dfp-copy-btn"
+                        onClick={() => {
+                          navigator.clipboard.writeText(failureErrorText);
+                          setActionSuccess('Pesan error disalin!');
+                          setTimeout(() => setActionSuccess(''), 2500);
+                        }}
+                      >
+                        <Icon name="copy" size={12} /> Salin Error
+                      </button>
+                    </div>
+                    <pre style={{
+                      margin: 0,
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 11.5,
+                      color: '#FECACA',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                      maxHeight: 120,
+                      overflowY: 'auto'
+                    }}>
+                      {failureErrorText}
+                    </pre>
+                  </div>
+
+                  {/* Solusi Box */}
+                  <div style={{
+                    maxWidth: 720,
+                    margin: '0 auto 24px auto',
+                    background: '#FFFBEB',
+                    border: '1px solid #FDE68A',
+                    borderRadius: 8,
+                    padding: '12px 16px',
+                    textAlign: 'left',
+                    display: 'flex',
+                    gap: 12,
+                    alignItems: 'flex-start'
+                  }}>
+                    <div style={{ color: '#D97706', flexShrink: 0, marginTop: 2 }}>
+                      <Icon name="zap" size={18} />
+                    </div>
+                    <div>
+                      <strong style={{ fontSize: 12.5, color: '#92400E', display: 'block', marginBottom: 2 }}>
+                        Langkah Penyelesaian / Rekomendasi:
+                      </strong>
+                      <p style={{ margin: 0, fontSize: 12, color: '#92400E', lineHeight: 1.5 }}>
+                        {failureRecommendation}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Tombol Aksi */}
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="dfp-btn-retry"
+                      onClick={() => handleRestartJob(activeJob.id)}
+                      disabled={loading}
+                    >
+                      <Icon name="refresh" size={14} />
+                      <span>{loading ? 'Memulai Ulang...' : 'Jalankan Ulang (Retry Discovery)'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="dfp-btn-edit"
+                      onClick={() => handleEditJob(activeJob)}
+                    >
+                      <Icon name="settings" size={14} />
+                      <span>Ubah Konfigurasi Proyek</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="dfp-btn-scroll"
+                      style={{ borderStyle: 'solid' }}
+                      onClick={() => setCurrentView('discovery')}
+                    >
+                      <Icon name="terminal" size={13} />
+                      <span>Buka Live Terminal untuk Memeriksa Traceback &rarr;</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {flowSource === 'job' && activeJob?.businessFlowMap && (
+                    <div style={{ marginBottom: 24 }}>
+                      <BusinessFlowVisualizer
+                        map={activeJob.businessFlowMap}
+                        onApproveAll={handleApproveBusinessFlows}
+                        onUpdateFlow={handleUpdateBusinessFlow}
+                        projectName={activeJob.name}
+                        baseUrl={activeJob.config?.baseUrl}
+                      />
+                    </div>
+                  )}
+
+                  {flowSource === 'zannora' && zannoraEvidence ? (
+                    <ZannoraTestDesign evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
+                  ) : !activeJob?.flows || activeJob.flows.length === 0 ? (
+                    <Empty title="Belum Ada Flow Skenario">
+                      Jalankan discovery untuk menghasilkan flow atau buat skenario manual.
+                    </Empty>
+                  ) : (
+                    <div className="split-view">
+                      {/* Left: Flow list */}
+                      <div className="list-pane">
+                        <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>
+                          Skenario Tergenerate ({activeJob.flows.length})
+                        </div>
+                        <div>
+                          <Paginated items={activeJob.flows}>{(flows) => flows.map(f => (
+                            <div
+                              key={f.id}
+                              onClick={() => {
+                                setSelectedFlowId(f.id);
+                                setFlowEditorSource(f.source);
+                              }}
+                              style={{
+                                padding: '16px 18px',
+                                borderBottom: '1px solid var(--border-subtle)',
+                                cursor: 'pointer',
+                                background: selectedFlowId === f.id ? 'rgba(53, 208, 186, 0.08)' : undefined
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                <strong>{f.name}</strong>
+                                <Badge value={f.status} />
+                              </div>
+                              <div style={{ fontSize: 12, color: 'var(--text-dim)', display: 'flex', gap: 8 }}>
+                                <span>Platform: {f.platform}</span>
+                                {f.reason && <span style={{ color: 'var(--yellow)' }}>â€¢ {f.reason}</span>}
+                              </div>
+                            </div>
+                          ))}</Paginated>
+                        </div>
+                      </div>
+
+                      {/* Right: Flow YAML Editor */}
+                      <div className="detail-pane">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <h3>Canonical Flow Definition</h3>
+                            <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 2 }}>
+                              Format canonical YAML deterministik untuk kompilasi multi-target.
+                            </p>
+                          </div>
+                          <button className="primary" onClick={handleSaveFlow} disabled={loading}>
+                            Simpan Perubahan
+                          </button>
+                        </div>
+
+                        <textarea
+                          className="code-editor"
+                          value={flowEditorSource}
+                          onChange={(e) => setFlowEditorSource(e.target.value)}
+                        />
+
+                        {compiledPreview && (
+                          <Panel title={compiledPreview.title}>
+                            <pre style={{ background: '#050811', padding: 14, borderRadius: 8, overflowX: 'auto', fontSize: 12, color: '#CBD5E1' }}>
+                              {compiledPreview.content}
+                            </pre>
+                          </Panel>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {flowSource === 'job' && activeJob && (activeJob.inventory?.featureContractPlan || activeJob.inventory?.crudPlan || activeJob.inventory?.roleActionPlan) && (
+                    <div style={{ display: 'grid', gap: 18, marginTop: 18 }}>
+                      {activeJob.inventory?.featureContractPlan && <FeatureContractPanel plan={activeJob.inventory.featureContractPlan} />}
+                      {activeJob.inventory?.crudPlan && <CrudCoveragePanel plan={activeJob.inventory.crudPlan} />}
+                      {activeJob.inventory?.roleActionPlan && <RoleActionPanel plan={activeJob.inventory.roleActionPlan} />}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -2389,11 +3210,7 @@ export function App() {
 
               {flowSource === 'zannora' && zannoraEvidence ? (
                 <ZannoraRuns evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
-              ) : !activeJob?.results || activeJob.results.length === 0 ? (
-                <Empty title="Belum Ada Hasil Uji">
-                  Jalankan salah satu skenario flow untuk melihat hasil eksekusi nyata.
-                </Empty>
-              ) : (
+              ) : activeJob?.results && activeJob.results.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                   <Paginated items={activeJob.results}>{(resultsPage, start) => resultsPage.map((res, i) => (
                     <Panel
@@ -2429,6 +3246,14 @@ export function App() {
                     </Panel>
                   ))}</Paginated>
                 </div>
+              ) : runHistory && runHistory.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  <RunHistoryPanel history={runHistory} />
+                </div>
+              ) : (
+                <Empty title="Belum Ada Hasil Uji">
+                  Jalankan salah satu skenario flow untuk melihat hasil eksekusi nyata.
+                </Empty>
               )}
             </div>
           )}
@@ -2595,7 +3420,7 @@ export function App() {
                               <div>
                                 <div className="finding-cat-card-header">
                                   <span className={`finding-cat-tag ${catKey}`}>{conf.badgeLabel}</span>
-                                  {isActive && <small style={{ color: 'var(--cyan)', fontWeight: 700, fontSize: 10 }}>● FILTER AKTIF</small>}
+                                  {isActive && <small style={{ color: 'var(--cyan)', fontWeight: 700, fontSize: 10 }}>●  FILTER AKTIF</small>}
                                 </div>
                                 <div className="finding-cat-count">{count}</div>
                                 <div className="finding-cat-label">{conf.label}</div>
@@ -2617,9 +3442,9 @@ export function App() {
                     {/* WORKFLOW BAR */}
                     <Panel title="Retest Workflow" description="Perbaiki temuan dimulai dari prioritas Kritis, jalankan retest, hingga status audit menjadi Passed.">
                       <div className="finding-flow">
-                        <span className="finding-step active"><b>01</b>Open</span><i>→</i>
-                        <span className="finding-step"><b>02</b>In Progress</span><i>→</i>
-                        <span className="finding-step"><b>03</b>Ready for Retest</span><i>→</i>
+                        <span className="finding-step active"><b>01</b>Open</span><i>← ’</i>
+                        <span className="finding-step"><b>02</b>In Progress</span><i>← ’</i>
+                        <span className="finding-step"><b>03</b>Ready for Retest</span><i>← ’</i>
                         <span className="finding-step"><b>04</b>Passed</span>
                       </div>
                     </Panel>
@@ -2755,7 +3580,7 @@ export function App() {
                                   <div className="finding-group-title">
                                     <strong>
                                       {conf.label}
-                                      {catKey === 'critical' && <span style={{ color: 'var(--red)', fontSize: 11, fontWeight: 800 }}>● PRIORITAS TINGGI</span>}
+                                      {catKey === 'critical' && <span style={{ color: 'var(--red)', fontSize: 11, fontWeight: 800 }}>●  PRIORITAS TINGGI</span>}
                                     </strong>
                                     <small>{conf.description}</small>
                                   </div>
@@ -2804,42 +3629,65 @@ export function App() {
             </div>
           )}
 
-          {/* VIEW: REPORTS */}
+          {/* VIEW: REPORTS (EXECUTIVE QA & QUALITY AUDIT REPORT) */}
           {currentView === 'reports' && (
             <div>
-              <div className="view-header">
+              <div className="view-header" style={{ marginBottom: 16 }}>
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                    <h1 style={{ margin: 0 }}>Executive QA &amp; Quality Audit Report</h1>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                    <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Laporan Final &amp; Audit Mutu</h1>
+                    <span className={`linear-status-badge ${
+                      activeJob?.status === 'COMPLETED' ? 'passed' :
+                      (activeJob?.status === 'FAILED' || activeJob?.status === 'INFRA_ERROR') ? 'failed' :
+                      activeJob?.status === 'RUNNING' ? 'info' : 'neutral'
+                    }`}>
+                      <span className="led-dot" />
+                      {activeJob?.status || 'UNKNOWN'}
+                    </span>
                     <span style={{
-                      padding: '4px 10px',
-                      borderRadius: 999,
-                      fontSize: 11,
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10.5,
                       fontWeight: 700,
-                      background: 'rgba(53, 208, 186, 0.15)',
-                      color: 'var(--cyan)',
-                      border: '1px solid rgba(53, 208, 186, 0.3)'
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background: '#FAF6F1',
+                      border: '1px solid #DBC4AC',
+                      color: '#7B6858'
                     }}>
-                      {activeJob?.config?.platform?.toUpperCase() || 'TARGET'}
+                      {activeJob?.config?.platform?.toUpperCase() || 'WEB'}
                     </span>
                   </div>
-                  <p>Laporan audit mutu menyeluruh: pemindaian struktur file, verifikasi halaman, pencatatan bug/crash, dan evaluasi kesiapan produksi.</p>
+                  <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                    Ringkasan verifikasi kualitas aplikasi, status skenario pengujian, dan catatan defect berdasarkan data eksekusi nyata.
+                  </p>
                 </div>
                 <div className="header-actions">
-                  <button className="tool-btn primary" onClick={() => activeJobId && downloadReport(activeJobId, 'pdf', reportAttempt, reportStatusFilter)} title="Unduh Dokumen Laporan Mutu PDF">
-                    <Icon name="download" size={15} /> Unduh PDF Report
+                  <button
+                    type="button"
+                    className="tool-btn primary"
+                    onClick={() => activeJobId && downloadReport(activeJobId, 'pdf', reportAttempt, reportStatusFilter)}
+                    title="Unduh Dokumen Laporan Mutu PDF"
+                  >
+                    <Icon name="download" size={14} /> Unduh PDF
                   </button>
-                  <button className="tool-btn" onClick={() => activeJobId && window.open(`/api/v1/discovery/jobs/${activeJobId}/report?format=pdf&attempt=${reportAttempt}&status=${reportStatusFilter}`, '_blank')} title="Buka & Cetak Dokumen PDF di Tab Baru">
-                    <Icon name="reports" size={15} /> Buka PDF
+                  <button
+                    type="button"
+                    className="tool-btn"
+                    onClick={() => activeJobId && window.open(`/api/v1/discovery/jobs/${activeJobId}/report?format=html&attempt=${reportAttempt}&status=${reportStatusFilter}`, '_blank')}
+                    title="Buka Dokumen Laporan Lengkap Interaktif di Tab Baru"
+                  >
+                    <Icon name="overview" size={14} /> Buka HTML
                   </button>
-                  <button className="tool-btn" onClick={() => activeJobId && downloadReport(activeJobId, 'json', reportAttempt, reportStatusFilter)} title="Unduh data audit JSON">
-                    <Icon name="download" size={15} /> Download JSON
+                  <button
+                    type="button"
+                    className="tool-btn"
+                    onClick={() => activeJobId && downloadReport(activeJobId, 'json', reportAttempt, reportStatusFilter)}
+                    title="Unduh data audit JSON"
+                  >
+                    <Icon name="download" size={14} /> JSON
                   </button>
                 </div>
               </div>
-
-              {flowSource === 'job' && <RunHistoryPanel history={runHistory} />}
-              {flowSource === 'job' && activeJob && <div style={{ display: 'grid', gap: 18, marginBottom: 18 }}><FeatureContractPanel plan={activeJob.inventory?.featureContractPlan} /><CrudCoveragePanel plan={activeJob.inventory?.crudPlan} /></div>}
 
               {flowSource === 'zannora' && zannoraEvidence ? (
                 <ZannoraReport evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
@@ -2903,455 +3751,841 @@ export function App() {
                 const passedRuns = resultsForAttempt.filter((r: any) => r.status === 'PASSED').length;
                 const failedRuns = resultsForAttempt.filter((r: any) => r.status !== 'PASSED').length;
                 const totalRuns = resultsForAttempt.length;
-                const healthScore = totalRuns > 0 ? Math.round((passedRuns / totalRuns) * 100) : 100;
-                const filesScanned = activeJob.inventory?.filesScanned || 0;
-                const pages = activeJob.inventory?.pages || [];
+
                 const allFailedSteps = results.flatMap((r: any) =>
-                  (r.steps || []).filter((s: any) => s.status === 'FAILED').map((s: any) => ({
-                    flowId: r.flowId,
-                    runId: r.runId,
-                    step: s,
-                    artifacts: r.artifacts
-                  }))
+                  (r.steps || []).filter((s: any) => s.status === 'FAILED').map((s: any) => {
+                    const rawMsg = s.errorMessage || '';
+                    const rawCode = s.errorCode || '';
+                    const lowerMsg = rawMsg.toLowerCase();
+                    const isEngine = s.errorOrigin === 'qc_maestro_engine' ||
+                      r.status === 'INFRA_ERROR' ||
+                      rawCode.toLowerCase() === 'infra_error' ||
+                      lowerMsg.includes('driver error') ||
+                      lowerMsg.includes('playwright internal') ||
+                      lowerMsg.includes('spawn enoent') ||
+                      lowerMsg.includes('socket hang up') ||
+                      lowerMsg.includes('daemon crashed') ||
+                      lowerMsg.includes('runner internal');
+                    const errorOrigin = isEngine ? ('qc_maestro_engine' as const) : ('user_target_application' as const);
+                    return {
+                      flowId: r.flowId,
+                      runId: r.runId,
+                      step: s,
+                      errorOrigin,
+                      artifacts: r.artifacts
+                    };
+                  })
                 );
 
+                const userAppErrorsCount = allFailedSteps.filter(item => item.errorOrigin === 'user_target_application').length;
+                const qcEngineErrorsCount = allFailedSteps.filter(item => item.errorOrigin === 'qc_maestro_engine').length;
+                const userAppErrorsTotal = userAppErrorsCount + (activeJob.qualityAudit?.errorBreakdown?.userAppErrors || 0);
+                const qcEngineErrorsTotal = qcEngineErrorsCount + (activeJob.qualityAudit?.errorBreakdown?.qcEngineErrors || 0);
+                const totalDefectsCombined = userAppErrorsTotal + qcEngineErrorsTotal;
+
+                const hasRunData = totalRuns > 0;
+                const runsScore = hasRunData ? Math.round((passedRuns / totalRuns) * 100) : null;
+                const qaAuditScore = activeJob.qualityAudit?.scorePercent;
+                const healthScore = typeof qaAuditScore === 'number' && qaAuditScore > 0 && hasRunData
+                  ? Math.round(((runsScore ?? 100) + qaAuditScore) / 2)
+                  : typeof qaAuditScore === 'number'
+                  ? qaAuditScore
+                  : runsScore;
+
+                const pages = activeJob.inventory?.pages || [];
+                const filesScanned = activeJob.inventory?.filesScanned || 0;
+
+                // Build complete list of screenshots across results
+                const galleryItems: Array<{
+                  id: string;
+                  flowId: string;
+                  flowName: string;
+                  name: string;
+                  label: string;
+                  featureGroup: string;
+                  url: string;
+                  status: string;
+                }> = [];
+                const seenGallery = new Set<string>();
+
+                // Build complete list of video recordings
+                const videoItems: Array<{
+                  id: string;
+                  flowId: string;
+                  flowName: string;
+                  name: string;
+                  url: string;
+                  status: string;
+                }> = [];
+                const seenVideos = new Set<string>();
+
+                // Search across results
+                const sourceForMedia = resultsForAttempt.length > 0 ? resultsForAttempt : allRawResults;
+                for (const res of sourceForMedia) {
+                  const flowObj = activeJob.flows?.find(f => f.id === res.flowId);
+                  for (const art of res.artifacts || []) {
+                    const raw = typeof art === 'string' ? art : (art as any)?.path || (art as any)?.url;
+                    if (!raw) continue;
+                    const clean = String(raw).replace(/\\/g, '/');
+                    const resolvedUrl = artifactUrl(activeJob.id, raw);
+                    if (!resolvedUrl) continue;
+
+                    if (clean.endsWith('.png') || clean.endsWith('.jpg') || clean.endsWith('.jpeg')) {
+                      if (!seenGallery.has(resolvedUrl)) {
+                        seenGallery.add(resolvedUrl);
+                        const fileName = clean.split('/').pop() || 'screenshot.png';
+                        const label = flowObj?.name || fileName.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+                        const featureGroup = flowObj?.name?.split(' ')[0] || 'Layar Terverifikasi';
+
+                        galleryItems.push({
+                          id: resolvedUrl,
+                          flowId: res.flowId,
+                          flowName: flowObj?.name || res.flowId,
+                          name: fileName,
+                          label,
+                          featureGroup,
+                          url: resolvedUrl,
+                          status: res.status
+                        });
+                      }
+                    } else if (clean.endsWith('.mp4') || clean.endsWith('.webm')) {
+                      if (!seenVideos.has(resolvedUrl)) {
+                        seenVideos.add(resolvedUrl);
+                        videoItems.push({
+                          id: resolvedUrl,
+                          flowId: res.flowId,
+                          flowName: flowObj?.name || res.flowId,
+                          name: clean.split('/').pop() || 'video.mp4',
+                          url: resolvedUrl,
+                          status: res.status
+                        });
+                      }
+                    }
+                  }
+                }
+
+                // Also collect videos from activeEvidence groups (e.g. curated Zannora / full-flow evidence)
+                if (activeEvidence?.groups) {
+                  for (const group of activeEvidence.groups) {
+                    for (const v of group.videos || []) {
+                      if (!seenVideos.has(v.url)) {
+                        seenVideos.add(v.url);
+                        videoItems.push({
+                          id: v.url,
+                          flowId: group.id,
+                          flowName: group.title,
+                          name: v.label || 'video.webm',
+                          url: v.url,
+                          status: group.status || 'PASSED'
+                        });
+                      }
+                    }
+                  }
+                }
+
+                // Dynamic feature groups from gallery
+                const dynamicFeatureGroups = ['all', ...Array.from(new Set(galleryItems.map(item => item.featureGroup))).filter(Boolean)];
+
+                const filteredGallery = galleryItems.filter(item => {
+                  if (galleryFilter === 'all') return true;
+                  return item.featureGroup === galleryFilter;
+                });
+
+                // Compute verdict
+                const isCompleted = activeJob.status === 'COMPLETED';
+                const isJobFailed = activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR';
+                const isRunning = activeJob.status === 'RUNNING';
+                const verdictLabel = isJobFailed
+                  ? 'BLOCKED'
+                  : !hasRunData
+                  ? 'IN PROGRESS'
+                  : runsScore != null && runsScore >= 80
+                  ? 'READY FOR STAGING'
+                  : runsScore != null
+                  ? 'NEEDS ATTENTION'
+                  : 'PENDING';
+                const verdictClass = verdictLabel === 'READY FOR STAGING'
+                  ? 'passed'
+                  : verdictLabel === 'BLOCKED' || verdictLabel === 'NEEDS ATTENTION'
+                  ? 'failed'
+                  : verdictLabel === 'IN PROGRESS'
+                  ? 'info'
+                  : 'neutral';
+
+                // Compute coverage numbers from Map data
+                const totalElements = pages.reduce((s: number, p: any) => s + (p.elementCount || p.elements?.length || 0), 0);
+                const authPagesCount = pages.filter((p: any) => p.requiresAuth || p.authRequired || p.type === 'authenticated').length;
+                const publicPagesCount = pages.length - authPagesCount;
+
+                // Timestamp helpers
+                const fmtDate = (iso?: string) => iso ? new Intl.DateTimeFormat('id-ID', {
+                  day: '2-digit', month: 'short', year: 'numeric',
+                  hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta'
+                }).format(new Date(iso)) + ' WIB' : '—';
+
                 return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-                    {/* ATTEMPTS & STATUS FILTER TOOLBAR */}
-                    <div style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 12,
-                      background: 'var(--panel-bg)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius)',
-                      padding: '16px 20px'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>
-                          <span>🔄</span>
-                          <span>SESI PERCOBAAN (ATTEMPT):</span>
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                          {attemptsList.map(att => {
-                            const isSelected = (reportAttempt === 'latest' && att.isLatest) || reportAttempt === att.id;
-                            return (
-                              <button
-                                key={att.id}
-                                className={`tool-btn ${isSelected ? (att.rate === 100 ? 'primary' : 'active') : ''}`}
-                                style={{
-                                  borderRadius: 999,
-                                  fontSize: 12,
-                                  padding: '5px 14px',
-                                  borderColor: isSelected ? (att.rate === 100 ? 'var(--green)' : 'var(--red)') : undefined
-                                }}
-                                onClick={() => setReportAttempt(att.id)}
-                              >
-                                {att.rate === 100 ? '✅' : '⚠️'} {att.name} ({att.rate}% Lulus)
-                              </button>
-                            );
-                          })}
-                          <button
-                            className={`tool-btn ${reportAttempt === 'all' ? 'active' : ''}`}
-                            style={{ borderRadius: 999, fontSize: 12, padding: '5px 14px' }}
-                            onClick={() => setReportAttempt('all')}
-                          >
-                            📚 Semua Percobaan ({attemptsList.length} Sesi)
-                          </button>
-                        </div>
-                      </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                    {/* EXECUTIVE REPORT DOCUMENT SHEET */}
+                    <div className="report-document-sheet">
 
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>
-                          <span>🔍</span>
-                          <span>FILTER STATUS:</span>
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                          <button
-                            className={`tool-btn ${reportStatusFilter === 'all' ? 'active' : ''}`}
-                            style={{ borderRadius: 999, fontSize: 12, padding: '4px 12px' }}
-                            onClick={() => setReportStatusFilter('all')}
-                          >
-                            Semua Skenario ({resultsForAttempt.length})
-                          </button>
-                          <button
-                            className={`tool-btn ${reportStatusFilter === 'PASSED' ? 'primary' : ''}`}
-                            style={{ borderRadius: 999, fontSize: 12, padding: '4px 12px', borderColor: reportStatusFilter === 'PASSED' ? 'var(--green)' : undefined }}
-                            onClick={() => setReportStatusFilter('PASSED')}
-                          >
-                            ✅ Hanya Berhasil ({passedRuns})
-                          </button>
-                          <button
-                            className={`tool-btn ${reportStatusFilter === 'FAILED' ? 'active' : ''}`}
-                            style={{ borderRadius: 999, fontSize: 12, padding: '4px 12px', borderColor: reportStatusFilter === 'FAILED' ? 'var(--red)' : undefined }}
-                            onClick={() => setReportStatusFilter('FAILED')}
-                          >
-                            ❌ Hanya Gagal ({failedRuns})
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* EXECUTIVE SUMMARY BANNER */}
-                    <Panel title="Executive Summary">
-                      <p style={{ color: 'var(--text-main)', fontSize: 14, lineHeight: 1.8, margin: 0 }}>
-                        Audit deterministik terhadap aplikasi <strong>{activeJob.name}</strong> berhasil memindai struktur proyek dan memetakan{' '}
-                        <strong>{pages.length || 1} halaman/layar utama</strong> dengan <strong>{stats.elementsCount} elemen interaktif</strong>.
-                        Terdapat <strong>{stats.flowsCount} skenario pengujian</strong> yang terdaftar.
-                        Pada <strong>{activeAttempt?.name || 'Sesi Terpilih'}</strong>, eksekusi pengujian deterministik menghasilkan QA Health Score{' '}
-                        <strong style={{ color: healthScore >= 80 ? 'var(--green)' : 'var(--red)' }}>{healthScore}%</strong>{' '}
-                        ({passedRuns} lolos clear, {failedRuns} perlu tindak lanjut).
-                      </p>
-                    </Panel>
-
-                    {/* KPI CARDS */}
-                    <div className="metric-grid" style={{ marginBottom: 0 }}>
-                      <div className="metric">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>QA Health Score</span>
-                          <span style={{ fontSize: 18 }}>🛡️</span>
-                        </div>
-                        <div style={{ fontSize: 32, fontWeight: 800, color: healthScore >= 80 ? 'var(--green)' : 'var(--red)' }}>
-                          {healthScore}%
-                        </div>
-                        <small style={{ color: 'var(--text-dim)' }}>
-                          {healthScore === 100 ? 'Semua pengujian lolos sempurna' : `${failedRuns} skenario terindikasi kendala`}
-                        </small>
-                      </div>
-
-                      <div className="metric">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>File Terpindai</span>
-                          <span style={{ fontSize: 18 }}>📁</span>
-                        </div>
-                        <div style={{ fontSize: 32, fontWeight: 800, color: '#FFFFFF' }}>
-                          {filesScanned}
-                        </div>
-                        <small style={{ color: 'var(--text-dim)' }}>Struktur kode &amp; modul dipindai</small>
-                      </div>
-
-                      <div className="metric">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Layar / Halaman</span>
-                          <span style={{ fontSize: 18 }}>📱</span>
-                        </div>
-                        <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--cyan)' }}>
-                          {pages.length || 1}
-                        </div>
-                        <small style={{ color: 'var(--text-dim)' }}>Halaman / route terpetakan</small>
-                      </div>
-
-                      <div className="metric">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Status Defect &amp; Bug</span>
-                          <span style={{ fontSize: 18 }}>🐞</span>
-                        </div>
-                        <div style={{ fontSize: 32, fontWeight: 800, color: allFailedSteps.length === 0 ? 'var(--green)' : '#FF5A79' }}>
-                          {allFailedSteps.length === 0 ? '0 Bug' : `${allFailedSteps.length} Terdeteksi`}
-                        </div>
-                        <small style={{ color: allFailedSteps.length === 0 ? 'var(--green)' : '#FF5A79' }}>
-                          {allFailedSteps.length === 0 ? 'Status Clear (Bebas Crash)' : 'Perlu investigasi perbaikan'}
-                        </small>
-                      </div>
-                    </div>
-
-                    {/* STATUS MATRIX: PAGES & SCENARIOS */}
-                    <Panel title="Audit Matrix: Verifikasi Halaman & Skenario (Clear vs Bugs)">
-                      <Paginated items={results}>{(resultsPage, start) => <div className="table-wrap">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Skenario / Halaman</th>
-                              <th>Target Platform</th>
-                              <th>Hasil Pengujian</th>
-                              <th>Langkah / Aksi</th>
-                              <th>Tangkapan Layar (Bukti)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {resultsPage.map((res, i) => {
-                              const flowObj = activeJob.flows?.find(f => f.id === res.flowId);
-                              const screenshotArtifact = (res.artifacts || []).find((a: any) =>
-                                typeof a === 'string' ? a.endsWith('.png') : (a?.type === 'screenshot' || a?.path?.endsWith('.png') || a?.url)
-                              );
-                              const ssUrl = screenshotArtifact
-                                ? (typeof screenshotArtifact === 'string'
-                                    ? `/api/v1/discovery/jobs/${activeJob.id}/artifacts/${res.runId}/${screenshotArtifact.split(/[\\/]/).pop()}`
-                                    : (screenshotArtifact.url || `/api/v1/discovery/jobs/${activeJob.id}/artifacts/${res.runId}/${screenshotArtifact.name || 'screenshot.png'}`))
-                                : null;
-
-                              return (
-                                <tr key={start + i}>
-                                  <td>
-                                    <strong>{flowObj?.name || res.flowId}</strong>
-                                    <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                                      Run ID: <code>{res.runId}</code>
-                                    </div>
-                                  </td>
-                                  <td>
-                                    <span style={{ textTransform: 'uppercase', color: 'var(--cyan)', fontSize: 12, fontWeight: 600 }}>
-                                      {activeJob.config?.platform || 'TARGET'}
-                                    </span>
-                                  </td>
-                                  <td>
-                                    {res.status === 'PASSED' ? (
-                                      <span style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 6,
-                                        color: 'var(--green)',
-                                        background: 'rgba(39, 201, 63, 0.12)',
-                                        border: '1px solid rgba(39, 201, 63, 0.3)',
-                                        borderRadius: 4,
-                                        padding: '4px 10px',
-                                        fontSize: 12,
-                                        fontWeight: 700
-                                      }}>
-                                        ✓ CLEAR (PASSED)
-                                      </span>
-                                    ) : (
-                                      <span style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 6,
-                                        color: '#FF5A79',
-                                        background: 'rgba(255, 90, 121, 0.12)',
-                                        border: '1px solid rgba(255, 90, 121, 0.3)',
-                                        borderRadius: 4,
-                                        padding: '4px 10px',
-                                        fontSize: 12,
-                                        fontWeight: 700
-                                      }}>
-                                        ✕ BUG / DEFECT
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td>
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                      {(res.steps || []).map((s: any, sIdx: number) => (
-                                        <span
-                                          key={sIdx}
-                                          style={{
-                                            fontSize: 10,
-                                            padding: '2px 6px',
-                                            borderRadius: 3,
-                                            background: s.status === 'PASSED' ? 'rgba(39, 201, 63, 0.15)' : 'rgba(255, 90, 121, 0.2)',
-                                            color: s.status === 'PASSED' ? 'var(--green)' : '#FF5A79',
-                                            border: `1px solid ${s.status === 'PASSED' ? 'rgba(39, 201, 63, 0.3)' : 'rgba(255, 90, 121, 0.4)'}`
-                                          }}
-                                          title={s.errorMessage || `${s.action} - ${s.status}`}
-                                        >
-                                          {s.action}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </td>
-                                  <td>
-                                    {ssUrl ? (
-                                      <button
-                                        type="button"
-                                        style={{
-                                          background: 'none',
-                                          border: 'none',
-                                          padding: 0,
-                                          cursor: 'pointer'
-                                        }}
-                                        onClick={() => setFullScreenshot(ssUrl)}
-                                        title="Klik untuk memperbesar bukti tangkapan layar"
-                                      >
-                                        <img
-                                          src={ssUrl}
-                                          alt="Bukti Pengujian"
-                                          style={{
-                                            width: 44,
-                                            height: 44,
-                                            objectFit: 'cover',
-                                            borderRadius: 6,
-                                            border: '1px solid var(--border)'
-                                          }}
-                                        />
-                                      </button>
-                                    ) : (
-                                      <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>—</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>}</Paginated>
-                    </Panel>
-
-                    {/* BUG & DEFECT DETAIL LEDGER */}
-                    <Panel title={`Catatan Bug & Error Log (${allFailedSteps.length})`}>
-                      {allFailedSteps.length === 0 ? (
-                        <div style={{
-                          padding: 24,
-                          background: 'rgba(39, 201, 63, 0.06)',
-                          border: '1px solid rgba(39, 201, 63, 0.2)',
-                          borderRadius: 8,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 14,
-                          color: 'var(--green)'
-                        }}>
-                          <span style={{ fontSize: 28 }}>🛡️</span>
-                          <div>
-                            <strong style={{ display: 'block', fontSize: 14, color: '#FFFFFF' }}>
-                              Tidak Ada Bug Kritis Ditemukan
-                            </strong>
-                            <small style={{ color: 'var(--text-muted)' }}>
-                              Semua skenario pengujian terakhir berhasil diselesaikan tanpa crash atau assertion failure.
-                            </small>
+                      {/* ── KOP SURAT / DOCUMENT HEADER ── */}
+                      <div className="report-doc-header">
+                        <div className="report-doc-brand">
+                          <div className="report-doc-kicker">
+                            <Icon name="shield" size={12} /> QC Maestro &middot; Executive Quality Audit Report
+                          </div>
+                          <h1 className="report-doc-title">
+                            {activeJob.name || activeJob.config?.name || 'Audit Kualitas Aplikasi'}
+                          </h1>
+                          <div className="report-doc-ref">
+                            <span>JOB:</span>
+                            <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{activeJob.id}</code>
+                            <span style={{ color: '#DBC4AC' }}>&middot;</span>
+                            <span>{fmtDate(activeJob.createdAt)}</span>
                           </div>
                         </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                          <Paginated items={allFailedSteps}>{(failedPage, start) => failedPage.map((b, idx) => (
-                            <div
-                              key={idx}
-                              style={{
-                                background: '#0d131f',
-                                border: '1px solid rgba(255, 90, 121, 0.3)',
-                                borderRadius: 8,
-                                padding: 16
-                              }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                <strong style={{ color: '#FF5A79', fontSize: 13 }}>
-                                  Defect #{start + idx + 1}: Flow "{b.flowId}" (Step: {b.step.action})
-                                </strong>
-                                <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Run: {b.runId}</span>
-                              </div>
-                              <pre style={{
-                                background: '#060913',
-                                padding: 12,
-                                borderRadius: 6,
-                                color: '#FFA5B5',
-                                fontSize: 11.5,
-                                overflowX: 'auto',
-                                margin: 0
-                              }}>
-                                {b.step.errorMessage || 'Unknown execution failure'}
-                              </pre>
+                        <div className="report-doc-verdict-box">
+                          <span className={`linear-status-badge ${verdictClass}`} style={{ fontSize: 12, padding: '6px 14px' }}>
+                            <span className="led-dot" />
+                            {verdictLabel}
+                          </span>
+                          <span style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            background: '#FAF6F1',
+                            border: '1px solid #DBC4AC',
+                            color: '#7B6858'
+                          }}>
+                            {(activeJob.config?.platform || 'WEB').toUpperCase()}
+                          </span>
+                          <div className="report-doc-date">{wibClock}</div>
+                        </div>
+                      </div>
+
+                      {/* ── EXECUTIVE TELEMETRY STRIP (5 KPIs) ── */}
+                      <div className="fr-telemetry-strip">
+                        <div className="fr-telemetry-item">
+                          <div className="fr-telemetry-label">
+                            <Icon name="shield" size={13} /> QA Health Score
+                          </div>
+                          <div className="fr-telemetry-val" style={{
+                            color: healthScore == null ? '#7B6858' : healthScore >= 80 ? '#15803D' : '#DC2626'
+                          }}>
+                            {healthScore != null ? `${healthScore}%` : '—'}
+                          </div>
+                          <div className="fr-telemetry-sub">
+                            {hasRunData
+                              ? (healthScore! >= 80 ? 'Evaluasi Mutu Baik' : 'Terdeteksi Isu')
+                              : (isJobFailed ? 'Discovery gagal' : 'Belum ada eksekusi')}
+                          </div>
+                        </div>
+
+                        <div className="fr-telemetry-item">
+                          <div className="fr-telemetry-label">
+                            <Icon name="runs" size={13} /> Verifikasi Skenario
+                          </div>
+                          <div className="fr-telemetry-val">
+                            {hasRunData ? `${passedRuns}/${totalRuns}` : (activeJob.flows?.length ?? 0)}
+                          </div>
+                          <div className="fr-telemetry-sub">
+                            {hasRunData
+                              ? `${Math.round((passedRuns / totalRuns) * 100)}% lolos`
+                              : 'flow siap uji'}
+                          </div>
+                        </div>
+
+                        <div className="fr-telemetry-item">
+                          <div className="fr-telemetry-label">
+                            <Icon name="warning" size={13} /> Defect Terdeteksi
+                          </div>
+                          <div className="fr-telemetry-val" style={{
+                            color: totalDefectsCombined > 0 ? '#DC2626' : '#15803D'
+                          }}>
+                            {totalDefectsCombined}
+                          </div>
+                          <div className="fr-telemetry-sub">
+                            {userAppErrorsTotal} Aplikasi &middot; {qcEngineErrorsTotal} Runner
+                          </div>
+                        </div>
+
+                        <div className="fr-telemetry-item">
+                          <div className="fr-telemetry-label">
+                            <Icon name="globe" size={13} /> Cakupan Arsitektur
+                          </div>
+                          <div className="fr-telemetry-val">{pages.length}</div>
+                          <div className="fr-telemetry-sub">
+                            {publicPagesCount} publik &middot; {authPagesCount} auth
+                          </div>
+                        </div>
+
+                        <div className="fr-telemetry-item">
+                          <div className="fr-telemetry-label">
+                            <Icon name="media" size={13} /> Bukti Visual
+                          </div>
+                          <div className="fr-telemetry-val">{galleryItems.length}</div>
+                          <div className="fr-telemetry-sub">screenshot tersimpan</div>
+                        </div>
+                      </div>
+
+                      {/* ── SECTION 1: PROFIL & LINGKUNGAN TARGET ── */}
+                      <div className="report-section-block">
+                        <h2 className="report-section-title">
+                          <span className="section-num">01</span>
+                          <Icon name="globe" size={15} /> Profil &amp; Lingkungan Target
+                        </h2>
+                        <div className="report-profile-grid">
+                          <div className="report-profile-card">
+                            <span className="card-label">Base URL / Target</span>
+                            <span className="card-val">
+                              <code>{activeJob.config?.baseUrl || '—'}</code>
+                            </span>
+                          </div>
+                          <div className="report-profile-card">
+                            <span className="card-label">Platform</span>
+                            <span className="card-val">{(activeJob.config?.platform || 'Web').toUpperCase()}</span>
+                          </div>
+                          <div className="report-profile-card">
+                            <span className="card-label">Mode Pengujian</span>
+                            <span className="card-val">
+                              <code>{activeJob.config?.runMode || 'STANDARD'}</code>
+                            </span>
+                          </div>
+                          <div className="report-profile-card">
+                            <span className="card-label">Database Engine</span>
+                            <span className="card-val">
+                              <code>{activeJob.config?.database?.engine || 'N/A'}</code>
+                            </span>
+                          </div>
+                          <div className="report-profile-card">
+                            <span className="card-label">Mulai Dijalankan</span>
+                            <span className="card-val" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                              {fmtDate(activeJob.createdAt)}
+                            </span>
+                          </div>
+                          <div className="report-profile-card">
+                            <span className="card-label">Selesai / Durasi</span>
+                            <span className="card-val" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                              {activeJob.finishedAt ? fmtDate(activeJob.finishedAt) : (isRunning ? 'Sedang berjalan...' : '—')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ── SECTION 2: CAKUPAN ARSITEKTUR ── */}
+                      {pages.length > 0 && (
+                        <div className="report-section-block">
+                          <h2 className="report-section-title">
+                            <span className="section-num">02</span>
+                            <Icon name="map" size={15} /> Cakupan Arsitektur &amp; Skenario
+                          </h2>
+                          <div className="report-profile-grid">
+                            <div className="report-profile-card">
+                              <span className="card-label">Total Halaman Terpetakan</span>
+                              <span className="card-val" style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 850 }}>{pages.length}</span>
                             </div>
-                          ))}</Paginated>
+                            <div className="report-profile-card">
+                              <span className="card-label">Halaman Publik</span>
+                              <span className="card-val" style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 850 }}>{publicPagesCount}</span>
+                            </div>
+                            <div className="report-profile-card">
+                              <span className="card-label">Halaman Auth</span>
+                              <span className="card-val" style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 850 }}>{authPagesCount}</span>
+                            </div>
+                            <div className="report-profile-card">
+                              <span className="card-label">Elemen DOM Dipindai</span>
+                              <span className="card-val" style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 850 }}>{totalElements > 0 ? totalElements : '—'}</span>
+                            </div>
+                            <div className="report-profile-card">
+                              <span className="card-label">File Modul Dipindai</span>
+                              <span className="card-val" style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 850 }}>{filesScanned}</span>
+                            </div>
+                            <div className="report-profile-card">
+                              <span className="card-label">Alur Bisnis Terdaftar</span>
+                              <span className="card-val" style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 850 }}>{activeJob.flows?.length ?? 0}</span>
+                            </div>
+                          </div>
                         </div>
                       )}
-                    </Panel>
 
-                    {/* APPLICATION MAP & ROUTE INVENTORY */}
-                    <Panel title="Application Map &amp; Screen Inventory">
-                      <Paginated items={pages}>{(visiblePages, start) => <div className="table-wrap">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Page / Screen Title</th>
-                              <th>Route / Package</th>
-                              <th>Status Code</th>
-                              <th>Elemen Terpetakan</th>
-                              <th>Akses Autentikasi</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {visiblePages.map((p, idx) => (
-                              <tr key={start + idx}>
-                                <td><strong>{p.title}</strong></td>
-                                <td><code style={{ color: 'var(--cyan)' }}>{p.path}</code></td>
-                                <td>{p.status || '—'}</td>
-                                <td>{p.elements?.length || 0} elemen</td>
-                                <td><Badge value={p.authentication || 'public'} /></td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>}</Paginated>
-                    </Panel>
+                      {/* ── SECTION 3: HASIL VERIFIKASI SKENARIO ── */}
+                      <div className="report-section-block">
+                        <h2 className="report-section-title">
+                          <span className="section-num">03</span>
+                          <Icon name="runs" size={15} /> Hasil Verifikasi Skenario
+                        </h2>
+
+                        {!hasRunData ? (
+                          /* Belum ada eksekusi */
+                          <div style={{
+                            background: isJobFailed ? '#FEF2F2' : '#EFF6FF',
+                            border: `1px solid ${isJobFailed ? '#FCA5A5' : '#BFDBFE'}`,
+                            borderRadius: 8,
+                            padding: '16px 20px',
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 14
+                          }}>
+                            <Icon name={isJobFailed ? 'warning' : 'shield'} size={20} />
+                            <div>
+                              <strong style={{ fontSize: 13.5, fontWeight: 800, color: isJobFailed ? '#DC2626' : '#1D4ED8', display: 'block', marginBottom: 6 }}>
+                                {isJobFailed
+                                  ? `Discovery berhenti — Status: ${activeJob.status}`
+                                  : `${activeJob.flows?.length ?? 0} Skenario Siap — Belum Dieksekusi`}
+                              </strong>
+                              <p style={{ margin: 0, fontSize: 12.5, color: '#7B6858', lineHeight: 1.55 }}>
+                                {isJobFailed
+                                  ? (failureErrorText || 'Proses gagal pada tahap inisialisasi runtime.')
+                                  : `Discovery selesai: ${filesScanned} modul & ${pages.length} rute terpetakan. Jalankan skenario test untuk menghasilkan metrik kelulusan.`}
+                              </p>
+                              {isJobFailed && (
+                                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                  <button type="button" className="tool-btn primary"
+                                    onClick={() => handleRestartJob(activeJob.id)}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                                    <Icon name="refresh" size={13} /> Retry
+                                  </button>
+                                  <button type="button" className="tool-btn"
+                                    onClick={() => setCurrentView('discovery')}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                                    <Icon name="terminal" size={13} /> Live Terminal
+                                  </button>
+                                </div>
+                              )}
+                              {!isJobFailed && (
+                                <button type="button" className="tool-btn primary"
+                                  onClick={() => setCurrentView('flows')}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 10 }}>
+                                  <Icon name="runs" size={13} /> Buka Skenario Test &amp; Mulai Eksekusi
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          /* Ada data eksekusi — tabel kompak */
+                          <>
+                            {/* Filter satu baris */}
+                            {attemptsList.length > 1 && (
+                              <div className="fr-filter-bar" style={{ marginBottom: 0 }}>
+                                <div className="fr-filter-group">
+                                  <span className="fr-filter-label"><Icon name="refresh" size={12} /> Sesi:</span>
+                                  {attemptsList.map(att => {
+                                    const isSelected = (reportAttempt === 'latest' && att.isLatest) || reportAttempt === att.id;
+                                    return (
+                                      <button key={att.id} type="button"
+                                        className={`tool-btn ${isSelected ? 'primary' : ''}`}
+                                        style={{ borderRadius: 999, fontSize: 11, padding: '3px 10px' }}
+                                        onClick={() => setReportAttempt(att.id)}>
+                                        #{att.num} ({att.rate}%)
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <div className="fr-filter-group">
+                                  <span className="fr-filter-label"><Icon name="search" size={12} /> Filter:</span>
+                                  {(['all', 'PASSED', 'FAILED'] as const).map(f => (
+                                    <button key={f} type="button"
+                                      className={`tool-btn ${reportStatusFilter === f ? (f === 'FAILED' ? 'active' : 'primary') : ''}`}
+                                      style={{ borderRadius: 999, fontSize: 11, padding: '3px 10px', borderColor: f === 'FAILED' && failedRuns > 0 ? 'var(--red)' : undefined }}
+                                      onClick={() => setReportStatusFilter(f)}>
+                                      {f === 'all' ? `Semua (${resultsForAttempt.length})` : f === 'PASSED' ? `Lolos (${passedRuns})` : `Gagal (${failedRuns})`}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="table-wrap">
+                              <table className="fr-compact-table">
+                                <thead>
+                                  <tr>
+                                    <th>Skenario / Alur</th>
+                                    <th>Status</th>
+                                    <th>Steps</th>
+                                    <th>Durasi</th>
+                                    <th>Bukti</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {results.map((res: any, i: number) => {
+                                    const flowObj = activeJob.flows?.find((f: any) => f.id === res.flowId);
+                                    const passedSteps = (res.steps || []).filter((s: any) => s.status === 'PASSED').length;
+                                    const totalSteps = (res.steps || []).length;
+                                    const flowScreenshots = (res.artifacts || []).filter((a: any) => {
+                                      const p = typeof a === 'string' ? a : a?.path || a?.url || '';
+                                      return p.toLowerCase().endsWith('.png') || p.toLowerCase().endsWith('.jpg');
+                                    });
+                                    const durationMs = res.finishedAt && res.startedAt
+                                      ? new Date(res.finishedAt).getTime() - new Date(res.startedAt).getTime()
+                                      : null;
+                                    const durationStr = durationMs != null
+                                      ? durationMs >= 60000
+                                        ? `${Math.round(durationMs / 60000)}m ${Math.round((durationMs % 60000) / 1000)}s`
+                                        : `${(durationMs / 1000).toFixed(1)}s`
+                                      : '—';
+                                    return (
+                                      <tr key={i}>
+                                        <td>
+                                          <strong style={{ fontSize: 13, color: '#14181D', display: 'block' }}>
+                                            {flowObj?.name || res.flowId}
+                                          </strong>
+                                          <code style={{ fontSize: 10.5, color: '#8E7C6C', fontFamily: 'var(--font-mono)' }}>{res.flowId}</code>
+                                        </td>
+                                        <td>
+                                          <span className={`linear-status-badge ${res.status === 'PASSED' ? 'passed' : 'failed'}`}>
+                                            <span className="led-dot" />
+                                            {res.status === 'PASSED' ? 'PASSED' : 'FAILED'}
+                                          </span>
+                                        </td>
+                                        <td>
+                                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#7B6858', fontVariantNumeric: 'tabular-nums' }}>
+                                            {passedSteps}/{totalSteps}
+                                          </span>
+                                        </td>
+                                        <td>
+                                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#7B6858' }}>
+                                            {durationStr}
+                                          </span>
+                                        </td>
+                                        <td>
+                                          {flowScreenshots.length > 0 ? (
+                                            <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                                              {flowScreenshots.slice(0, 3).map((art: any, artIdx: number) => {
+                                                const raw = typeof art === 'string' ? art : (art.path || art.url);
+                                                const resolved = artifactUrl(activeJob.id, raw);
+                                                if (!resolved) return null;
+                                                return (
+                                                  <button key={artIdx} type="button"
+                                                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                                                    onClick={() => setFullScreenshot(resolved)}>
+                                                    <img src={resolved} alt="Bukti"
+                                                      style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 4, border: '1px solid #DBC4AC' }} />
+                                                  </button>
+                                                );
+                                              })}
+                                              {flowScreenshots.length > 3 && (
+                                                <span style={{ fontSize: 11, color: '#8E7C6C' }}>+{flowScreenshots.length - 3}</span>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <span style={{ fontSize: 12, color: '#A89B8F' }}>—</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      {/* ── SECTION 4: CATATAN DEFECT (hanya jika ada) ── */}
+                      {allFailedSteps.length > 0 && (
+                        <div className="report-section-block">
+                          <h2 className="report-section-title">
+                            <span className="section-num">04</span>
+                            <Icon name="warning" size={15} /> Catatan Defect &amp; Error Traceback ({allFailedSteps.length})
+                          </h2>
+                          <Paginated items={allFailedSteps}>{(failedPage, start) => (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                              {failedPage.map((b: any, idx: number) => {
+                                const isEngine = b.errorOrigin === 'qc_maestro_engine';
+                                const failureScreenshot = (b.artifacts || []).find((art: any) => {
+                                  const p = typeof art === 'string' ? art : art?.path || art?.url || '';
+                                  return p.toLowerCase().includes('failure') || (p.toLowerCase().endsWith('.png') && p.toLowerCase().includes(`step-${(b.step.index ?? 0) + 1}`));
+                                });
+                                const rawPath = typeof failureScreenshot === 'string' ? failureScreenshot : (failureScreenshot as any)?.path || (failureScreenshot as any)?.url;
+                                const resolvedSS = rawPath ? artifactUrl(activeJob.id, rawPath) : null;
+                                return (
+                                  <div key={idx} className={`defect-ledger-card ${isEngine ? 'origin-qc-engine' : 'origin-user-app'}`}>
+                                    <div className="defect-header-row">
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                        <span className={`defect-origin-pill ${isEngine ? 'qc-engine' : 'user-app'}`}>
+                                          ●  {isEngine ? 'RUNNER QC' : 'APLIKASI TARGET'}
+                                        </span>
+                                        <strong style={{ fontSize: 13, color: 'var(--text-main, #ffffff)' }}>
+                                          Defect #{start + idx + 1}: &ldquo;{b.flowId}&rdquo; — {b.step.action}
+                                        </strong>
+                                      </div>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'rgba(255,255,255,0.4)' }}>
+                                        RUN: {b.runId}
+                                      </span>
+                                    </div>
+                                    <pre className={`defect-diagnostic-msg ${isEngine ? 'engine-code' : ''}`}>
+                                      {b.step.errorMessage || 'Unknown execution failure'}
+                                    </pre>
+                                    {resolvedSS && (
+                                      <button type="button" onClick={() => setFullScreenshot(resolvedSS)}
+                                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                                        <img src={resolvedSS} alt="Failure Screenshot"
+                                          style={{ width: 52, height: 36, objectFit: 'cover', borderRadius: 4, border: '1px solid #ef4444' }} />
+                                        <span style={{ fontSize: 11, color: '#fca5a5' }}>Tangkapan layar saat error (klik perbesar)</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}</Paginated>
+                        </div>
+                      )}
+
+                      {/* ── SIGN-OFF / VERDICT ── */}
+                      <div className="report-signoff-box">
+                        <div className="report-signoff-meta">
+                          <strong>Digital Audit Signature</strong>
+                          <small>
+                            Dihasilkan otomatis oleh QC Maestro Engine &middot; {fmtDate(activeJob.finishedAt || activeJob.createdAt)}
+                          </small>
+                          <small style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5 }}>
+                            Job ID: {activeJob.id}
+                          </small>
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <div className={`report-signoff-stamp ${isJobFailed ? '' : ''}`} style={
+                            isJobFailed
+                              ? { borderColor: '#DC2626', background: '#FEF2F2', color: '#DC2626' }
+                              : !hasRunData
+                              ? { borderColor: '#B45309', background: '#FFFBEB', color: '#B45309' }
+                              : runsScore != null && runsScore >= 80
+                              ? {}
+                              : { borderColor: '#DC2626', background: '#FEF2F2', color: '#DC2626' }
+                          }>
+                            <Icon name={isJobFailed ? 'warning' : runsScore != null && runsScore >= 80 ? 'check' : 'warning'} size={13} />
+                            {verdictLabel}
+                          </div>
+                          {galleryItems.length > 0 && (
+                            <button type="button" className="tool-btn"
+                              onClick={() => setReportSubTab('gallery')}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                              <Icon name="media" size={13} /> {galleryItems.length} Screenshot
+                            </button>
+                          )}
+                          {videoItems.length > 0 && (
+                            <button type="button" className="tool-btn"
+                              onClick={() => setReportSubTab('videos')}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                              <Icon name="runs" size={13} /> {videoItems.length} Video
+                            </button>
+                          )}
+                          {activeJobId && isCompleted && (
+                            <button type="button" className="tool-btn"
+                              onClick={() => window.open(`/api/v1/discovery/jobs/${activeJobId}/report?format=html&attempt=${reportAttempt}&status=${reportStatusFilter}`, '_blank')}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                              <Icon name="overview" size={13} /> Dokumen HTML Lengkap
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SUBTAB GALERI SCREENSHOT (tersembunyi, dimunculkan via tombol di sign-off) */}
+                    {reportSubTab === 'gallery' && galleryItems.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                          <strong style={{ fontSize: 14, fontWeight: 800, color: '#14181D' }}>
+                            <Icon name="media" size={15} /> Galeri Screenshot Bukti ({galleryItems.length})
+                          </strong>
+                          <button type="button" className="tool-btn" onClick={() => setReportSubTab('summary')}
+                            style={{ fontSize: 12 }}>←  Kembali ke Laporan</button>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
+                          {galleryItems.map((item, idx) => (
+                            <div key={idx} style={{ background: '#FFFFFF', border: '1.5px solid #DBC4AC', borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 2px 8px rgba(70,50,35,0.05)' }}>
+                              <div style={{ background: '#0F172A', height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', overflow: 'hidden' }}
+                                onClick={() => setFullScreenshot(item.url)}>
+                                <img src={item.url} alt={item.label} style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                              </div>
+                              <div style={{ padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <strong style={{ fontSize: 12, color: '#14181D', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</strong>
+                                  <small style={{ color: '#8E7C6C', fontSize: 10.5, fontFamily: 'var(--font-mono)' }}>{item.name}</small>
+                                </div>
+                                <a href={item.url} download={item.name} className="tool-btn"
+                                  style={{ fontSize: 11, padding: '4px 8px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  <Icon name="download" size={11} />
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUBTAB VIDEO (tersembunyi, dimunculkan via tombol di sign-off) */}
+                    {reportSubTab === 'videos' && videoItems.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                          <strong style={{ fontSize: 14, fontWeight: 800, color: '#14181D' }}>
+                            <Icon name="runs" size={15} /> Rekaman Video Eksekusi ({videoItems.length})
+                          </strong>
+                          <button type="button" className="tool-btn" onClick={() => setReportSubTab('summary')}
+                            style={{ fontSize: 12 }}>←  Kembali ke Laporan</button>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+                          {videoItems.map((v, vIdx) => (
+                            <div key={vIdx} style={{ background: '#FFFFFF', border: '1.5px solid #DBC4AC', borderRadius: 10, overflow: 'hidden' }}>
+                              <video controls playsInline preload="metadata" src={v.url} style={{ width: '100%', maxHeight: 340, display: 'block', background: '#000' }} />
+                              <div style={{ padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                  <strong style={{ fontSize: 12, color: '#14181D', display: 'block' }}>Flow: {v.flowName}</strong>
+                                  <small style={{ color: '#8E7C6C', fontSize: 10.5, fontFamily: 'var(--font-mono)' }}>{v.name}</small>
+                                </div>
+                                <a href={v.url} download={v.name} className="tool-btn"
+                                  style={{ fontSize: 11, padding: '4px 8px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  <Icon name="download" size={11} />
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
             </div>
           )}
 
-          {/* VIEW: ZANNORA EVIDENCE */}
+
+          {/* VIEW: MEDIA */}
           {currentView === 'evidence' && (
             <div className="zannora-evidence-view">
-              <div className="view-header">
+              <div className="view-header" style={{ marginBottom: 16 }}>
                 <div>
-                  <div className="evidence-title-row">
-                    <h1 style={{ margin: 0 }}>{flowSource === 'zannora' ? 'Zannora Evidence Center' : `${activeJob?.name || 'Target'} Evidence Center`}</h1>
-                    <span className="evidence-project-chip">LIVE ARTIFACT INDEX</span>
+                  <div className="evidence-title-row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <h1 style={{ margin: 0 }}>Media</h1>
+                    <span className="evidence-project-chip">
+                      {evidenceSubTab === 'gallery' ? 'MEDIA & SCREENSHOT VIEWER' : 'AUDIT ARTIFACT INDEX'}
+                    </span>
                   </div>
-                  <p>Semua report, screenshot, dan video QC terbaru dikelompokkan berdasarkan bagian yang diuji.</p>
+                  <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>
+                    {evidenceSubTab === 'gallery'
+                      ? 'Penampil rekaman video flow dan arsip screenshot checkpoint dengan stage interaktif, zoom, dan filter.'
+                      : 'Semua report JSON, kelompok pengujian, dan folder evidence dikelompokkan berdasarkan bagian yang diuji.'}
+                  </p>
                 </div>
-                <div className="header-actions">
+                <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ display: 'inline-flex', background: 'var(--bg-panel-sub)', padding: 3, borderRadius: 8, border: '1px solid var(--border)' }}>
+                    <button
+                      className="tool-btn"
+                      onClick={() => setEvidenceSubTab('gallery')}
+                      style={{
+                        background: evidenceSubTab === 'gallery' ? 'var(--cyan-surface)' : 'transparent',
+                        color: evidenceSubTab === 'gallery' ? 'var(--cyan)' : 'var(--text-muted)',
+                        borderColor: evidenceSubTab === 'gallery' ? 'var(--cyan)' : 'transparent',
+                        borderRadius: 6,
+                        padding: '6px 14px',
+                        fontSize: 13,
+                        fontWeight: evidenceSubTab === 'gallery' ? 600 : 400,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Icon name="reports" size={14} /> Galeri Screenshot &amp; Video
+                    </button>
+                    <button
+                      className="tool-btn"
+                      onClick={() => setEvidenceSubTab('audit')}
+                      style={{
+                        background: evidenceSubTab === 'audit' ? 'var(--cyan-surface)' : 'transparent',
+                        color: evidenceSubTab === 'audit' ? 'var(--cyan)' : 'var(--text-muted)',
+                        borderColor: evidenceSubTab === 'audit' ? 'var(--cyan)' : 'transparent',
+                        borderRadius: 6,
+                        padding: '6px 14px',
+                        fontSize: 13,
+                        fontWeight: evidenceSubTab === 'audit' ? 600 : 400,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Icon name="database" size={14} /> Dokumen Audit &amp; JSON
+                    </button>
+                  </div>
                   <button className="tool-btn" onClick={() => flowSource === 'zannora' ? void refreshZannoraEvidence() : void refreshTargetEvidence(activeJobId)} disabled={evidenceLoading}>
-                    <Icon name="refresh" size={15} /> {evidenceLoading ? 'Memuat...' : 'Refresh Evidence'}
+                    <Icon name="refresh" size={15} /> {evidenceLoading ? 'Memuat...' : 'Refresh'}
                   </button>
                 </div>
               </div>
 
-              {evidenceError && <Notice error>{evidenceError}</Notice>}
-              {evidenceLoading && !activeEvidence && <div className="inline-empty">Membaca seluruh evidence target dari folder QC...</div>}
-              {!evidenceLoading && !activeEvidence && !evidenceError && <div className="inline-empty">Evidence target belum tersedia.</div>}
-
-              {activeEvidence && (
+              {evidenceSubTab === 'gallery' ? (
+                <LiveViewport
+                  job={flowSource === 'job' ? activeJob : null}
+                  evidence={activeEvidence}
+                  hideHeader
+                />
+              ) : (
                 <>
-                  <div className="evidence-summary-grid">
-                    <div className="evidence-summary-card"><span>Bagian diuji</span><strong>{activeEvidence.totals.groups}</strong><small>{activeEvidence.totals.passed} lulus · {activeEvidence.totals.failed} perlu perhatian</small></div>
-                    <div className="evidence-summary-card"><span>Report JSON</span><strong>{activeEvidence.totals.reports}</strong><small>Report per kategori tersedia</small></div>
-                    <div className="evidence-summary-card"><span>Screenshot</span><strong>{activeEvidence.totals.screenshots}</strong><small>Bukti visual yang bisa diperbesar</small></div>
-                    <div className="evidence-summary-card"><span>Video</span><strong>{activeEvidence.totals.videos}</strong><small>Video flow dengan kontrol playback</small></div>
-                  </div>
+                  {evidenceError && <Notice error>{evidenceError}</Notice>}
+                  {evidenceLoading && !activeEvidence && <div className="inline-empty">Membaca seluruh evidence target dari folder QC...</div>}
+                  {!evidenceLoading && !activeEvidence && !evidenceError && <div className="inline-empty">Evidence target belum tersedia.</div>}
 
-                  <div className="evidence-filter-bar">
-                    <span>LIHAT BAGIAN:</span>
-                    <button className={`tool-btn ${evidenceGroupFilter === 'all' ? 'active' : ''}`} onClick={() => setEvidenceGroupFilter('all')}>Semua ({activeEvidence.groups.length})</button>
-                    {[...new Set(activeEvidence.groups.map((group) => group.category))].map((category) => (
-                      <button key={category} className={`tool-btn ${evidenceGroupFilter === category ? 'active' : ''}`} onClick={() => setEvidenceGroupFilter(category)}>{category}</button>
-                    ))}
-                  </div>
+                  {activeEvidence && (
+                    <>
+                      <div className="evidence-summary-grid">
+                        <div className="evidence-summary-card"><span>Bagian diuji</span><strong>{activeEvidence.totals.groups}</strong><small>{activeEvidence.totals.passed} lulus · {activeEvidence.totals.failed} perlu perhatian</small></div>
+                        <div className="evidence-summary-card"><span>Report JSON</span><strong>{activeEvidence.totals.reports}</strong><small>Report per kategori tersedia</small></div>
+                        <div className="evidence-summary-card"><span>Screenshot</span><strong>{activeEvidence.totals.screenshots}</strong><small>Bukti visual yang bisa diperbesar</small></div>
+                        <div className="evidence-summary-card"><span>Video</span><strong>{activeEvidence.totals.videos}</strong><small>Video flow dengan kontrol playback</small></div>
+                      </div>
 
-                  <EvidenceInspector focus={evidenceFocus} evidence={activeEvidence} onClose={() => setEvidenceFocus(null)} onOpenAsset={(asset) => setFullScreenshot(asset.url)} />
+                      <div className="evidence-filter-bar">
+                        <span>LIHAT BAGIAN:</span>
+                        <button className={`tool-btn ${evidenceGroupFilter === 'all' ? 'active' : ''}`} onClick={() => setEvidenceGroupFilter('all')}>Semua ({activeEvidence.groups.length})</button>
+                        {[...new Set(activeEvidence.groups.map((group) => group.category))].map((category) => (
+                          <button key={category} className={`tool-btn ${evidenceGroupFilter === category ? 'active' : ''}`} onClick={() => setEvidenceGroupFilter(category)}>{category}</button>
+                        ))}
+                      </div>
 
-                  <div className="evidence-groups">
-                    <Paginated items={activeEvidence.groups.filter((group) => evidenceGroupFilter === 'all' || group.category === evidenceGroupFilter)} resetKey={evidenceGroupFilter}>{(visibleGroups) => visibleGroups.map((group) => (
-                      <Panel key={group.id} className="evidence-group-panel">
-                        <div className="evidence-group-heading">
-                          <div>
-                            <div className="evidence-group-kicker">{group.category}</div>
-                            <h2>{group.title}</h2>
-                            <p>{group.summary}</p>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Badge value={group.status} /><button className="quiet evidence-inline-open-btn" onClick={() => setEvidenceFocus({ groupId: group.id })}>Inspect inline</button></div>
-                        </div>
-                        <div className="evidence-folder-row">
-                          <span><Icon name="database" size={14} /> Folder evidence</span>
-                          <code>{group.folder}</code>
-                          {group.report && <a href={group.report.url} target="_blank" rel="noreferrer">Buka report JSON ↗</a>}
-                        </div>
+                      <EvidenceInspector focus={evidenceFocus} evidence={activeEvidence} onClose={() => setEvidenceFocus(null)} onOpenAsset={(asset) => setFullScreenshot(asset.url)} />
 
-                        {group.videos.length > 0 && (
-                          <div className="evidence-section">
-                            <div className="evidence-section-title"><span>VIDEO FLOW</span><small>{group.videos.length} file</small></div>
-                            <Paginated items={group.videos} resetKey={group.id}>{(videos) => <div className="evidence-video-grid">
-                              {videos.map((asset: EvidenceAsset) => (
-                                <div className="evidence-video-card" key={asset.relativePath}>
-                                  <video controls preload="metadata" src={asset.url} onClick={() => setEvidenceFocus({ groupId: group.id, asset })} />
-                                  <div className="evidence-asset-footer"><div><strong>{asset.label}</strong><small>{asset.relativePath}</small></div><a href={asset.url} download>Download</a></div>
-                                </div>
-                              ))}
-                            </div>}</Paginated>
-                          </div>
-                        )}
+                      <div className="evidence-groups">
+                        <Paginated items={activeEvidence.groups.filter((group) => evidenceGroupFilter === 'all' || group.category === evidenceGroupFilter)} resetKey={evidenceGroupFilter}>{(visibleGroups) => visibleGroups.map((group) => (
+                          <Panel key={group.id} className="evidence-group-panel">
+                            <div className="evidence-group-heading">
+                              <div>
+                                <div className="evidence-group-kicker">{group.category}</div>
+                                <h2>{group.title}</h2>
+                                <p>{group.summary}</p>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Badge value={group.status} /><button className="quiet evidence-inline-open-btn" onClick={() => setEvidenceFocus({ groupId: group.id })}>Inspect inline</button></div>
+                            </div>
+                            <div className="evidence-folder-row">
+                              <span><Icon name="database" size={14} /> Folder evidence</span>
+                              <code>{group.folder}</code>
+                              {group.report && <a href={group.report.url} target="_blank" rel="noreferrer">Buka report JSON ← —</a>}
+                            </div>
 
-                        {group.screenshots.length > 0 && <ScreenshotGallery assets={group.screenshots} selectedPath={evidenceFocus?.asset?.relativePath} onOpen={(asset) => { setEvidenceFocus({ groupId: group.id, asset }); setFullScreenshot(asset.url); }} collapsible resetToken={group.id} />}
+                            {group.videos.length > 0 && (
+                              <div className="evidence-section">
+                                <div className="evidence-section-title"><span>VIDEO FLOW</span><small>{group.videos.length} file</small></div>
+                                <Paginated items={group.videos} resetKey={group.id}>{(videos) => <div className="evidence-video-grid">
+                                  {videos.map((asset: EvidenceAsset) => (
+                                    <div className="evidence-video-card" key={asset.relativePath}>
+                                      <video controls preload="metadata" src={asset.url} onClick={() => setEvidenceFocus({ groupId: group.id, asset })} />
+                                      <div className="evidence-asset-footer"><div><strong>{asset.label}</strong><small>{asset.relativePath}</small></div><a href={asset.url} download>Download</a></div>
+                                    </div>
+                                  ))}
+                                </div>}</Paginated>
+                              </div>
+                            )}
 
-                        <div className="evidence-asset-count"><span>{group.assets.length} total artifact terindeks</span><span>Updated {date(group.report?.updatedAt || group.assets[0]?.updatedAt)}</span></div>
-                      </Panel>
-                    ))}</Paginated>
-                  </div>
+                            {group.screenshots.length > 0 && <ScreenshotGallery assets={group.screenshots} selectedPath={evidenceFocus?.asset?.relativePath} onOpen={(asset) => { setEvidenceFocus({ groupId: group.id, asset }); setFullScreenshot(asset.url); }} collapsible resetToken={group.id} />}
+
+                            <div className="evidence-asset-count"><span>{group.assets.length} total artifact terindeks</span><span>Updated {date(group.report?.updatedAt || group.assets[0]?.updatedAt)}</span></div>
+                          </Panel>
+                        ))}</Paginated>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>

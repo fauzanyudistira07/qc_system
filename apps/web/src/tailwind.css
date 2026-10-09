@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-cyan: #35D0BA;
+  --color-brand-violet: #8B7CFF;
+  --color-brand-canvas: #080D1A;
+  --color-brand-sidebar: #0B1122;
+  --color-brand-panel: #0F172A;
+  --color-brand-surface: #1A2744;
+}

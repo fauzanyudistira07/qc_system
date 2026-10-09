@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import childProcess, { spawn, type ChildProcess } from 'node:child_process';
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -46,7 +46,7 @@ export type RunnerUpdate = {
   stepResults?: RunStepResult[];
 };
 
-export type RunnerContext = { sourceDir: string; workspace: string; networkName: string; services: ManagedService[]; containers: Map<string, { name: string; workdir: string }> };
+export type RunnerContext = { runId: string; sourceDir: string; workspace: string; networkName: string; services: ManagedService[]; containers: Map<string, { name: string; workdir: string }> };
 export type RunnerHooks = { update: (update: RunnerUpdate) => void; signal?: AbortSignal; onSource?: (sourceDir: string) => Promise<void>; prepare?: (context: RunnerContext) => Promise<Record<string, string>>; beforeStart?: (context: RunnerContext) => Promise<void>; execute?: (sourceDir: string) => Promise<WebRunResult>; cleanup?: () => Promise<void> };
 
 function wait(ms: number) {
@@ -72,17 +72,17 @@ async function exists(file: string) {
 async function ensureDockerHostSpace() {
   if (process.platform !== 'win32') return;
   const { statfs } = await import('node:fs/promises') as unknown as { statfs: (path: string) => Promise<{ bavail: number | bigint; bsize: number | bigint }> };
-  const requiredBytes = 2 * 1024 ** 3;
-  const systemRoot = process.env.SystemRoot ?? process.cwd();
-  const systemDrive = path.parse(systemRoot).root;
-  const probePaths = [...new Set([systemDrive, tmpdir()])];
+  const configuredMinBytes = Number(process.env.QC_MIN_DOCKER_DISK_BYTES ?? 50 * 1024 * 1024);
+  const requiredBytes = Number.isFinite(configuredMinBytes) ? configuredMinBytes : 50 * 1024 * 1024;
+  const workspaceDrive = path.parse(process.cwd()).root;
+  const probePaths = [...new Set([workspaceDrive])];
   for (const probePath of probePaths) {
     const filesystem = await statfs(probePath).catch(() => undefined);
     if (!filesystem) continue;
     const availableBytes = Number(filesystem.bavail) * Number(filesystem.bsize);
     if (availableBytes < requiredBytes) {
       const availableGb = (availableBytes / 1024 ** 3).toFixed(2);
-      throw new Error(`ruang disk host Docker tidak mencukupi pada ${path.parse(probePath).root || probePath}: tersisa ${availableGb} GiB, perlu minimal 2 GiB. Bebaskan ruang di drive tersebut lalu jalankan ulang QC.`);
+      throw new Error(`ruang disk host Docker tidak mencukupi pada ${path.parse(probePath).root || probePath}: tersisa ${availableGb} GiB, perlu minimal ${(requiredBytes / 1024 ** 3).toFixed(2)} GiB. Bebaskan ruang di drive tersebut lalu jalankan ulang QC.`);
     }
   }
 }
@@ -122,8 +122,20 @@ async function findManifestDirectories(sourceDir: string, filename: string, maxD
   return directories;
 }
 
-function basePort(baseUrl: string, fallback: number) {
-  try { return Number(new URL(baseUrl).port) || fallback; } catch { return fallback; }
+export function serverPort(port: number, fallback = 5000): number {
+  if (Number.isInteger(port) && port >= 5000 && port <= 6000) return port;
+  // Map any outside port into 5000-6000 range
+  const mapped = 5000 + (Math.abs(port) % 1001);
+  return mapped >= 5000 && mapped <= 6000 ? mapped : fallback;
+}
+
+function basePort(baseUrl: string, fallback: number, enforceServerRange = true) {
+  try {
+    const raw = Number(new URL(baseUrl).port) || fallback;
+    return enforceServerRange ? serverPort(raw, fallback) : raw;
+  } catch {
+    return enforceServerRange ? serverPort(fallback, fallback) : fallback;
+  }
 }
 
 function isLaravelPreset(service: ManagedService) {
@@ -154,7 +166,7 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
   const packageDirs = await findManifestDirectories(sourceDir, 'package.json');
   const nodeServices: ManagedService[] = [];
   for (const [index, directory] of packageDirs.entries()) {
-    const packageJson = await readJson<{ scripts?: Record<string, string>; packageManager?: string }>(path.join(directory, 'package.json'));
+    const packageJson = await readJson<{ scripts?: Record<string, string>; dependencies?: Record<string, string>; devDependencies?: Record<string, string>; packageManager?: string }>(path.join(directory, 'package.json'));
     const scripts = packageJson?.scripts ?? {};
     const script = scripts.dev ? 'dev' : scripts.start ? 'start' : scripts.serve ? 'serve' : undefined;
     if (!script) continue;
@@ -163,31 +175,49 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
     const packageManager = packageJson?.packageManager ?? '';
     const hasPnpmLock = await exists(path.join(directory, 'pnpm-lock.yaml'));
     const hasYarnLock = await exists(path.join(directory, 'yarn.lock'));
+    const hasPackageLock = await exists(path.join(directory, 'package-lock.json'));
     const tool = packageManager.startsWith('pnpm') || hasPnpmLock ? 'pnpm' : packageManager.startsWith('yarn') || hasYarnLock ? 'yarn' : 'npm';
-    const installCommand = tool === 'pnpm' ? `pnpm install${hasPnpmLock ? ' --frozen-lockfile' : ''}` : tool === 'yarn' ? `yarn install${hasYarnLock ? ' --frozen-lockfile' : ''}` : await exists(path.join(directory, 'package-lock.json')) ? 'npm ci' : 'npm install';
+    const isNext = Boolean(scripts[script]?.includes('next') || (scripts.build && scripts.build.includes('next')) || packageJson?.dependencies?.next || packageJson?.devDependencies?.next);
+    const hasPrisma = await exists(path.join(directory, 'prisma', 'schema.prisma'));
+    const hasNodeModules = await exists(path.join(directory, 'node_modules'));
+    let installCommand = hasNodeModules
+      ? (hasPrisma ? 'npx prisma generate' : '')
+      : (tool === 'pnpm'
+        ? `pnpm install${hasPnpmLock ? ' --frozen-lockfile' : ''}`
+        : tool === 'yarn'
+        ? `yarn install${hasYarnLock ? ' --frozen-lockfile' : ''}`
+        : hasPackageLock
+        ? 'npm ci --prefer-offline --no-audit --no-fund || npm install --prefer-offline --no-audit --no-fund --progress=false'
+        : 'npm install --prefer-offline --no-audit --no-fund --progress=false');
+    if (!hasNodeModules && hasPrisma) {
+      installCommand = `${installCommand} && npx prisma generate`;
+    }
+    const startCommand = isNext
+      ? `${tool} run ${script}${tool === 'yarn' ? '' : ' --'} -p ${port}`
+      : `${tool} run ${script}${tool === 'yarn' ? '' : ' --'} --host 0.0.0.0 --port=${port}`;
     nodeServices.push({
       id: isRoot ? 'node-app' : `node-${serviceSlug(sourceDir, directory)}`,
       name: isRoot ? 'node-app' : `node-${relativeWorkingDir(sourceDir, directory)}`,
       kind: laravelDirs.length > 0 ? 'frontend' : 'custom',
       workingDir: relativeWorkingDir(sourceDir, directory),
       installCommand,
-      startCommand: `${tool} run ${script}${tool === 'yarn' ? '' : ' --'} --host 0.0.0.0 --port=${port}`,
+      startCommand,
       healthCheck: laravelDirs.length > 0 ? '' : project.baseUrl,
       port,
-      runtimeImage: 'node:24-bookworm-slim',
+      runtimeImage: 'node:22',
       dependsOn: laravelDirs.length > 0 ? laravelDirs.map((directory) => `laravel-${serviceSlug(sourceDir, directory)}`) : []
     });
   }
 
   const services: ManagedService[] = [];
   for (const [index, directory] of laravelDirs.entries()) {
-    const port = index === 0 ? basePort(project.baseUrl, 8000) : 8000 + index;
+    const port = index === 0 ? basePort(project.baseUrl, 5000) : 5000 + index;
     services.push({
       id: `laravel-${serviceSlug(sourceDir, directory)}`,
       name: directory === sourceDir ? 'laravel-backend' : `laravel-${relativeWorkingDir(sourceDir, directory)}`,
       kind: 'backend',
       workingDir: relativeWorkingDir(sourceDir, directory),
-      installCommand: 'composer install',
+      installCommand: 'composer install --no-interaction --prefer-dist --ignore-platform-reqs',
       startCommand: `php artisan serve --host=0.0.0.0 --port=${port}`,
       healthCheck: index === 0 ? project.baseUrl : `http://127.0.0.1:${port}/`,
       port,
@@ -203,7 +233,7 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
   const djangoDirs = await findManifestDirectories(sourceDir, 'manage.py');
   if (pythonProjects.length > 0 || djangoDirs.length > 0) {
     const directory = djangoDirs[0] ?? pythonProjects[0];
-    const port = basePort(project.baseUrl, 8000);
+    const port = basePort(project.baseUrl, 5000);
     const hasRequirements = await exists(path.join(directory, 'requirements.txt'));
     return [{ id: 'python-app', name: 'python-app', kind: 'backend', workingDir: relativeWorkingDir(sourceDir, directory), installCommand: hasRequirements ? 'python -m pip install -r requirements.txt' : 'python -m pip install -e .', startCommand: djangoDirs.length > 0 ? `python manage.py runserver 0.0.0.0:${port}` : `python -m uvicorn app:app --host 0.0.0.0 --port ${port}`, healthCheck: project.baseUrl, port, runtimeImage: 'python:3.12-slim', dependsOn: [] }];
   }
@@ -211,7 +241,7 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
   const goDirs = await findManifestDirectories(sourceDir, 'go.mod');
   if (goDirs.length > 0) {
     const directory = goDirs[0];
-    return [{ id: 'go-app', name: 'go-app', kind: 'backend', workingDir: relativeWorkingDir(sourceDir, directory), installCommand: 'go mod download', startCommand: 'go run .', healthCheck: project.baseUrl, port: basePort(project.baseUrl, 8080), runtimeImage: 'golang:1.27-bookworm', dependsOn: [] }];
+    return [{ id: 'go-app', name: 'go-app', kind: 'backend', workingDir: relativeWorkingDir(sourceDir, directory), installCommand: 'go mod download', startCommand: 'go run .', healthCheck: project.baseUrl, port: basePort(project.baseUrl, 5000), runtimeImage: 'golang:1.27-bookworm', dependsOn: [] }];
   }
 
   const composeFiles = [...await findManifestDirectories(sourceDir, 'docker-compose.yml'), ...await findManifestDirectories(sourceDir, 'docker-compose.yaml')];
@@ -223,13 +253,31 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
 }
 
 export async function cloneRepository(repositoryUrl: string, ref: string, sourceDir: string, root: string, env: NodeJS.ProcessEnv, gitToken: string | undefined, onOutput: (message: string) => void) {
-  const args = ['clone', '--depth', '1', '--filter=blob:none', '--no-tags', repositoryUrl, sourceDir];
+  const isGitRepo = await exists(path.join(sourceDir, '.git'));
   let gitEnv = env;
+  if (isGitRepo) {
+    onOutput('Repository sudah ada di workspace; memperbarui referensi dari origin…');
+    await runProcess('git', ['fetch', '--depth', '1', 'origin', ref], { cwd: sourceDir, env: gitEnv, commandLabel: 'git fetch ref', timeoutMs: 120_000, onOutput });
+    await runProcess('git', ['checkout', '--detach', 'FETCH_HEAD'], { cwd: sourceDir, env: gitEnv, commandLabel: 'git checkout ref', timeoutMs: 60_000 });
+    return;
+  }
+  if (await exists(sourceDir)) {
+    await rm(sourceDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(async () => {
+      if (process.platform === 'win32') {
+        await runProcess('cmd', ['/c', 'rmdir', '/s', '/q', sourceDir], { cwd: root, env, commandLabel: 'clean sourceDir' }).catch(() => {});
+      }
+    });
+  }
+  const args = ['clone', '--depth', '1', '--filter=blob:none', '--no-tags', repositoryUrl, sourceDir];
   try {
     await runProcess('git', args, { cwd: root, env, commandLabel: 'git clone', timeoutMs: 180_000, onOutput });
   } catch (error) {
     if (!gitToken) throw error;
-    await rm(sourceDir, { recursive: true, force: true });
+    await rm(sourceDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(async () => {
+      if (process.platform === 'win32') {
+        await runProcess('cmd', ['/c', 'rmdir', '/s', '/q', sourceDir], { cwd: root, env, commandLabel: 'clean sourceDir' }).catch(() => {});
+      }
+    });
     const anonymousEnv = { ...env };
     delete anonymousEnv.GIT_CONFIG_COUNT;
     delete anonymousEnv.GIT_CONFIG_KEY_0;
@@ -339,7 +387,7 @@ function safeContainerImage(service: ManagedService) {
   const install = service.installCommand.trim().toLowerCase();
   const inferred = service.runtimeImage?.trim()
     || (/\bcomposer\b/.test(install) ? 'composer:2' : undefined)
-    || (/\b(?:npm|pnpm|yarn|node|corepack)\b/.test(`${start} ${install}`) ? 'node:24-bookworm-slim' : undefined)
+    || (/\b(?:npm|pnpm|yarn|node|corepack)\b/.test(`${start} ${install}`) ? 'node:22' : undefined)
     || (/\b(?:php|artisan|composer)\b/.test(`${start} ${install}`) ? 'php:8.3-cli' : undefined)
     || (/\b(?:python|pip|manage\.py)\b/.test(`${start} ${install}`) ? 'python:3.12-slim' : undefined)
     || (/\b(?:go|golang)\b/.test(`${start} ${install}`) ? 'golang:1.27-bookworm' : undefined);
@@ -351,11 +399,14 @@ function safeContainerImage(service: ManagedService) {
 function containerPort(service: ManagedService) {
   if (service.port !== undefined) {
     if (!Number.isInteger(service.port) || service.port < 1 || service.port > 65535) throw new Error(`port service ${service.name} harus antara 1 dan 65535.`);
-    return service.port;
+    return serverPort(service.port);
   }
   try {
     const url = new URL(service.healthCheck);
-    if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') return Number(url.port) || (url.protocol === 'https:' ? 443 : 80);
+    if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') {
+      const rawPort = Number(url.port) || (url.protocol === 'https:' ? 443 : 80);
+      return serverPort(rawPort);
+    }
   } catch { /* health check may be intentionally empty */ }
   return undefined;
 }
@@ -422,17 +473,16 @@ async function waitForHealth(url: string, timeoutMs: number, onProgress?: (messa
   let lastError = 'belum ada response';
   while (Date.now() < deadline) {
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 1_500);
-      const response = await fetch(url, { signal: controller.signal });
-      clearTimeout(timer);
-      if (response.ok) return;
+      const remainingMs = Math.max(1000, deadline - Date.now());
+      const attemptTimeout = Math.min(25_000, remainingMs);
+      const response = await fetch(url, { signal: AbortSignal.timeout(attemptTimeout) });
+      if (response.ok || (response.status >= 200 && response.status < 500)) return;
       lastError = `HTTP ${response.status}`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
     onProgress?.(`menunggu health check (${lastError})`);
-    await wait(500);
+    await wait(1000);
   }
   throw new Error(`health check timeout ${url}: ${lastError}`);
 }
@@ -466,6 +516,12 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
 
   try {
     if (!/^[a-z0-9-]+$/i.test(runId)) throw new Error('invalid run id');
+    try {
+      const existing = childProcess.execSync(`docker ps -aq --filter label=qc.run_id=${runId}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      if (existing) {
+        childProcess.execSync(`docker rm -fv ${existing.split(/\s+/).join(' ')}`, { stdio: 'ignore' });
+      }
+    } catch {}
     await mkdir(workspace, { recursive: true });
     hooks.signal?.throwIfAborted();
     hooks.update({ phase: 'CLONING', progress: 5, message: 'Mengambil repository dari GitHub…' });
@@ -527,9 +583,10 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
     if (unsupportedDockerCommand) throw new Error(`service ${unsupportedDockerCommand.name} meminta Docker/Compose di dalam repo. Nested Docker belum diizinkan pada sandbox; isi image runtime dan command aplikasi biasa.`);
     await ensureDockerHostSpace();
     const limits = sandboxLimits();
+    await runProcess('docker', ['network', 'rm', networkName], { cwd: root, env, commandLabel: 'cleanup stale network' }).catch(() => undefined);
     networkCreated = true;
     await runProcess('docker', ['network', 'create', '--label', 'qc.managed=true', '--label', `qc.run_id=${runId}`, networkName], { cwd: root, env, commandLabel: 'membuat jaringan sandbox', timeoutMs: 60_000, secrets: projectSecrets });
-    const runnerContext = { sourceDir, workspace, networkName, services: ordered, containers: containerByService };
+    const runnerContext = { runId, sourceDir, workspace, networkName, services: ordered, containers: containerByService };
     const additionalEnvironment = await hooks.prepare?.(runnerContext) ?? {};
     projectSecrets.push(...Object.entries(additionalEnvironment).filter(([key]) => /password|token|secret|accounts/i.test(key)).map(([, value]) => value));
     for (const service of ordered) {
@@ -538,18 +595,28 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
       const name = serviceContainerName(runId, service);
       const aliases = [...new Set([service.id, service.name].map((value) => value.replace(/[^a-z0-9-]/gi, '-').toLowerCase().replace(/^-+|-+$/g, '').slice(0, 48)).filter(Boolean))];
       const port = containerPort(service);
+      const serviceWorkdir = containerWorkingDirectory(sourceDir, safeWorkingDirectory(sourceDir, service.workingDir));
       const args = [
         'run', '--detach', '--init', '--name', name,
         '--label', 'qc.managed=true', '--label', `qc.run_id=${runId}`,
         '--network', networkName, ...aliases.flatMap((alias) => ['--network-alias', alias]),
         '--memory', limits.memory, '--cpus', limits.cpus, '--pids-limit', limits.pids,
         '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL',
-        '--tmpfs', '/tmp:rw,nosuid,size=512m',
+        '--tmpfs', '/tmp:rw,nosuid,size=2g',
         '--volume', `${sourceDir}:/workspace${service.kind === 'database' ? ':ro' : ''}`,
-        '--workdir', containerWorkingDirectory(sourceDir, safeWorkingDirectory(sourceDir, service.workingDir)),
+        '--volume', 'qc-npm-cache:/tmp/npm-cache'
+      ];
+      if (service.kind !== 'database' && /\b(?:npm|pnpm|yarn|node)\b/i.test(`${service.installCommand} ${service.startCommand}`)) {
+        args.push('--volume', `${serviceWorkdir}/node_modules`);
+        if (/\bnext\b/i.test(`${service.installCommand} ${service.startCommand}`)) {
+          args.push('--volume', `${serviceWorkdir}/.next`);
+        }
+      }
+      args.push(
+        '--workdir', serviceWorkdir,
         '--env', `APP_ENV=${project.environment}`, '--env', 'HOME=/tmp', '--env', 'COMPOSER_HOME=/tmp/composer',
         '--env', 'NPM_CONFIG_CACHE=/tmp/npm-cache', '--env', 'PIP_CACHE_DIR=/tmp/pip-cache'
-      ];
+      );
       for (const [key, value] of Object.entries(additionalEnvironment)) args.push('--env', `${key}=${value}`);
       if (port) args.push('--publish', `127.0.0.1:${port}:${port}`);
       args.push('--entrypoint', '/bin/sh', image, '-lc', 'while :; do sleep 3600; done');
@@ -560,8 +627,8 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
     hooks.update({ phase: 'RUNTIME_READY', progress: 20, message: `Sandbox Docker aktif dengan batas ${limits.cpus} CPU, ${limits.memory}, ${limits.pids} proses.` });
 
     const installTotal = ordered.filter((service) => service.installCommand.trim()).length;
-    const configuredInstallTimeout = Number(process.env.QC_INSTALL_TIMEOUT_MS ?? 900_000);
-    const installTimeoutMs = Number.isFinite(configuredInstallTimeout) ? Math.max(60_000, Math.min(3_600_000, Math.floor(configuredInstallTimeout))) : 900_000;
+    const configuredInstallTimeout = Number(process.env.QC_INSTALL_TIMEOUT_MS ?? 1_800_000);
+    const installTimeoutMs = Number.isFinite(configuredInstallTimeout) ? Math.max(60_000, Math.min(3_600_000, Math.floor(configuredInstallTimeout))) : 1_800_000;
     let installed = 0;
     const installationResults = await Promise.allSettled(ordered.filter((service) => service.installCommand.trim()).map(async (service) => {
       updateService(service, 'INSTALLING');
@@ -590,7 +657,7 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
     hooks.signal?.throwIfAborted();
     await hooks.beforeStart?.(runnerContext);
 
-    const healthTimeout = Number(process.env.QC_SERVICE_HEALTH_TIMEOUT_MS ?? 30_000);
+    const healthTimeout = Number(process.env.QC_SERVICE_HEALTH_TIMEOUT_MS ?? 120_000);
     for (let index = 0; index < ordered.length; index += 1) {
       const service = ordered[index];
       hooks.signal?.throwIfAborted();
@@ -624,17 +691,21 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
     throw new Error(message);
   } finally {
     for (const child of children.reverse()) await stopProcess(child);
-    for (const containerName of containerNames) await runProcess('docker', ['rm', '-f', containerName], { cwd: root, env, commandLabel: `docker cleanup ${containerName}` }).catch(() => undefined);
+    for (const containerName of containerNames) await runProcess('docker', ['rm', '-f', '-v', containerName], { cwd: root, env, commandLabel: `docker cleanup ${containerName}` }).catch(() => undefined);
     await hooks.cleanup?.();
     if (networkCreated) await runProcess('docker', ['network', 'rm', networkName], { cwd: root, env, commandLabel: 'docker network cleanup', timeoutMs: 30_000 }).catch(() => undefined);
-    if (project.retainClone && project.sourceType === 'github' && await exists(sourceDir)) {
-      const clonePath = path.join(artifactRoot, 'clones', runId);
-      await mkdir(path.dirname(clonePath), { recursive: true });
-      await rm(clonePath, { recursive: true, force: true });
-      await rename(sourceDir, clonePath);
-      await rm(workspace, { recursive: true, force: true });
-    } else {
-      await rm(workspace, { recursive: true, force: true });
-    }
+    try {
+      if (project.retainClone && project.sourceType === 'github' && await exists(sourceDir)) {
+        const clonePath = path.join(artifactRoot, 'clones', runId);
+        await mkdir(path.dirname(clonePath), { recursive: true });
+        await rm(clonePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => undefined);
+        await rename(sourceDir, clonePath).catch(async () => {
+          await copySourceDirectory(sourceDir, clonePath).catch(() => undefined);
+        });
+        await rm(workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => undefined);
+      } else {
+        await rm(workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => undefined);
+      }
+    } catch {}
   }
 }

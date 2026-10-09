@@ -33,12 +33,25 @@ export type QualityAuditState = {
   passed?: number;
   failed?: number;
   notApplicable?: number;
+  scorePercent?: number;
+  errorBreakdown?: {
+    userAppErrors: number;
+    qcEngineErrors: number;
+  };
   browsers?: QualityAuditBrowser[];
   viewports?: QualityAuditViewport[];
   reportPath?: string;
   message?: string;
-  categories?: Record<string, { total: number; passed: number; failed: number }>;
+  categories?: Record<string, { total: number; passed: number; failed: number; notApplicable?: number; userAppErrors?: number; qcEngineErrors?: number }>;
   visualRegression?: { mode?: 'off' | 'capture' | 'required'; baselinesCompared?: number; baselinesCaptured?: number; changed?: number; missing?: number };
+};
+export type TargetExecutionMode = 'local' | 'internet' | 'server';
+export type ServiceTargetConfig = {
+  mode: TargetExecutionMode;
+  url: string;
+  repositoryUrl: string;
+  branch: string;
+  sameRepoAsFrontend?: boolean;
 };
 export type Config = {
   name: string; sourceType?: 'existing-target' | 'local-folder' | 'github'; localPath?: string; repositoryUrl: string; ref: string; baseUrl: string;
@@ -47,7 +60,9 @@ export type Config = {
   database: { engine: 'none' | 'mysql' | 'postgres' | 'sqlite'; source: 'empty' | 'sql' | 'migrate' | 'seed'; sqlUploadId?: string; migrationCommand?: string; seedCommand?: string; provisionCommand?: string };
   envUploadId?: string; accounts: Account[];
   rules: { maxPages: number; maxDepth: number; includePaths: string[]; excludePaths: string[]; loginPath?: string; emailSelector?: string; passwordSelector?: string; submitSelector?: string; successUrl?: string };
-  platform: 'web' | 'android'; appId?: string; deviceId?: string; executeFlows: boolean; businessFlowReview: { mode: 'required' | 'auto' }; qualityAudit: QualityAuditConfig;
+  platform: 'web' | 'android'; appId?: string; deviceId?: string; useServerEmulator?: boolean;
+  frontendTarget?: ServiceTargetConfig; backendTarget?: ServiceTargetConfig;
+  executeFlows: boolean; businessFlowReview: { mode: 'required' | 'auto' }; qualityAudit: QualityAuditConfig;
   apkUploadId?: string; apkFilename?: string; apkPackageId?: string;
 };
 export type Element = { type: string; name: string; selector?: string; testId?: string; tag?: string; source?: string; confidence?: number };
@@ -80,9 +95,9 @@ export type BusinessFlowMap = {
 };
 export type Inventory = { pages: Page[]; routes: unknown[]; api: unknown[]; filesScanned: number; warnings: string[]; generatedAt: string; capabilities?: CapabilityProfile; crudPlan?: CrudPlan; roleActionPlan?: RoleActionPlan; featureContractPlan?: FeatureContractPlan };
 export type Flow = { id: string; name: string; source: string; platform: string; status: string; reason?: string };
-export type Step = { id?: string; index?: number; action?: string; status: string; durationMs?: number; errorMessage?: string; [key: string]: unknown };
+export type Step = { id?: string; index?: number; action?: string; status: string; durationMs?: number; errorCode?: string; errorMessage?: string; errorOrigin?: 'user_target_application' | 'qc_maestro_engine'; [key: string]: unknown };
 export type Artifact = { type?: string; path?: string; name?: string; url?: string };
-export type Result = { flowId: string; status: string; steps: Step[]; artifacts: (Artifact | string)[]; runId?: string; finishedAt?: string };
+export type Result = { flowId: string; status: string; steps: Step[]; artifacts: (Artifact | string)[]; runId?: string; finishedAt?: string; errorOrigin?: 'user_target_application' | 'qc_maestro_engine' };
 export type JobWorkspace = { projectSlug: string; runLabel: string; projectPath: string; runPath: string; milestonesPath: string };
 export type Job = { id: string; name: string; status: string; phase: string; progress: number; createdAt: string; finishedAt?: string; message?: string; logs: { time: string; category: string; message: string }[]; inventory?: Inventory; businessFlowMap?: BusinessFlowMap; flows?: Flow[]; results?: Result[]; qualityAudit?: QualityAuditState; findingStatuses?: Record<string, FindingWorkflowStatus>; config?: Partial<Config>; workspace?: JobWorkspace };
 export type Capability = { available: boolean; message: string; devices?: string[] };
@@ -101,7 +116,7 @@ export const initialConfig = (): Config => ({
   sourceType: 'existing-target',
   repositoryUrl: '',
   ref: 'main',
-  baseUrl: 'http://127.0.0.1:8000',
+  baseUrl: 'http://localhost:5174',
   backendUrl: 'http://10.0.2.2:8000',
   backendMode: 'existing',
   runMode: 'existing-target',
@@ -110,8 +125,8 @@ export const initialConfig = (): Config => ({
   database: { engine: 'none', source: 'empty' },
   accounts: [{ name: 'QA Tester', email: 'tester.qc@example.com', password: 'password123', role: 'user' }],
   rules: {
-    maxPages: 40,
-    maxDepth: 4,
+    maxPages: 100,
+    maxDepth: 8,
     includePaths: [],
     excludePaths: ['/logout', '/delete'],
     loginPath: '/login',
@@ -121,8 +136,22 @@ export const initialConfig = (): Config => ({
     successUrl: '/dashboard',
   },
   platform: ENABLE_MOBILE_SUPPORT ? 'android' : 'web',
+  deviceId: 'emulator-5554',
+  useServerEmulator: true,
+  frontendTarget: {
+    mode: 'local',
+    url: 'http://localhost:5173',
+    repositoryUrl: '',
+    branch: 'main',
+  },
+  backendTarget: {
+    mode: 'local',
+    url: 'http://127.0.0.1:8000',
+    repositoryUrl: '',
+    branch: 'main',
+  },
   executeFlows: true,
-  businessFlowReview: { mode: 'auto' },
+  businessFlowReview: { mode: 'required' },
   qualityAudit: {
     enabled: true,
     browsers: ['chromium', 'firefox', 'webkit'],

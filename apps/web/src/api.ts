@@ -52,14 +52,41 @@ export const send = <T,>(path: string, body: unknown = {}, method = 'POST') => r
 export const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 export const active = (status: string) => !['COMPLETED', 'COMPLETE', 'PASSED', 'FAILED', 'CANCELLED', 'CANCELED', 'INFRA_ERROR', 'ERROR', 'READY', 'PARTIAL'].includes(status.toUpperCase());
 
-export function artifactUrl(id: string, path: string) {
+export function artifactUrl(id: string, path?: string | null): string | undefined {
+  if (!path || typeof path !== 'string') return undefined;
   const prefix = `${jobPath(id)}/artifacts/`;
   const token = getAuthToken();
   const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
-  if (path.startsWith(prefix)) return `${path}${tokenQuery}`;
-  const clean = path.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (/^(?:[a-z]+:|\/\/)/i.test(clean) || clean.split('/').includes('..')) return undefined;
-  return `${prefix}${clean.split('/').filter(Boolean).map(encodeURIComponent).join('/')}${tokenQuery}`;
+
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (path.startsWith('/api/')) return `${path}${path.includes('?') ? '' : tokenQuery}`;
+  if (path.startsWith(prefix)) return `${path}${path.includes('?') ? '' : tokenQuery}`;
+
+  const normalized = path.replace(/\\/g, '/');
+  const jobMarker = `/jobs/${id}/`;
+  const markerIdx = normalized.indexOf(jobMarker);
+  let cleanRel = '';
+  if (markerIdx !== -1) {
+    cleanRel = normalized.slice(markerIdx + jobMarker.length);
+  } else {
+    const generalJobMatch = normalized.match(/\/jobs\/[^/]+\/(.+)$/);
+    if (generalJobMatch) {
+      cleanRel = generalJobMatch[1];
+    } else if (normalized.includes('/run-') || normalized.startsWith('run-')) {
+      const runIdx = normalized.indexOf('run-');
+      cleanRel = normalized.slice(runIdx);
+    } else {
+      cleanRel = normalized.replace(/^[a-zA-Z]:[/\\]+/, '').replace(/^\.\//, '').replace(/^\/+/, '');
+      if (cleanRel.includes('.qc-artifacts/')) {
+        cleanRel = cleanRel.split('.qc-artifacts/')[1].replace(/^jobs\/[^/]+\//, '');
+      }
+    }
+  }
+
+  cleanRel = cleanRel.replace(/^\/+/, '');
+  if (!cleanRel || cleanRel.split('/').includes('..')) return undefined;
+  const encodedPath = cleanRel.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  return `${prefix}${encodedPath}${tokenQuery}`;
 }
 
 export function download(content: string | Blob, filename: string, type = 'text/plain') {

@@ -63,23 +63,40 @@ export type QualityAuditState = {
   passed?: number;
   failed?: number;
   notApplicable?: number;
+  scorePercent?: number;
+  errorBreakdown?: {
+    userAppErrors: number;
+    qcEngineErrors: number;
+  };
   browsers?: QualityAuditBrowser[];
   viewports?: QualityAuditViewport[];
   reportPath?: string;
   message?: string;
-  categories?: Record<string, { total: number; passed: number; failed: number; notApplicable?: number }>;
+  categories?: Record<string, { total: number; passed: number; failed: number; notApplicable?: number; userAppErrors?: number; qcEngineErrors?: number }>;
   visualRegression?: { mode?: VisualRegressionMode; baselinesCompared?: number; baselinesCaptured?: number; changed?: number; missing?: number };
 };
 export type FindingWorkflowStatus = 'OPEN' | 'IN_PROGRESS' | 'READY_FOR_RETEST' | 'PASSED';
 
+export type TargetExecutionMode = 'local' | 'internet' | 'server';
+export type ServiceTargetConfig = {
+  mode: TargetExecutionMode;
+  url: string;
+  repositoryUrl: string;
+  branch: string;
+  sameRepoAsFrontend?: boolean;
+};
+
 export type DiscoveryConfig = {
   name: string; sourceType?: 'existing-target' | 'local-folder' | 'github'; localPath?: string; repositoryUrl: string; ref: string; baseUrl: string;
+  backendUrl?: string; backendMode?: 'existing' | 'local' | 'repo';
   runMode: 'managed-local' | 'existing-target' | 'demo'; stack: 'auto' | 'custom' | 'laravel';
   services: ManagedService[]; envUploadId?: string;
   database: { engine: 'none' | 'mysql' | 'postgres' | 'sqlite'; source: 'empty' | 'sql' | 'migrate' | 'seed'; sqlUploadId?: string; migrationCommand?: string; seedCommand?: string; provisionCommand?: string };
   accounts: Array<{ name?: string; email: string; password: string; role?: string }>;
   rules: { maxPages: number; maxDepth: number; includePaths: string[]; excludePaths: string[]; loginPath?: string; emailSelector?: string; passwordSelector?: string; submitSelector?: string; successUrl?: string };
-  platform: 'web' | 'android'; appId?: string; deviceId?: string; executeFlows: boolean; businessFlowReview?: { mode: 'required' | 'auto' }; qualityAudit?: QualityAuditConfig;
+  platform: 'web' | 'android'; appId?: string; deviceId?: string; useServerEmulator?: boolean;
+  frontendTarget?: ServiceTargetConfig; backendTarget?: ServiceTargetConfig;
+  executeFlows: boolean; businessFlowReview?: { mode: 'required' | 'auto' }; qualityAudit?: QualityAuditConfig;
   apkUploadId?: string; apkFilename?: string; apkPackageId?: string;
 };
 export type Inventory = { pages: InventoryPage[]; routes: Array<{ path: string; method: string; source: string }>; api: Array<{ path: string; method: string; source: string }>; filesScanned: number; warnings: string[]; generatedAt: string; capabilities?: CapabilityProfile; crudPlan?: CrudPlan; roleActionPlan?: RoleActionPlan; featureContractPlan?: FeatureContractPlan };

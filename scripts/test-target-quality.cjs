@@ -73,7 +73,16 @@ function emitLog(category, message) {
 
 function add(area, name, passed, detail, meta, outcome) {
   const resolvedOutcome = outcome || (passed ? 'PASSED' : 'FAILED');
-  checks.push(Object.assign({ area, name, passed: resolvedOutcome !== 'FAILED', applicable: resolvedOutcome !== 'NOT_APPLICABLE', outcome: resolvedOutcome, detail }, meta || {}));
+  let errorOrigin = undefined;
+  if (resolvedOutcome === 'FAILED') {
+    const detailStr = String(detail || '');
+    if (detailStr.includes('ECONNREFUSED') || detailStr.includes('browser process closed') || detailStr.includes('QC Maestro internal')) {
+      errorOrigin = 'qc_maestro_engine';
+    } else {
+      errorOrigin = 'user_target_application';
+    }
+  }
+  checks.push(Object.assign({ area, name, passed: resolvedOutcome !== 'FAILED', applicable: resolvedOutcome !== 'NOT_APPLICABLE', outcome: resolvedOutcome, detail, ...(errorOrigin ? { errorOrigin } : {}) }, meta || {}));
 }
 function addNotApplicable(area, name, detail, meta) {
   add(area, name, true, `NOT APPLICABLE: ${detail}`, meta, 'NOT_APPLICABLE');
@@ -755,12 +764,19 @@ async function auditBrowser(name, type, routes, job = {}) {
   const passed = checks.filter((check) => check.passed && check.outcome !== 'NOT_APPLICABLE').length;
   const notApplicable = checks.filter((check) => check.outcome === 'NOT_APPLICABLE').length;
   const failed = checks.filter((check) => check.outcome === 'FAILED').length;
+  const userAppErrors = checks.filter((check) => check.outcome === 'FAILED' && check.errorOrigin === 'user_target_application').length;
+  const qcEngineErrors = checks.filter((check) => check.outcome === 'FAILED' && check.errorOrigin === 'qc_maestro_engine').length;
+  const scorePercent = Math.round((passed / Math.max(1, checks.length - notApplicable)) * 100);
   const categories = checks.reduce((result, check) => {
-    const current = result[check.area] || { total: 0, passed: 0, failed: 0, notApplicable: 0 };
+    const current = result[check.area] || { total: 0, passed: 0, failed: 0, notApplicable: 0, userAppErrors: 0, qcEngineErrors: 0 };
     current.total += 1;
     if (check.outcome === 'NOT_APPLICABLE') current.notApplicable += 1;
     else if (check.passed) current.passed += 1;
-    else current.failed += 1;
+    else {
+      current.failed += 1;
+      if (check.errorOrigin === 'user_target_application') current.userAppErrors += 1;
+      else if (check.errorOrigin === 'qc_maestro_engine') current.qcEngineErrors += 1;
+    }
     result[check.area] = current;
     return result;
   }, {});
@@ -772,6 +788,11 @@ async function auditBrowser(name, type, routes, job = {}) {
     passed,
     failed,
     notApplicable,
+    scorePercent,
+    errorBreakdown: {
+      userAppErrors,
+      qcEngineErrors,
+    },
     scope: { browsers: browserNames, viewports, routes },
     categories,
     visualRegression: visualStats,
@@ -783,6 +804,6 @@ async function auditBrowser(name, type, routes, job = {}) {
   };
   await fs.writeFile(path.join(runDir, 'report.json'), JSON.stringify(report, null, 2));
   emitLog('quality', `Report tersimpan di ${path.relative('/work/.qc-artifacts', path.join(runDir, 'report.json'))}.`);
-  emitLog('quality', `Quality Audit selesai: ${report.passed}/${report.total} lulus, ${report.failed} finding, ${report.notApplicable} not applicable.`);
-  console.log(JSON.stringify({ status: report.status, total: report.total, passed: report.passed, failed: report.failed, notApplicable: report.notApplicable, routes: routes.length, runDir }));
+  emitLog('quality', `Quality Audit selesai: ${report.passed}/${report.total} lulus (${scorePercent}%), ${report.failed} error (${userAppErrors} kode aplikasi user, ${qcEngineErrors} engine QC).`);
+  console.log(JSON.stringify({ status: report.status, total: report.total, passed: report.passed, failed: report.failed, notApplicable: report.notApplicable, scorePercent, userAppErrors, qcEngineErrors, routes: routes.length, runDir }));
 })();

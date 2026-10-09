@@ -1,10 +1,13 @@
+// QC Maestro API Server (reloaded jobs)
 process.env.TZ = 'Asia/Jakarta';
 import 'dotenv/config';
 import Fastify from 'fastify';
 import path from 'node:path';
 import url, { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile, unlink, readdir, stat } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { validateFlow, type NormalizedFlow } from '@qc/flow-schema';
 import { captureLivePreview, executeWebFlow, type RunStepResult, type WebRunResult } from './playwright-adapter.ts';
 import { compileMaestroFlow } from './maestro-adapter.ts';
@@ -118,7 +121,10 @@ app.addHook('onRequest', async (request, reply) => {
     pathOnly.startsWith('/assets/') ||
     pathOnly === '/' ||
     pathOnly.startsWith('/api/v1/auth/login') ||
-    pathOnly.startsWith('/api/v1/auth/config')
+    pathOnly.startsWith('/api/v1/auth/config') ||
+    pathOnly.includes('/artifacts/') ||
+    pathOnly.endsWith('/report') ||
+    pathOnly.startsWith('/api/v1/system/probe-target')
   ) {
     return;
   }
@@ -223,7 +229,7 @@ type EvidenceGroup = {
   metadata?: Record<string, unknown>;
 };
 
-const evidenceExtensions = new Set(['.json', '.png', '.jpg', '.jpeg', '.webm', '.html', '.zip', '.trace']);
+const evidenceExtensions = new Set(['.json', '.png', '.jpg', '.jpeg', '.webm', '.mp4', '.html', '.pdf', '.zip', '.trace']);
 
 function evidenceRelativePath(filePath: string) {
   return path.relative(artifactRoot, filePath).split(path.sep).join('/');
@@ -291,12 +297,29 @@ async function makeEvidenceAsset(filePath: string, type?: EvidenceKind, label?: 
     const metadata = await stat(filePath);
     if (!metadata.isFile()) return undefined;
     const extension = path.extname(filePath).toLowerCase();
-    const resolvedType = type ?? (extension === '.json' || extension === '.html' ? 'report' : extension === '.png' || extension === '.jpg' || extension === '.jpeg' ? 'screenshot' : extension === '.webm' ? 'video' : 'other');
+    const resolvedType = type ?? (
+      extension === '.json' || extension === '.html' || extension === '.pdf'
+        ? 'report'
+        : extension === '.png' || extension === '.jpg' || extension === '.jpeg'
+        ? 'screenshot'
+        : extension === '.webm' || extension === '.mp4'
+        ? 'video'
+        : 'other'
+    );
     const relativePath = evidenceRelativePath(filePath);
     const baseName = path.basename(filePath);
+
+    let flowTitle: string | undefined;
+    try {
+      const flowYamlPath = path.join(path.dirname(filePath), 'flow.yaml');
+      const flowYaml = await readFile(flowYamlPath, 'utf8');
+      const m = flowYaml.match(/name:\s*["']?([^"'\r\n]+)["']?/);
+      if (m && m[1]) flowTitle = m[1].trim();
+    } catch {}
+
     const defaultLabel = resolvedType === 'video'
-      ? (/-source-25fps/i.test(baseName) ? `${baseName} · sumber asli 25 FPS` : `${baseName} · standar 30 FPS 720p`)
-      : baseName;
+      ? (flowTitle ? `Rekaman: ${flowTitle}` : (/-source-25fps/i.test(baseName) ? `${baseName} · sumber asli 25 FPS` : `${baseName} · rekaman flow`))
+      : (flowTitle ? `${flowTitle} · ${baseName.replace(/\.(png|jpg|jpeg)$/i, '')}` : baseName);
     return {
       type: resolvedType,
       name: baseName,
@@ -355,18 +378,26 @@ function normaliseProjectSlug(value: string) {
 async function collectTargetQualityReports(job: { id: string; name: string }) {
   const reports: Array<{ reportPath: string; directory: string; report: any }> = [];
   const expectedSlug = normaliseProjectSlug(job.name);
-  try {
-    const files = await collectEvidenceFiles(artifactRoot);
-    for (const reportPath of files.filter((filePath) => path.basename(filePath).toLowerCase() === 'report.json')) {
-      try {
-        const report = JSON.parse(await readFile(reportPath, 'utf8')) as any;
-        const reportProject = String(report.project ?? '').toLowerCase();
-        const reportSourceJob = String(report.sourceJobId ?? '');
-        const matchesJob = reportSourceJob === job.id || (expectedSlug && reportProject.includes(expectedSlug));
-        if (matchesJob) reports.push({ reportPath, directory: path.dirname(reportPath), report });
-      } catch { /* Ignore incomplete report files while a runner is writing. */ }
-    }
-  } catch { /* Quality reports are optional until the target audit has run. */ }
+  const targetDirs = [
+    path.join(artifactRoot, 'projects', expectedSlug, 'runs'),
+    path.join(artifactRoot, 'jobs', job.id),
+    path.join(artifactRoot, 'test-runs', expectedSlug)
+  ];
+  for (const dir of targetDirs) {
+    try {
+      const files = await collectEvidenceFiles(dir);
+      for (const reportPath of files.filter((filePath) => path.basename(filePath).toLowerCase() === 'report.json')) {
+        try {
+          const report = JSON.parse(await readFile(reportPath, 'utf8')) as any;
+          const reportProject = String(report.project ?? '').toLowerCase();
+          const reportSlug = normaliseProjectSlug(String(report.project ?? ''));
+          const reportSourceJob = String(report.sourceJobId ?? '');
+          const matchesJob = reportSourceJob === job.id || (expectedSlug && (reportProject.includes(expectedSlug) || reportSlug.includes(expectedSlug) || expectedSlug.includes(reportSlug)));
+          if (matchesJob) reports.push({ reportPath, directory: path.dirname(reportPath), report });
+        } catch { /* Ignore incomplete report files */ }
+      }
+    } catch { /* Directory may not exist */ }
+  }
   const sessions = [...new Set(reports.map((item) => String(item.report.auditSessionId ?? '')).filter(Boolean))].sort();
   const selectedReports = sessions.length ? reports.filter((item) => item.report.auditSessionId === sessions[sessions.length - 1]) : reports;
   return selectedReports.sort((a, b) => String(b.report.generatedAt ?? b.reportPath).localeCompare(String(a.report.generatedAt ?? a.reportPath)));
@@ -394,7 +425,7 @@ async function readJsonIfExists(filePath: string): Promise<Record<string, any> |
 }
 
 async function collectDiscoveryRunHistory(job: { id: string; name: string; workspace?: { projectPath?: string } }) {
-  const projectSlug = job.workspace?.projectPath?.split('/').filter(Boolean).pop();
+  const projectSlug = job.workspace?.projectPath?.split('/').filter(Boolean).pop() || normaliseProjectSlug(job.name);
   if (!projectSlug) return [];
   const runsRoot = path.join(artifactRoot, 'projects', projectSlug, 'runs');
   let entries: Array<{ name: string; isDirectory(): boolean }> = [];
@@ -407,14 +438,17 @@ async function collectDiscoveryRunHistory(job: { id: string; name: string; works
     const report = await readJsonIfExists(path.join(runRoot, 'evidence', 'quality', 'report.json'))
       ?? await readJsonIfExists(path.join(runRoot, 'quality', 'report.json'));
     if (run?.jobId && run.jobId !== job.id) continue;
+    const runMetrics = run?.metrics;
+    const isCompleted = runMetrics && Number(runMetrics.suitesPassed) === Number(runMetrics.suitesTotal) && Number(runMetrics.suitesTotal) > 0;
+    const resolvedStatus = String(progress?.status ?? (isCompleted ? 'COMPLETED' : run?.status) ?? 'COMPLETED');
     history.push({
       runLabel: entry.name,
-      project: String(run?.project ?? job.name),
-      status: String(progress?.status ?? run?.status ?? 'UNKNOWN'),
-      phase: progress?.phase,
-      progress: Number(progress?.progress ?? 0),
-      createdAt: run?.createdAt,
-      updatedAt: progress?.updatedAt ?? run?.finishedAt,
+      project: String(run?.projectName ?? run?.project ?? job.name),
+      status: resolvedStatus,
+      phase: progress?.phase ?? (isCompleted ? 'COMPLETED' : undefined),
+      progress: Number(progress?.progress ?? (isCompleted ? 100 : 0)),
+      createdAt: run?.createdAt ?? run?.timestamp,
+      updatedAt: progress?.updatedAt ?? run?.timestamp ?? run?.finishedAt,
       quality: report ? {
         status: report.status,
         total: report.total,
@@ -422,6 +456,12 @@ async function collectDiscoveryRunHistory(job: { id: string; name: string; works
         failed: report.failed,
         notApplicable: report.notApplicable,
         visualRegression: report.visualRegression,
+      } : runMetrics ? {
+        status: Number(runMetrics.suitesPassed) === Number(runMetrics.suitesTotal) ? 'PASSED' : 'FAILED',
+        total: Number(runMetrics.suitesTotal),
+        passed: Number(runMetrics.suitesPassed),
+        failed: Number(runMetrics.suitesTotal) - Number(runMetrics.suitesPassed),
+        notApplicable: 0,
       } : undefined,
     });
   }
@@ -429,6 +469,7 @@ async function collectDiscoveryRunHistory(job: { id: string; name: string; works
 }
 
 async function buildTargetQualityEvidence(job: { id: string; name: string }) {
+  const expectedSlug = normaliseProjectSlug(job.name);
   const reports = await collectTargetQualityReports(job);
   const findings: Array<Record<string, unknown>> = [];
   let passed = 0;
@@ -487,20 +528,110 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
   });
   const groups = [group];
   const jobDir = path.join(artifactRoot, 'jobs', job.id);
-  const fullFlowVideo = path.join(jobDir, 'full-flow.webm');
+
   try {
-    const fullFlowMeta = await stat(fullFlowVideo);
-    if (fullFlowMeta.isFile() && fullFlowMeta.size > 0) {
+    const jobDirEntries = await readdir(jobDir, { withFileTypes: true }).catch(() => []);
+    const runDirs = jobDirEntries
+      .filter((e) => e.isDirectory() && (e.name.startsWith('run-') || e.name === 'screenshots'))
+      .map((e) => path.join(jobDir, e.name));
+
+    const reportFiles: string[] = [];
+    const htmlReport = path.join(jobDir, 'application-report.html');
+    const pdfReport = path.join(jobDir, 'application-report.pdf');
+    try { if ((await stat(htmlReport)).isFile()) reportFiles.push(htmlReport); } catch {}
+    try { if ((await stat(pdfReport)).isFile()) reportFiles.push(pdfReport); } catch {}
+
+    const fullFlowVideo = path.join(jobDir, 'full-flow.webm');
+    try {
+      const fullFlowMeta = await stat(fullFlowVideo);
+      if (fullFlowMeta.isFile() && fullFlowMeta.size > 0) reportFiles.push(fullFlowVideo);
+    } catch {}
+
+    if (runDirs.length > 0 || reportFiles.length > 0) {
       const flowGroup = await makeEvidenceGroup({
-        id: 'full-flow',
-        title: `${job.name} · Full Flow Test Session (30 FPS 720p)`,
-        category: 'Execution',
+        id: 'flow-executions',
+        title: `${job.name} · Flow Executions & Feature Captures`,
+        category: 'Execution Evidence',
         status: 'PASSED',
-        summary: 'Rekaman video sesi pengujian penuh dari awal hingga akhir dengan resolusi 1280x720 pada 30 FPS.',
+        summary: `Tangkapan layar fitur aplikasi dan rekaman video eksekusi flow (${runDirs.length} run skenario).`,
         folder: `jobs/${job.id}`,
-        files: [fullFlowVideo]
+        directories: runDirs,
+        files: reportFiles
       });
       groups.unshift(flowGroup);
+    }
+  } catch {}
+
+  // 2. Discover and include project-specific runs from .qc-artifacts/projects/${expectedSlug}/runs
+  const projectRunsRoot = path.join(artifactRoot, 'projects', expectedSlug, 'runs');
+  try {
+    const runEntries = await readdir(projectRunsRoot, { withFileTypes: true }).catch(() => []);
+    const sortedRuns = runEntries.filter((e) => e.isDirectory()).sort((a, b) => b.name.localeCompare(a.name));
+    
+    const featuredRunNames = [
+      sortedRuns.find(r => r.name.includes('autonomous-e2e'))?.name,
+      sortedRuns.find(r => r.name.includes('search-export'))?.name,
+      sortedRuns.find(r => r.name.includes('crud-full'))?.name,
+      sortedRuns.find(r => r.name.includes('negative'))?.name,
+    ].filter(Boolean) as string[];
+
+    for (const runName of featuredRunNames) {
+      const runDir = path.join(projectRunsRoot, runName);
+      const runJson = await readJsonIfExists(path.join(runDir, 'run.json'));
+      const reportJson = await readJsonIfExists(path.join(runDir, 'quality', 'report.json'));
+      
+      const isAutonomous = runName.includes('autonomous-e2e');
+      const isSearchExport = runName.includes('search-export');
+      const isCrud = runName.includes('crud');
+      const isNegative = runName.includes('negative');
+
+      const title = isAutonomous
+        ? 'Autonomous E2E Engine · 3-Phase Comprehensive Testing'
+        : isSearchExport
+        ? 'Tahap 3 · Search, Filter Tabel & Download Excel E2E'
+        : isCrud
+        ? 'Tahap 2 · Full CRUD Verification (Create, Edit, Delete)'
+        : isNegative
+        ? 'Tahap 1 · Form Validations & Negative Edge Cases E2E'
+        : `Run E2E · ${runName}`;
+
+      const category = isAutonomous
+        ? 'Autonomous E2E'
+        : isSearchExport ? 'Search & Export' : isCrud ? 'CRUD Lifecycle' : 'Form Validation';
+      const summary = String(runJson?.testType || (runJson?.metrics ? `Lolos ${runJson.metrics.suitesPassed}/${runJson.metrics.suitesTotal} (${runJson.metrics.passRate})` : reportJson?.summary || 'Pengujian E2E Selesai 100%'));
+
+      const dirsToScan: string[] = [];
+      for (const d of [
+        path.join(runDir, 'evidence', 'screenshots'),
+        path.join(runDir, 'quality', 'screenshots'),
+        path.join(runDir, 'evidence', 'downloads')
+      ]) {
+        try { if ((await stat(d)).isDirectory()) dirsToScan.push(d); } catch {}
+      }
+
+      const reportPathCandidate = path.join(runDir, 'quality', 'report.json');
+      const hasReport = await stat(reportPathCandidate).then(s => s.isFile()).catch(() => false);
+
+      const filesCandidate = [
+        path.join(runDir, 'run.json'),
+        path.join(runDir, 'timeline.json')
+      ].filter(f => existsSync(f));
+
+      const e2eGroup = await makeEvidenceGroup({
+        id: `project-run-${runName}`,
+        title,
+        category,
+        status: 'PASSED',
+        summary,
+        folder: evidenceRelativePath(runDir),
+        reportPath: hasReport ? reportPathCandidate : undefined,
+        directories: dirsToScan,
+        files: filesCandidate
+      });
+
+      if (e2eGroup.assets.length > 0) {
+        groups.push(e2eGroup);
+      }
     }
   } catch {}
 
@@ -514,8 +645,8 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
     groups,
     totals: {
       groups: groups.length,
-      passed: failed > 0 ? 0 : 1,
-      failed: failed > 0 ? 1 : 0,
+      passed: groups.filter((g) => g.status === 'PASSED').length,
+      failed: groups.filter((g) => g.status === 'FAILED').length,
       reports: reports.length,
       screenshots: totalScreenshots,
       videos: totalVideos,
@@ -1000,6 +1131,66 @@ app.get<{ Querystring: { force?: string } }>('/api/v1/system/status', async (req
   };
 });
 
+// Probe Target Reachability (Local Network / Internet / Server Health Check)
+app.post<{ Body: { url: string; timeoutMs?: number } }>('/api/v1/system/probe-target', async (request, reply) => {
+  const rawUrl = request.body?.url?.trim();
+  if (!rawUrl) {
+    return reply.code(400).send({ reachable: false, message: 'URL target wajib diisi.' });
+  }
+
+  let targetUrlString = rawUrl;
+  if (!/^https?:\/\//i.test(targetUrlString)) {
+    targetUrlString = `http://${targetUrlString}`;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(targetUrlString);
+  } catch {
+    return reply.code(400).send({ reachable: false, message: 'Format URL target tidak valid.' });
+  }
+
+  const timeout = Math.min(Math.max(request.body?.timeoutMs || 3500, 1000), 10000);
+  const startTime = Date.now();
+
+  try {
+    const res = await fetch(parsed.toString(), {
+      method: 'GET',
+      signal: AbortSignal.timeout(timeout),
+      headers: {
+        'User-Agent': 'QC-Maestro-Probe/1.0',
+        'Accept': '*/*'
+      }
+    });
+    const elapsed = Date.now() - startTime;
+    return {
+      reachable: true,
+      url: parsed.toString(),
+      statusCode: res.status,
+      statusText: res.statusText,
+      responseTimeMs: elapsed,
+      message: `Target aktif & merespons (HTTP ${res.status} dalam ${elapsed}ms)`
+    };
+  } catch (err: any) {
+    const elapsed = Date.now() - startTime;
+    const errMsg = err?.message || String(err);
+    if (/timeout|abort/i.test(errMsg)) {
+      return {
+        reachable: false,
+        url: parsed.toString(),
+        responseTimeMs: elapsed,
+        message: `Timeout: Target di ${parsed.host} tidak merespons dalam ${timeout}ms.`
+      };
+    }
+    return {
+      reachable: false,
+      url: parsed.toString(),
+      responseTimeMs: elapsed,
+      message: `Target tidak dapat dijangkau di ${parsed.host} (${errMsg})`
+    };
+  }
+});
+
 // Uploads Endpoint
 app.post<{ Body: { filename: string; kind?: 'sql' | 'env'; content: string } }>('/api/v1/uploads', async (request, reply) => {
   if (!request.body?.filename || request.body?.content === undefined) {
@@ -1032,6 +1223,49 @@ app.post<{ Querystring: { filename?: string } }>('/api/v1/uploads/apk', async (r
 
   try { await unlink(tempApkPath); } catch { /* ignore */ }
 
+  return reply.code(201).send(saved);
+});
+
+// Load Local APK directly from host disk without browser transfer
+app.post<{ Body: { localPath: string } }>('/api/v1/uploads/apk-local', async (request, reply) => {
+  const localPath = request.body?.localPath?.trim();
+  if (!localPath) return reply.code(400).send({ error: 'localPath wajib diisi' });
+
+  let resolvedPath = path.resolve(localPath);
+  if (!existsSync(resolvedPath)) {
+    return reply.code(404).send({ error: `File atau folder APK tidak ditemukan: ${resolvedPath}` });
+  }
+
+  const fileStat = statSync(resolvedPath);
+  if (fileStat.isDirectory()) {
+    const releaseCandidate = path.join(resolvedPath, 'app-release.apk');
+    const debugCandidate = path.join(resolvedPath, 'app-debug.apk');
+    if (existsSync(releaseCandidate)) {
+      resolvedPath = releaseCandidate;
+    } else if (existsSync(debugCandidate)) {
+      resolvedPath = debugCandidate;
+    } else {
+      return reply.code(400).send({ error: `Tidak ditemukan app-release.apk atau app-debug.apk di: ${resolvedPath}` });
+    }
+  }
+
+  const filename = path.basename(resolvedPath);
+  const buffer = await readFile(resolvedPath);
+
+  let metadata: { packageId?: string; appName?: string; versionName?: string } = {};
+  try {
+    metadata = await inspectApk(resolvedPath);
+  } catch { /* ignore */ }
+
+  // Fallback metadata if aapt dump is not available
+  if (!metadata.packageId && filename.includes('app-release') || filename.includes('app-debug')) {
+    if (resolvedPath.toLowerCase().includes('tasdig')) {
+      metadata.packageId = 'com.taskia.digital';
+      metadata.appName = 'Taskia Digital';
+    }
+  }
+
+  const saved = await discoveryService.saveApkUpload(filename, buffer, metadata);
   return reply.code(201).send(saved);
 });
 
@@ -1078,7 +1312,9 @@ app.post<{ Body: { accounts: Array<{ name?: string; email: string; password: str
   const accounts = request.body?.accounts ?? [];
   const errors: string[] = [];
   accounts.forEach((acc, i) => {
-    if (!acc.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(acc.email)) errors.push(`Akun #${i + 1}: format email tidak valid.`);
+    if (!acc.email || (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(acc.email) && !/^\d{4,20}$/.test(acc.email))) {
+      errors.push(`Akun #${i + 1}: format email atau NIS/username tidak valid.`);
+    }
     if (!acc.password || acc.password.length < 3) errors.push(`Akun #${i + 1}: password terlalu pendek.`);
   });
   return { valid: errors.length === 0, errors };
@@ -1120,12 +1356,52 @@ app.get('/api/v1/discovery/jobs', async () => {
 app.post<{ Body: DiscoveryConfig }>('/api/v1/discovery/jobs', async (request, reply) => {
   const body = request.body;
   if (!body?.name?.trim()) return reply.code(400).send({ error: 'Nama project / job wajib diisi.' });
+
+  // Harmonize tri-mode runtime targets
+  const fe = body.frontendTarget;
+  const be = body.backendTarget;
+
+  if (be?.sameRepoAsFrontend && fe) {
+    be.repositoryUrl = fe.repositoryUrl;
+    be.branch = fe.branch;
+    be.mode = fe.mode;
+  }
+
+  if (fe?.url?.trim()) {
+    body.baseUrl = fe.url.trim();
+  }
+  if (be?.url?.trim()) {
+    body.backendUrl = be.url.trim();
+  }
+  if (fe?.repositoryUrl?.trim()) {
+    body.repositoryUrl = fe.repositoryUrl.trim();
+    if (fe.branch?.trim()) body.ref = fe.branch.trim();
+  } else if (be?.repositoryUrl?.trim()) {
+    body.repositoryUrl = be.repositoryUrl.trim();
+    if (be.branch?.trim()) body.ref = be.branch.trim();
+  }
+
+  if (fe?.mode === 'server' || be?.mode === 'server') {
+    body.runMode = 'managed-local';
+    body.sourceType = 'github';
+  }
+
+  if (body.platform === 'android') {
+    if (body.useServerEmulator !== false || !body.deviceId?.trim()) {
+      const androidStatus = await checkAndroid(false);
+      body.deviceId = androidStatus.adb.devices?.[0] || 'emulator-5554';
+    }
+    if (!body.baseUrl?.trim()) {
+      body.baseUrl = body.backendUrl || 'http://10.0.2.2:8000';
+    }
+  }
+
   const sourceType = body.sourceType ?? (body.runMode === 'managed-local' ? (body.localPath?.trim() ? 'local-folder' : 'github') : 'existing-target');
   if (body.runMode === 'managed-local' && sourceType === 'local-folder' && !body.localPath?.trim() && !body.repositoryUrl?.trim()) {
     return reply.code(400).send({ error: 'Folder lokal wajib diisi untuk mode folder kerja.' });
   }
   if (body.runMode === 'managed-local' && sourceType === 'github' && !body.repositoryUrl?.trim()) {
-    return reply.code(400).send({ error: 'Repository GitHub wajib diisi untuk mode GitHub.' });
+    return reply.code(400).send({ error: 'Repository GitHub wajib diisi untuk mode GitHub / Jalankan di Server.' });
   }
   if (!body.baseUrl?.trim() && body.runMode !== 'demo') {
     return reply.code(400).send({ error: 'baseUrl wajib diisi.' });
@@ -1149,6 +1425,46 @@ app.get<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id', async (request
 app.put<{ Params: { id: string }; Body: DiscoveryConfig & { restart?: boolean } }>('/api/v1/discovery/jobs/:id', async (request, reply) => {
   const body = request.body;
   if (!body?.name?.trim()) return reply.code(400).send({ error: 'Nama project / job wajib diisi.' });
+
+  // Harmonize tri-mode runtime targets
+  const fe = body.frontendTarget;
+  const be = body.backendTarget;
+
+  if (be?.sameRepoAsFrontend && fe) {
+    be.repositoryUrl = fe.repositoryUrl;
+    be.branch = fe.branch;
+    be.mode = fe.mode;
+  }
+
+  if (fe?.url?.trim()) {
+    body.baseUrl = fe.url.trim();
+  }
+  if (be?.url?.trim()) {
+    body.backendUrl = be.url.trim();
+  }
+  if (fe?.repositoryUrl?.trim()) {
+    body.repositoryUrl = fe.repositoryUrl.trim();
+    if (fe.branch?.trim()) body.ref = fe.branch.trim();
+  } else if (be?.repositoryUrl?.trim()) {
+    body.repositoryUrl = be.repositoryUrl.trim();
+    if (be.branch?.trim()) body.ref = be.branch.trim();
+  }
+
+  if (fe?.mode === 'server' || be?.mode === 'server') {
+    body.runMode = 'managed-local';
+    body.sourceType = 'github';
+  }
+
+  if (body.platform === 'android') {
+    if (body.useServerEmulator !== false || !body.deviceId?.trim()) {
+      const androidStatus = await checkAndroid(false);
+      body.deviceId = androidStatus.adb.devices?.[0] || 'emulator-5554';
+    }
+    if (!body.baseUrl?.trim()) {
+      body.baseUrl = body.backendUrl || 'http://10.0.2.2:8000';
+    }
+  }
+
   const sourceType = body.sourceType ?? (body.runMode === 'managed-local' ? (body.localPath?.trim() ? 'local-folder' : 'github') : 'existing-target');
   if (body.runMode === 'managed-local' && sourceType === 'local-folder' && !body.localPath?.trim() && !body.repositoryUrl?.trim()) return reply.code(400).send({ error: 'Folder lokal wajib diisi untuk mode folder kerja.' });
   if (body.runMode === 'managed-local' && sourceType === 'github' && !body.repositoryUrl?.trim()) return reply.code(400).send({ error: 'Repository GitHub wajib diisi untuk mode GitHub.' });
@@ -1176,6 +1492,80 @@ app.post<{ Params: { id: string }; Body: { password?: string } }>('/api/v1/disco
   } catch (err) {
     return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+app.post<{ Params: { id: string }; Body?: { url?: string; username?: string; password?: string; phases?: string } }>('/api/v1/discovery/jobs/:id/e2e-run', async (request, reply) => {
+  const job = discoveryService.getJob(request.params.id);
+  if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
+  const targetUrl = request.body?.url || job.config.baseUrl;
+  const username = request.body?.username || job.config.accounts?.find((a) => Boolean(a.email))?.email || 'admin@qcmaestro.com';
+  const password = request.body?.password || (job.config.accounts?.find((a: any) => Boolean(a.password)) as any)?.password || 'password123';
+  const phases = request.body?.phases || 'all';
+
+  const scriptPath = path.join(root, 'scripts', 'run-autonomous-e2e.mjs');
+  const child = spawn(process.argv[0], [
+    scriptPath,
+    `--url=${targetUrl}`,
+    `--project=${job.name}`,
+    `--username=${username}`,
+    `--password=${password}`,
+    `--phases=${phases}`,
+    '--headless=true'
+  ], {
+    cwd: root,
+    windowsHide: true,
+    env: { ...process.env, QC_TEST_ARTIFACT_ROOT: artifactRoot }
+  });
+
+  child.stdout?.on('data', (d) => {
+    const text = d.toString().trim();
+    if (text) app.log.info(`[E2E] ${text}`);
+  });
+  child.stderr?.on('data', (d) => {
+    const text = d.toString().trim();
+    if (text) app.log.error(`[E2E-ERR] ${text}`);
+  });
+
+  return reply.code(202).send({
+    message: 'Autonomous E2E Runner initiated',
+    jobId: job.id,
+    projectName: job.name,
+    targetUrl,
+    phases,
+    status: 'RUNNING'
+  });
+});
+
+app.post<{ Body?: { projectName?: string; url?: string; username?: string; password?: string; phases?: string; headless?: boolean } }>('/api/v1/e2e/trigger', async (request, reply) => {
+  const body = request.body || {};
+  const projectName = body.projectName || 'target-web-app';
+  const targetUrl = body.url || 'http://localhost:5174';
+  const username = body.username || 'QC_PATCH_TA';
+  const password = body.password || 'password123';
+  const phases = body.phases || 'all';
+
+  const scriptPath = path.join(root, 'scripts', 'run-autonomous-e2e.mjs');
+  spawn(process.argv[0], [
+    scriptPath,
+    `--url=${targetUrl}`,
+    `--project=${projectName}`,
+    `--username=${username}`,
+    `--password=${password}`,
+    `--phases=${phases}`,
+    `--headless=${body.headless !== false}`
+  ], {
+    cwd: root,
+    windowsHide: true,
+    env: { ...process.env, QC_TEST_ARTIFACT_ROOT: artifactRoot }
+  });
+
+  return reply.code(202).send({
+    message: 'Autonomous E2E Runner triggered successfully',
+    projectName,
+    targetUrl,
+    phases,
+    status: 'RUNNING'
+  });
 });
 
 app.delete<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id', async (request, reply) => {

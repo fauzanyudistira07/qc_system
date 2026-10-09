@@ -471,6 +471,160 @@ Target repository tetap read-only. Engine menghasilkan audit, finding, dan evide
 
 **Status:** `DONE`
 
+## Phase 11 — Full CRUD & Capture Lifecycle (Kamis, 1 Oktober 2026)
+
+### P11-01 — Full CRUD Test Suite & 3-Choice Auto-Seeder
+
+**Description:** Mengintegrasikan 3 metode inisialisasi basis data: Auto-seed Laravel, unggah berkas SQL dump, dan koneksi ke Live DB existing untuk pengujian CRUD lengkap.
+
+**Status:** `DONE`
+
+### P11-02 — Continuous 720p 30 FPS Lossless Video Recording
+
+**Description:** Implementasi perekaman video Playwright terpadu resolusi 720p pada 30 FPS untuk merekam seluruh sesi pengujian aplikasi web secara lossless.
+
+**Status:** `DONE`
+
+### P11-03 — Staging Admin Authentication Gate & HMAC Session Token
+
+**Description:** Menambahkan gerbang login admin staging dengan otentikasi token session HMAC berbasis backend Fastify dan pembersihan field awal demi keamanan kredensial.
+
+**Status:** `DONE`
+
+### P11-04 — Pemulihan Arsitektur Flagging Mobile Support (Android)
+
+**Description:** Mengamankan dan memulihkan feature flag ENABLE_MOBILE_SUPPORT untuk kontrol fitur target mobile Android pada monorepo QC Maestro.
+
+**Status:** `DONE`
+
+## Phase 12 — Mobile Android Subsystem (Jumat, 2 Oktober 2026)
+
+### P12-01 — Android Emulator Subsystem Bridge (ADB & Runner)
+
+**Description:** Merancang dan mengimplementasikan modul jembatan emulator Android: adb.ts, emulator-runner.ts, dan sistem deteksi perangkat mobile otomatis.
+
+**Status:** `DONE`
+
+### P12-02 — Mobile QC Run Wizard Form (APK Upload & ADB Verify)
+
+**Description:** Menyediakan form input pengujian aplikasi Android di Wizard: upload file APK, deteksi otomatis packageId dan version, serta verifikasi koneksi ADB.
+
+**Status:** `DONE`
+
+### P12-03 — Maestro YAML Runner Engine & Mobile Pipeline
+
+**Description:** Menyiapkan engine eksekutor sintaks Maestro YAML untuk pengetesan alur aplikasi mobile native Android dan milestone pipeline execution.
+
+**Status:** `DONE`
+
+## Phase 13 — Live Viewport & Context Isolation (Sabtu, 3 Oktober 2026)
+
+### P13-01 — Headless Live Viewport & Remote Stream Control Center
+
+**Description:** Membangun komponen Live Viewport streaming visual interaktif untuk memantau aksi browser Playwright secara realtime selama audit berlangsung.
+
+**Status:** `DONE`
+
+### P13-02 — Multi-Project Context Isolation & Active Run Switcher
+
+**Description:** Mengisolasi penyimpanan artefak, log, dan riwayat attempt antar target audit (Zannora, Cakrawala, Taskia, Jamaahku) dengan dropdown context switcher.
+
+**Status:** `DONE`
+
+## Phase 14 — Visual Evidence & Defect Triage (Minggu, 4 Oktober 2026)
+
+### P14-01 — Visual Evidence Gallery & Multi-Media Trace Center
+
+**Description:** Menyediakan galeri bukti uji komprehensif: screenshot thumbnail, video playback, Playwright trace viewer zip, dan bundle manifest terstruktur.
+
+**Status:** `DONE`
+
+### P14-02 — Automated Defect Triage & Instant Retest Workflow
+
+**Description:** Implementasi manajemen siklus defect triage (Open -> In Progress -> Ready for Retest -> Passed) dengan komparasi bukti sebelum dan sesudah verifikasi.
+
+**Status:** `DONE`
+
+## Phase 15 — Discovery Engine & Flow Synthesis (Senin, 5 Oktober 2026)
+
+### P15-01 — Deep Crawler & Autonomous Route Inventory Discovery
+
+**Description:** Mengembangkan crawler otonom untuk memindai seluruh rute, link tersembunyi, form action, dan elemen interaktif web aplikasi tanpa batasan.
+
+**Status:** `DONE`
+
+### P15-02 — Dynamic Business Flow Synthesis & Functional State Generator
+
+**Description:** Sintesis otomatis peta alur bisnis aplikasi (BusinessFlowMap) yang mengelompokkan alur fungsional berdasarkan kategori dan aktor.
+
+**Status:** `DONE`
+
+## Phase 16 — Live Terminal & Telemetry (Selasa, 6 Oktober 2026)
+
+### P16-01 — Real-Time Interactive Discovery Terminal & ANSI Visualizer
+
+**Description:** Terminal telemetri langsung discovery dengan parser kode warna ANSI, filter log bertag (SYSTEM, RUNNER, BROWSER, DATABASE), dan auto-scroll.
+
+**Status:** `DONE`
+
+### P16-02 — Granular Network & Database Activity Monitoring Telemetry
+
+**Description:** Pencatatan telemetri request/response HTTP, status code API, dan query mutasi database yang terjadi selama penelusuran alur pengujian.
+
+**Status:** `DONE`
+
+## Phase 17 — Wizard Streamline, Flow Gate & Error Attribution (Rabu, 7 Oktober 2026)
+
+### P17-01 — Streamline Wizard Form (Prioritas DB & Form Akun Kedua)
+
+**Description:** Menata ulang Langkah 1 Wizard QC Maestro: penempatan metode inisialisasi basis data di paling atas (Seksi 1) dan form kredensial akun di seksi kedua.
+
+**Status:** `DONE`
+
+### P17-02 — Eliminasi Clutter Form & Enforce 100% Deep Testing Matrix
+
+**Description:** Membersihkan seluruh saklar/pill clutter form dan mengaktifkan 100% kapabilitas pengujian mendalam (3 browser, 3 viewport, max depth 8, unconstrained routes) di balik layar.
+
+**Status:** `DONE`
+
+### P17-03 — Mandatory Business Flow Review Gate & Auto-Switch Terminal
+
+**Description:** Jeda review wajib (WAITING_REVIEW) setelah sintesis alur bisnis sebelum eksekusi terminal berjalan. Otomatis redirect ke Flow visualizer dan kembali ke live terminal setelah acc.
+
+**Status:** `DONE`
+
+### P17-04 — Modernisasi Papan Review Linear-Style Wizard Langkah 2
+
+**Description:** Mendesain ulang papan review konfirmasi akhir Linear-style yang merangkum seluruh form: Target Frontend/API probe, Database method, Akun audit, dan matrix kapabilitas 100%.
+
+**Status:** `DONE`
+
+### P17-05 — Sistem Pelaporan Mutu & Atribusi Error (User App vs QC Engine)
+
+**Description:** Perhitungan persentase skor kelulusan dinamis dan pemisahan tegas sumber defek antara bug kode aplikasi user vs runner engine QC Maestro pada kartu KPI dan laporan.
+
+**Status:** `DONE`
+
+### P17-06 — Integrasi Defect Ledger & Verifikasi Monorepo QC Maestro
+
+**Description:** Menambahkan tabel Defect Ledger lengkap dengan jejak diagnosis teknis, failure thumbnail zoom, dan advice perbaikan pada dashboard dan ekspor PDF/HTML, serta verifikasi build monorepo.
+
+**Status:** `DONE`
+
+## Phase 18 — Incremental Testing & Enhanced UX (Rencana Berjalan)
+
+### P18-01 — Selective Delta Re-Testing via GitHub Push (Change-Impact Analysis)
+
+**Description:** Mekanisme pengujian diferensial selektif saat user melakukan git push ke GitHub. Engine mendeteksi file dan komponen yang mengalami perubahan (git diff/tree impact), lalu hanya menguji ulang modul dan rute terkait tanpa perlu menjalankan audit keseluruhan web.
+
+**Status:** `IN PROGRESS`
+
+### P18-02 — Redesain UX & UI Seluruh Tab Navigasi agar Lebih User-Friendly
+
+**Description:** Modernisasi antarmuka seluruh tab kontrol QC Maestro (Setup, Discovery, Terminal, Flow, Quality, Findings, Evidence, Reports) menjadi lebih intuitif, user-friendly, bebas clutter, dan responsif dengan visual feedback real-time.
+
+**Status:** `IN PROGRESS`
+
 ## Kondisi runtime saat ini
 
 - QC Dashboard/API: `http://localhost:4101`

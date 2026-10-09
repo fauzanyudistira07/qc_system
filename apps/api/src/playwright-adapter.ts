@@ -13,12 +13,14 @@ export type RunStepResult = {
   durationMs: number;
   errorCode?: string;
   errorMessage?: string;
+  errorOrigin?: 'user_target_application' | 'qc_maestro_engine';
 };
 
 export type WebRunResult = {
   status: 'PASSED' | 'FAILED' | 'INFRA_ERROR';
   steps: RunStepResult[];
   artifacts: Array<{ type: string; path: string }>;
+  errorOrigin?: 'user_target_application' | 'qc_maestro_engine';
 };
 
 type Target = { strategy: string; value: string; role?: string; name?: string; exact?: boolean };
@@ -420,7 +422,10 @@ export async function executeWebFlow(
           const ok = await safePageScreenshot(page!, screenshotPath, false);
           if (ok) artifacts.push({ type: 'screenshot', path: screenshotPath });
         }
-        const stepResult = { id: step.id, index, action: step.action, status: 'FAILED' as const, durationMs: Date.now() - started, errorCode: step.action.startsWith('assert') ? 'ASSERTION_FAILED' : 'ACTION_FAILED', errorMessage: message };
+        const lowerMsg = message.toLowerCase();
+        const isEngineError = lowerMsg.includes('driver error') || lowerMsg.includes('playwright internal') || lowerMsg.includes('spawn enoent') || lowerMsg.includes('socket hang up') || lowerMsg.includes('daemon crashed');
+        const errorOrigin: 'user_target_application' | 'qc_maestro_engine' = isEngineError ? 'qc_maestro_engine' : 'user_target_application';
+        const stepResult = { id: step.id, index, action: step.action, status: 'FAILED' as const, durationMs: Date.now() - started, errorCode: step.action.startsWith('assert') ? 'ASSERTION_FAILED' : 'ACTION_FAILED', errorMessage: message, errorOrigin };
         results.push(stepResult); onStep?.(stepResult);
         break;
       }
