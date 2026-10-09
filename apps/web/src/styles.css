@@ -6335,6 +6335,86 @@ button.quiet:hover,
   color: #211812;
 }
 
+/* UI Preview Screenshots inside Before vs After Cards */
+.compare-preview-box {
+  margin-top: 10px;
+  background: #FFFFFF;
+  border: 1px solid #D5C2AF;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.compare-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #F7F2EC;
+  border-bottom: 1px solid #E4D7C8;
+  padding: 6px 10px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 750;
+  color: #6B5D52;
+}
+
+.compare-preview-tag {
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #EFE8DE;
+  color: #211812;
+  border: 1px solid #D5C2AF;
+}
+
+.compare-preview-tag.tag-after {
+  background: #DCFCE7;
+  color: #166534;
+  border-color: #86EFAC;
+}
+
+.compare-img-wrap {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  background: #14181D;
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.compare-img-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  transition: transform 180ms ease;
+}
+
+.compare-img-wrap:hover img {
+  transform: scale(1.02);
+}
+
+.compare-img-overlay {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(20, 24, 29, 0.82);
+  color: #FFFFFF;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+}
+
 /* Diff Inspector Box */
 .diff-inspector-box {
   margin-top: 14px;

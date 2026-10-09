@@ -1751,65 +1751,162 @@ export function App() {
                         </div>
 
                         <div className="before-after-columns-grid">
-                          {/* Kolom BEFORE: Baseline Regression */}
-                          <div className="compare-card card-before">
-                            <div className="compare-card-badge-row">
-                              <span className="badge-compare-before">SEBELUM UPDATE (BASELINE)</span>
-                              <span className="compare-bullet">RUN INDUK</span>
-                            </div>
-                            <div className="compare-stat-lead">
-                              <span>{jobs.find((j) => j.id === activeJob.parentJobId)?.flows?.length || 27} Skenario Penuh (100% Suite)</span>
-                            </div>
-                            <div className="compare-detail-list">
-                              <div className="compare-item-row">
-                                <span className="compare-bullet">•</span>
-                                <span><strong>Cakupan:</strong> Menjalankan seluruh alur aplikasi secara menyeluruh tanpa isolasi</span>
-                              </div>
-                              <div className="compare-item-row">
-                                <span className="compare-bullet">•</span>
-                                <span><strong>Modul Diuji:</strong> Semua 27 modul (Airlines, Flights, Airports, Booking, Payment, Tickets, dll)</span>
-                              </div>
-                              <div className="compare-item-row">
-                                <span className="compare-bullet">•</span>
-                                <span><strong>Estimasi Durasi:</strong> ~3-5 menit untuk suite penuh</span>
-                              </div>
-                              <div className="compare-item-row">
-                                <span className="compare-bullet">•</span>
-                                <span><strong>Fokus:</strong> Verifikasi regresi global sebelum rilis</span>
-                              </div>
-                            </div>
-                          </div>
+                          {(() => {
+                            const parentJob = jobs.find((j) => j.id === activeJob.parentJobId);
+                            const impactedKeyword =
+                              (activeJob.impactReport?.impactedModules?.[0]?.toLowerCase() || '').replace(/\s+/g, '') ||
+                              (activeJob.commitInfo?.filesChanged?.[0]?.toLowerCase().includes('airport') ? 'airport' : 'dashboard');
 
-                          {/* Kolom AFTER: Focused Incremental Room */}
-                          <div className="compare-card card-after">
-                            <div className="compare-card-badge-row">
-                              <span className="badge-compare-after">SESUDAH UPDATE (COMMIT #{activeJob.commitInfo.sha.slice(0, 7)})</span>
-                              <span className="compare-bullet">ROOM TERARAH</span>
-                            </div>
-                            <div className="compare-stat-lead text-emerald">
-                              <span>
-                                {activeJob.impactReport?.totalFlowsTested ?? (activeJob.flows?.length || 0)} Skenario Terarah ({activeJob.impactReport?.passed ?? 0}/{activeJob.impactReport?.totalFlowsTested ?? (activeJob.flows?.length || 0)} Lulus)
-                              </span>
-                            </div>
-                            <div className="compare-detail-list">
-                              <div className="compare-item-row">
-                                <span className="compare-bullet">•</span>
-                                <span><strong>Cakupan:</strong> Mengisolasi pengujian hanya pada area yang dimodifikasi</span>
-                              </div>
-                              <div className="compare-item-row">
-                                <span className="compare-bullet">•</span>
-                                <span><strong>Modul Terdampak:</strong> <span className="compare-item-highlight">{activeJob.impactReport?.impactedModules?.join(', ') || 'Modul terkait'}</span> (25 modul lainnya dilewati)</span>
-                              </div>
-                              <div className="compare-item-row">
-                                <span className="compare-bullet">•</span>
-                                <span><strong>Efisiensi:</strong> <strong>~12 detik</strong> (Hemat &gt;95% waktu &amp; resource)</span>
-                              </div>
-                              <div className="compare-item-row">
-                                <span className="compare-bullet">•</span>
-                                <span><strong>Fokus:</strong> Verifikasi cepat commit &amp; rekaman bukti video terpisah</span>
-                              </div>
-                            </div>
-                          </div>
+                            const resolveScreenshotUrl = (job: Job | null | undefined, kw: string) => {
+                              if (!job || !job.results) return null;
+                              let found: string | null = null;
+                              for (const r of job.results) {
+                                for (const a of r.artifacts || []) {
+                                  const p = typeof a === 'string' ? a : (a.path || a.url || '');
+                                  if (p.endsWith('.png') || p.endsWith('.jpg')) {
+                                    if (kw && p.toLowerCase().includes(kw)) {
+                                      found = p;
+                                      break;
+                                    }
+                                    if (!found && !p.includes('step-1.png') && !p.includes('login')) {
+                                      found = p;
+                                    }
+                                  }
+                                }
+                                if (found && kw && found.toLowerCase().includes(kw)) break;
+                              }
+                              if (!found) {
+                                for (const r of job.results) {
+                                  for (const a of r.artifacts || []) {
+                                    const p = typeof a === 'string' ? a : (a.path || a.url || '');
+                                    if (p.endsWith('.png') || p.endsWith('.jpg')) {
+                                      found = p;
+                                      break;
+                                    }
+                                  }
+                                  if (found) break;
+                                }
+                              }
+                              if (!found) return null;
+                              if (found.startsWith('http') || found.startsWith('/api/')) return found;
+                              const match = found.match(/jobs[\\/]([^\\/]+)[\\/](.+)$/);
+                              if (match) {
+                                return `/api/v1/discovery/jobs/${match[1]}/artifacts/${match[2].replace(/\\/g, '/')}`;
+                              }
+                              return null;
+                            };
+
+                            const beforeScreenshotUrl = resolveScreenshotUrl(parentJob, impactedKeyword);
+                            const afterScreenshotUrl = resolveScreenshotUrl(activeJob, impactedKeyword);
+
+                            return (
+                              <>
+                                {/* Kolom BEFORE: Baseline Regression */}
+                                <div className="compare-card card-before">
+                                  <div className="compare-card-badge-row">
+                                    <span className="badge-compare-before">SEBELUM UPDATE (BASELINE)</span>
+                                    <span className="compare-bullet">RUN INDUK</span>
+                                  </div>
+                                  <div className="compare-stat-lead">
+                                    <span>{parentJob?.flows?.length || 27} Skenario Penuh (100% Suite)</span>
+                                  </div>
+                                  <div className="compare-detail-list">
+                                    <div className="compare-item-row">
+                                      <span className="compare-bullet">•</span>
+                                      <span><strong>Cakupan:</strong> Menjalankan seluruh alur aplikasi secara menyeluruh tanpa isolasi</span>
+                                    </div>
+                                    <div className="compare-item-row">
+                                      <span className="compare-bullet">•</span>
+                                      <span><strong>Modul Diuji:</strong> Semua 27 modul (Airlines, Flights, Airports, Booking, Payment, Tickets, dll)</span>
+                                    </div>
+                                    <div className="compare-item-row">
+                                      <span className="compare-bullet">•</span>
+                                      <span><strong>Estimasi Durasi:</strong> ~3-5 menit untuk suite penuh</span>
+                                    </div>
+                                    <div className="compare-item-row">
+                                      <span className="compare-bullet">•</span>
+                                      <span><strong>Fokus:</strong> Verifikasi regresi global sebelum rilis</span>
+                                    </div>
+                                  </div>
+
+                                  {beforeScreenshotUrl && (
+                                    <div className="compare-preview-box">
+                                      <div className="compare-preview-header">
+                                        <span>PREVIEW UI BASELINE:</span>
+                                        <span className="compare-preview-tag">SEBELUM UPDATE</span>
+                                      </div>
+                                      <div
+                                        className="compare-img-wrap"
+                                        onClick={() => setFullScreenshot(beforeScreenshotUrl)}
+                                        title="Klik untuk memperbesar tampilan UI"
+                                        role="button"
+                                        tabIndex={0}
+                                      >
+                                        <img src={beforeScreenshotUrl} alt="Baseline UI Preview" />
+                                        <div className="compare-img-overlay">
+                                          <Icon name="arrow" size={12} />
+                                          <span>Perbesar</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Kolom AFTER: Focused Incremental Room */}
+                                <div className="compare-card card-after">
+                                  <div className="compare-card-badge-row">
+                                    <span className="badge-compare-after">SESUDAH UPDATE (COMMIT #{activeJob.commitInfo.sha.slice(0, 7)})</span>
+                                    <span className="compare-bullet">ROOM TERARAH</span>
+                                  </div>
+                                  <div className="compare-stat-lead text-emerald">
+                                    <span>
+                                      {activeJob.impactReport?.totalFlowsTested ?? (activeJob.flows?.length || 0)} Skenario Terarah ({activeJob.impactReport?.passed ?? 0}/{activeJob.impactReport?.totalFlowsTested ?? (activeJob.flows?.length || 0)} Lulus)
+                                    </span>
+                                  </div>
+                                  <div className="compare-detail-list">
+                                    <div className="compare-item-row">
+                                      <span className="compare-bullet">•</span>
+                                      <span><strong>Cakupan:</strong> Mengisolasi pengujian hanya pada area yang dimodifikasi</span>
+                                    </div>
+                                    <div className="compare-item-row">
+                                      <span className="compare-bullet">•</span>
+                                      <span><strong>Modul Terdampak:</strong> <span className="compare-item-highlight">{activeJob.impactReport?.impactedModules?.join(', ') || 'Modul terkait'}</span> (25 modul lainnya dilewati)</span>
+                                    </div>
+                                    <div className="compare-item-row">
+                                      <span className="compare-bullet">•</span>
+                                      <span><strong>Efisiensi:</strong> <strong>~12 detik</strong> (Hemat &gt;95% waktu &amp; resource)</span>
+                                    </div>
+                                    <div className="compare-item-row">
+                                      <span className="compare-bullet">•</span>
+                                      <span><strong>Fokus:</strong> Verifikasi cepat commit &amp; rekaman bukti video terpisah</span>
+                                    </div>
+                                  </div>
+
+                                  {afterScreenshotUrl && (
+                                    <div className="compare-preview-box">
+                                      <div className="compare-preview-header">
+                                        <span>PREVIEW UI TERVERIFIKASI:</span>
+                                        <span className="compare-preview-tag tag-after">SESUDAH UPDATE</span>
+                                      </div>
+                                      <div
+                                        className="compare-img-wrap"
+                                        onClick={() => setFullScreenshot(afterScreenshotUrl)}
+                                        title="Klik untuk memperbesar tampilan UI"
+                                        role="button"
+                                        tabIndex={0}
+                                      >
+                                        <img src={afterScreenshotUrl} alt="Updated UI Preview" />
+                                        <div className="compare-img-overlay">
+                                          <Icon name="arrow" size={12} />
+                                          <span>Perbesar</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
 
                         {/* CODE DIFF INSPECTOR */}
