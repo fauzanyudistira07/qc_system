@@ -77,9 +77,11 @@ if (Test-Path $urlFile) {
 Write-StatusItem -Name "Cloudflare Remote Tunnel" -IsOk $tunnelOk -Details $(if ($tunnelOk) { "Active (PID: $($tunnelProc.Id))" } else { "Tidak berjalan" })
 
 # 6. Auto-Update Watcher
-$watcherProc = Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like "*watch-and-deploy.ps1*" }
+$watcherProc = Get-WmiObject Win32_Process | Where-Object { 
+    $_.CommandLine -like "*watch-and-deploy.ps1*" -or $_.CommandLine -like "*auto-updater.ps1*" 
+}
 $watcherOk = ($watcherProc -ne $null)
-Write-StatusItem -Name "GitHub Auto-Update Watcher" -IsOk $watcherOk -Details $(if ($watcherOk) { "Running" } else { "Standby / Off" })
+Write-StatusItem -Name "GitHub Auto-Update Watcher" -IsOk $watcherOk -Details $(if ($watcherOk) { "Running (Active)" } else { "Standby / Off" })
 
 Write-Host "--------------------------------------------------------" -ForegroundColor DarkGray
 Write-Host " TAUTAN AKSES AKTIF SAAT INI:" -ForegroundColor White
