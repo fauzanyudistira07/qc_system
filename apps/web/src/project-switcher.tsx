@@ -124,20 +124,20 @@ export function ProjectSwitcher({
   // Projek aktif saat ini
   const currentRootProjectName = useMemo(() => {
     if (activeJob) return getRootProjectName(activeJob, jobs);
-    return rootProjects[0]?.name || 'Zannora';
+    return rootProjects[0]?.name || '';
   }, [activeJob, jobs, rootProjects]);
 
   // Tab projek yang sedang dipilih di dalam modal
-  const [selectedProjectName, setSelectedProjectName] = useState<string>(currentRootProjectName);
+  const [selectedProjectName, setSelectedProjectName] = useState<string>(currentRootProjectName || (rootProjects[0]?.name || ''));
 
   // Sync tab pilihan ketika activeJob berubah atau modal baru dibuka
   useEffect(() => {
     if (isModalOpen) {
-      setSelectedProjectName(currentRootProjectName);
+      setSelectedProjectName(currentRootProjectName || (rootProjects[0]?.name || ''));
       setSearchQuery('');
       setActiveCategoryTab('all');
     }
-  }, [isModalOpen, currentRootProjectName]);
+  }, [isModalOpen, currentRootProjectName, rootProjects]);
 
   // Keyboard shortcut listener (Escape & Ctrl+K / Cmd+K)
   useEffect(() => {
@@ -232,28 +232,41 @@ export function ProjectSwitcher({
         <button
           type="button"
           className="sidebar-project-trigger-card"
-          onClick={() => setIsModalOpen(true)}
-          title="Klik untuk memilih Project & Sub-Project (Ctrl+K)"
+          onClick={() => {
+            if (rootProjects.length === 0) {
+              onNewJob();
+            } else {
+              setIsModalOpen(true);
+            }
+          }}
+          title={currentRootProjectName ? "Klik untuk memilih Project & Sub-Project (Ctrl+K)" : "Klik untuk membuat QC Run baru"}
         >
           <div className={`trigger-platform-icon platform-${selectedProject?.platform || 'web'}`}>
-            <Icon name={selectedProject?.platform === 'android' ? 'android' : 'globe'} size={14} />
+            <Icon name={currentRootProjectName ? (selectedProject?.platform === 'android' ? 'android' : 'globe') : 'plus'} size={14} />
           </div>
 
           <div className="trigger-text-column">
             <div className="trigger-top-row">
-              <strong className="trigger-project-name" title={currentRootProjectName}>
-                {currentRootProjectName}
+              <strong className="trigger-project-name" title={currentRootProjectName || 'Belum Ada Projek'}>
+                {currentRootProjectName || 'Belum Ada Projek'}
               </strong>
               <div className="trigger-pill-group">
-                <kbd className="trigger-kbd-pill">⌘K</kbd>
-                <span className="trigger-chevron-icon">
-                  <Icon name="chevron-down" size={11} />
-                </span>
+                <kbd className="trigger-kbd-pill">{rootProjects.length > 0 ? '⌘K' : '+'}</kbd>
+                {rootProjects.length > 0 && (
+                  <span className="trigger-chevron-icon">
+                    <Icon name="chevron-down" size={11} />
+                  </span>
+                )}
               </div>
             </div>
 
             <div className="trigger-bottom-row">
-              {isCurrentActiveIncremental ? (
+              {!currentRootProjectName ? (
+                <span className="trigger-baseline-pill">
+                  <span className="pill-icon">✨</span>
+                  <span className="pill-text">Klik + New QC Run</span>
+                </span>
+              ) : isCurrentActiveIncremental ? (
                 <span className="trigger-room-pill" title={activeJob?.commitInfo?.message || ''}>
                   <span className="pill-bolt">⚡</span>
                   <span className="pill-code">#{activeSha}</span>
@@ -308,6 +321,28 @@ export function ProjectSwitcher({
             </div>
 
             {/* Layout Master-Detail (Split View) */}
+            {rootProjects.length === 0 ? (
+              <div className="project-picker-empty-box">
+                <div className="empty-picker-icon-wrap">
+                  <Icon name="plus" size={32} />
+                </div>
+                <h3>Belum Ada Projek di Server</h3>
+                <p>
+                  Database pengujian di server ini masih kosong. Silakan mulai dengan membuat QC Run perdana atau kirim webhook dari repo GitHub Anda.
+                </p>
+                <button
+                  type="button"
+                  className="empty-create-run-btn"
+                  onClick={() => {
+                    setIsModalOpen(false);
+                    onNewJob();
+                  }}
+                >
+                  <Icon name="plus" size={14} />
+                  <span>+ Buat QC Run Pertama</span>
+                </button>
+              </div>
+            ) : (
             <div className="project-picker-split-body">
               {/* PANEL KIRI: DAFTAR PROJEK UTAMA */}
               <aside className="project-picker-sidebar">
@@ -565,6 +600,7 @@ export function ProjectSwitcher({
                 )}
               </main>
             </div>
+            )}
 
             {/* Footer Modal Bawah */}
             <div className="project-picker-bottom-footer">

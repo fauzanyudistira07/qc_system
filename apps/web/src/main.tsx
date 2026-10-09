@@ -887,7 +887,7 @@ export function App() {
         setActiveJobId(webJob ? webJob.id : data[0].id);
         setFlowSource('job');
       } else if (!data.length) {
-        setFlowSource('zannora');
+        setFlowSource('job');
       }
     } catch {
       // API may be booting
@@ -1625,7 +1625,43 @@ export function App() {
 
           {/* VIEW: OVERVIEW (PROJECT SUMMARY) */}
           {currentView === 'overview' && (
-            flowSource === 'zannora' && zannoraEvidence ? (
+            jobs.length === 0 && !activeJob ? (
+              <div className="empty-workspace-landing">
+                <div className="empty-landing-card">
+                  <div className="landing-badge">
+                    <span className="landing-led-dot">●</span>
+                    <span>QC MAESTRO AUTONOMOUS QA · READY</span>
+                  </div>
+                  <h1 className="landing-title">Selamat Datang di QC Maestro</h1>
+                  <p className="landing-subtitle">
+                    Server Autonomous QA siap melayani pengujian end-to-end. Belum ada proyek atau riwayat testing yang tersimpan di server ini.
+                  </p>
+                  <div className="landing-steps-grid">
+                    <div className="landing-step-item">
+                      <span className="step-num">01</span>
+                      <strong>Target Web / Android</strong>
+                      <p>Uji aplikasi web (Laravel, React, Vue, PHP) atau aplikasi Android APK.</p>
+                    </div>
+                    <div className="landing-step-item">
+                      <span className="step-num">02</span>
+                      <strong>Autonomous Discovery</strong>
+                      <p>Crawling otomatis memetakan rute, form, interaksi UI, dan validasi fungsional.</p>
+                    </div>
+                    <div className="landing-step-item">
+                      <span className="step-num">03</span>
+                      <strong>GitHub Push Webhook</strong>
+                      <p>Deteksi otomatis commit per fitur dan pembuatan dedicated update room instan.</p>
+                    </div>
+                  </div>
+                  <div className="landing-cta-row">
+                    <button type="button" className="tool-btn primary-btn" onClick={() => setCurrentView('new')}>
+                      <Icon name="plus" size={14} />
+                      <span>Mulai QC Run Pertama (+ New QC Run)</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : flowSource === 'zannora' && zannoraEvidence ? (
               <ZannoraOverview evidence={zannoraEvidence} onNavigate={setCurrentView} onOpenEvidence={openEvidenceGroup} />
             ) : (
               <div className="summary-dashboard-container">
