@@ -220,7 +220,7 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
       name: directory === sourceDir ? 'laravel-backend' : `laravel-${relativeWorkingDir(sourceDir, directory)}`,
       kind: 'backend',
       workingDir: relativeWorkingDir(sourceDir, directory),
-      installCommand: 'composer install --no-interaction --prefer-dist --ignore-platform-reqs',
+      installCommand: detectedPhp.installCommand,
       startCommand: `php artisan serve --host=0.0.0.0 --port=${port}`,
       healthCheck: index === 0 ? project.baseUrl : `http://127.0.0.1:${port}/`,
       port,

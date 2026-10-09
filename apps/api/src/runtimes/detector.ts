@@ -83,7 +83,7 @@ export async function detectProjectRuntime(sourceDir: string): Promise<DetectedR
         frameworkVersion: laravelVersion,
         runtimeVersion: phpVersion,
         recommendedImage: `qc-runtime:php-${phpVersion}`,
-        installCommand: 'composer install --no-interaction --prefer-dist --ignore-platform-reqs',
+        installCommand: 'composer install --no-interaction --prefer-dist --ignore-platform-reqs && (php artisan key:generate --force || true)',
         startCommandTemplate: (port) => `php artisan serve --host=0.0.0.0 --port=${port}`,
         cacheVolumes: ['qc-composer-cache:/tmp/composer/cache']
       };
