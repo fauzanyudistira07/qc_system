@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { NormalizedFlow } from '@qc/flow-schema';
 import { executeWebFlow, type RunStepResult, type WebRunResult } from './playwright-adapter.ts';
+import { detectProjectRuntime, ensureRuntimeImage } from './runtimes/index.ts';
 
 export type ManagedService = {
   id: string;
@@ -195,6 +196,7 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
     const startCommand = isNext
       ? `${tool} run ${script}${tool === 'yarn' ? '' : ' --'} -p ${port}`
       : `${tool} run ${script}${tool === 'yarn' ? '' : ' --'} --host 0.0.0.0 --port=${port}`;
+    const detectedNode = await detectProjectRuntime(directory);
     nodeServices.push({
       id: isRoot ? 'node-app' : `node-${serviceSlug(sourceDir, directory)}`,
       name: isRoot ? 'node-app' : `node-${relativeWorkingDir(sourceDir, directory)}`,
@@ -204,7 +206,7 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
       startCommand,
       healthCheck: laravelDirs.length > 0 ? '' : project.baseUrl,
       port,
-      runtimeImage: 'node:22',
+      runtimeImage: detectedNode.recommendedImage,
       dependsOn: laravelDirs.length > 0 ? laravelDirs.map((directory) => `laravel-${serviceSlug(sourceDir, directory)}`) : []
     });
   }
@@ -212,6 +214,7 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
   const services: ManagedService[] = [];
   for (const [index, directory] of laravelDirs.entries()) {
     const port = index === 0 ? basePort(project.baseUrl, 5000) : 5000 + index;
+    const detectedPhp = await detectProjectRuntime(directory);
     services.push({
       id: `laravel-${serviceSlug(sourceDir, directory)}`,
       name: directory === sourceDir ? 'laravel-backend' : `laravel-${relativeWorkingDir(sourceDir, directory)}`,
@@ -221,7 +224,7 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
       startCommand: `php artisan serve --host=0.0.0.0 --port=${port}`,
       healthCheck: index === 0 ? project.baseUrl : `http://127.0.0.1:${port}/`,
       port,
-      runtimeImage: 'composer:2',
+      runtimeImage: detectedPhp.recommendedImage,
       dependsOn: []
     });
   }
@@ -386,11 +389,11 @@ function safeContainerImage(service: ManagedService) {
   const start = service.startCommand.trim().toLowerCase();
   const install = service.installCommand.trim().toLowerCase();
   const inferred = service.runtimeImage?.trim()
-    || (/\bcomposer\b/.test(install) ? 'composer:2' : undefined)
-    || (/\b(?:npm|pnpm|yarn|node|corepack)\b/.test(`${start} ${install}`) ? 'node:22' : undefined)
-    || (/\b(?:php|artisan|composer)\b/.test(`${start} ${install}`) ? 'php:8.3-cli' : undefined)
+    || (/\bcomposer\b/.test(install) ? 'qc-runtime:php-8.2' : undefined)
+    || (/\b(?:npm|pnpm|yarn|node|corepack)\b/.test(`${start} ${install}`) ? 'node:22-alpine' : undefined)
+    || (/\b(?:php|artisan|composer)\b/.test(`${start} ${install}`) ? 'qc-runtime:php-8.2' : undefined)
     || (/\b(?:python|pip|manage\.py)\b/.test(`${start} ${install}`) ? 'python:3.12-slim' : undefined)
-    || (/\b(?:go|golang)\b/.test(`${start} ${install}`) ? 'golang:1.27-bookworm' : undefined);
+    || (/\b(?:go|golang)\b/.test(`${start} ${install}`) ? 'golang:1.22-alpine' : undefined);
   if (!inferred) throw new Error(`runtime image wajib diisi untuk service ${service.name}; gunakan image Linux yang memiliki /bin/sh.`);
   if (!/^[a-z0-9][a-z0-9._/:@-]*$/i.test(inferred) || inferred.includes('..')) throw new Error(`runtime image tidak valid untuk service ${service.name}.`);
   return inferred;
@@ -591,7 +594,9 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
     projectSecrets.push(...Object.entries(additionalEnvironment).filter(([key]) => /password|token|secret|accounts/i.test(key)).map(([, value]) => value));
     for (const service of ordered) {
       hooks.signal?.throwIfAborted();
-      const image = safeContainerImage(service);
+      const rawImage = safeContainerImage(service);
+      hooks.update({ message: `Memeriksa ketersediaan runtime library: ${rawImage}...` });
+      const image = await ensureRuntimeImage(rawImage, (msg) => hooks.update({ message: msg }));
       const name = serviceContainerName(runId, service);
       const aliases = [...new Set([service.id, service.name].map((value) => value.replace(/[^a-z0-9-]/gi, '-').toLowerCase().replace(/^-+|-+$/g, '').slice(0, 48)).filter(Boolean))];
       const port = containerPort(service);
@@ -604,7 +609,9 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
         '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL',
         '--tmpfs', '/tmp:rw,nosuid,size=2g',
         '--volume', `${sourceDir}:/workspace${service.kind === 'database' ? ':ro' : ''}`,
-        '--volume', 'qc-npm-cache:/tmp/npm-cache'
+        '--volume', 'qc-npm-cache:/tmp/npm-cache',
+        '--volume', 'qc-composer-cache:/tmp/composer/cache',
+        '--volume', 'qc-pip-cache:/tmp/pip-cache'
       ];
       if (service.kind !== 'database' && /\b(?:npm|pnpm|yarn|node)\b/i.test(`${service.installCommand} ${service.startCommand}`)) {
         args.push('--volume', `${serviceWorkdir}/node_modules`);
@@ -614,7 +621,8 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
       }
       args.push(
         '--workdir', serviceWorkdir,
-        '--env', `APP_ENV=${project.environment}`, '--env', 'HOME=/tmp', '--env', 'COMPOSER_HOME=/tmp/composer',
+        '--env', `APP_ENV=${project.environment}`, '--env', 'HOME=/tmp', 
+        '--env', 'COMPOSER_HOME=/tmp/composer', '--env', 'COMPOSER_CACHE_DIR=/tmp/composer/cache',
         '--env', 'NPM_CONFIG_CACHE=/tmp/npm-cache', '--env', 'PIP_CACHE_DIR=/tmp/pip-cache'
       );
       for (const [key, value] of Object.entries(additionalEnvironment)) args.push('--env', `${key}=${value}`);
