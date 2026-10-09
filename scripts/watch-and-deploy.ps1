@@ -42,17 +42,11 @@ while ($true) {
             Write-Host "`n[1/2] Melakukan git pull origin main..." -ForegroundColor Cyan
             git pull origin main
 
-            # 2. Rebuild & Restart Docker Containers
-            Write-Host "`n[2/2] Memperbarui container Docker (docker compose up -d --build)..." -ForegroundColor Cyan
-            docker compose up -d --build
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "`n[WARNING] Docker compose build gagal (mungkin DNS Docker Desktop bermasalah)." -ForegroundColor Yellow
-                Write-Host "Mencoba menyalakan container yang ada tanpa rebuild..." -ForegroundColor Yellow
-                docker compose up -d
-            } else {
-                Write-Host "`n[SUCCESS] Server QC Maestro berhasil diperbarui ke commit terbaru ($remoteSha)!" -ForegroundColor Green
-                Write-Host "Kontainer web & API sudah live dengan kode teranyar.`n" -ForegroundColor Green
-            }
+            # 2. Pastikan kontainer infrastruktur tetap sehat
+            Write-Host "`n[2/2] Memastikan kontainer database & cache aktif..." -ForegroundColor Cyan
+            docker compose -f infrastructure\compose\docker-compose.yml up -d
+            Write-Host "`n[SUCCESS] Server QC Maestro berhasil diperbarui ke commit terbaru ($remoteSha)!" -ForegroundColor Green
+            Write-Host "Perubahan kode langsung aktif via hot-reload dev server.`n" -ForegroundColor Green
         } else {
             # Idle heartbeat
             $timeNow = (Get-Date).ToString("HH:mm:ss")
