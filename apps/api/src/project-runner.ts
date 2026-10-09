@@ -1,5 +1,5 @@
 import childProcess, { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import fs from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -14,8 +14,8 @@ export function resolveGitToken(root?: string): string | undefined {
   for (const dir of searchDirs) {
     try {
       const envPath = path.join(dir, '.env');
-      if (existsSync(envPath)) {
-        const text = readFileSync(envPath, 'utf8');
+      if (fs.existsSync(envPath)) {
+        const text = fs.readFileSync(envPath, 'utf8');
         const match = text.match(/^\s*(?:GITHUB_TOKEN|GH_TOKEN)\s*=\s*(["']?)(.*?)\1\s*$/m);
         if (match && match[2]?.trim()) {
           const found = match[2].trim();
