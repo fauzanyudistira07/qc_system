@@ -1669,6 +1669,100 @@ export function App() {
                   </div>
                 </div>
 
+                {/* 1.5. Dedicated Incremental Autonomous QA Room Banner */}
+                {activeJob?.kind === 'incremental-room' && activeJob.commitInfo && (
+                  <div className="incremental-room-telemetry-banner">
+                    <div className="telemetry-banner-header">
+                      <div className="telemetry-banner-title">
+                        <span className="telemetry-pulse-dot" />
+                        <span className="telemetry-banner-badge">GITHUB AUTONOMOUS QA ROOM</span>
+                        <code className="telemetry-commit-pill">#{activeJob.commitInfo.sha.slice(0, 7)}</code>
+                        <span className="telemetry-branch-tag">branch: {activeJob.commitInfo.branch || 'main'}</span>
+                      </div>
+                      {activeJob.parentJobId && (
+                        <button
+                          type="button"
+                          className="telemetry-btn-parent-jump"
+                          onClick={() => setActiveJobId(activeJob.parentJobId!)}
+                          title="Buka Baseline Full Regression untuk projek ini"
+                        >
+                          <Icon name="arrow" size={12} />
+                          <span>Buka Baseline QA</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="telemetry-banner-body">
+                      <div className="telemetry-commit-message">
+                        <strong>Commit:</strong> &ldquo;{activeJob.commitInfo.message}&rdquo;
+                        <span className="telemetry-author">oleh <em>{activeJob.commitInfo.author}</em></span>
+                      </div>
+
+                      <div className="telemetry-grid-details">
+                        <div className="telemetry-detail-cell">
+                          <span className="telemetry-cell-label">MODUL TERDAMPAK</span>
+                          <div className="telemetry-tags">
+                            {activeJob.impactReport?.impactedModules?.length ? (
+                              activeJob.impactReport.impactedModules.map((m) => (
+                                <span key={m} className="telemetry-tag-module">{m}</span>
+                              ))
+                            ) : (
+                              <span className="telemetry-tag-muted">Tidak ada modul bisnis langsung</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="telemetry-detail-cell">
+                          <span className="telemetry-cell-label">FILE PERUBAHAN ({activeJob.commitInfo.filesChanged?.length || 0})</span>
+                          <div className="telemetry-files-list">
+                            {(activeJob.commitInfo.filesChanged || []).slice(0, 3).map((f) => (
+                              <code key={f} className="telemetry-file-code" title={f}>{f.split('/').pop()}</code>
+                            ))}
+                            {(activeJob.commitInfo.filesChanged?.length || 0) > 3 && (
+                              <span className="telemetry-more-files">+{activeJob.commitInfo.filesChanged.length - 3} lainnya</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="telemetry-detail-cell">
+                          <span className="telemetry-cell-label">SKENARIO TERUJI</span>
+                          <span className="telemetry-stat-value">
+                            <strong className="text-emerald">{activeJob.impactReport?.passed ?? 0}</strong>
+                            <span className="text-dim">/{activeJob.impactReport?.totalFlowsTested ?? (activeJob.flows?.length || 0)}</span> LULUS
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 1.6. Baseline Job: Notifikasi bila ada room update tersedia */}
+                {activeJob?.kind !== 'incremental-room' && jobs.filter((j) => j.parentJobId === activeJob?.id).length > 0 && (
+                  <div className="baseline-updates-available-strip">
+                    <div className="updates-strip-left">
+                      <span className="updates-pulse-dot" />
+                      <span>Tersedia <strong>{jobs.filter((j) => j.parentJobId === activeJob?.id).length} Update Room</strong> dari push GitHub otomatis.</span>
+                    </div>
+                    <div className="updates-strip-pills">
+                      {jobs
+                        .filter((j) => j.parentJobId === activeJob?.id)
+                        .slice(0, 3)
+                        .map((room) => (
+                          <button
+                            key={room.id}
+                            type="button"
+                            className="btn-update-room-chip"
+                            onClick={() => setActiveJobId(room.id)}
+                            title={room.commitInfo?.message || room.name}
+                          >
+                            <span>#{room.commitInfo?.sha?.slice(0, 7) || 'Update'}</span>
+                            <span className="chip-status-check">✓</span>
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* 2. Executive KPI Metrics: 4 Metrik Tunggal Berkarakter Linear */}
                 <div className="summary-kpis">
                   <div className="summary-kpi-card" onClick={() => setCurrentView('map')} role="button" tabIndex={0} title="Buka App Map & Struktur Halaman">

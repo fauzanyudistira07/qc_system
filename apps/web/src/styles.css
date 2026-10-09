@@ -5953,3 +5953,290 @@ button.quiet:hover,
   border-radius: 999px;
   transition: width 0.2s ease;
 }
+
+/* ==========================================================================
+   INCREMENTAL AUTONOMOUS QA ROOMS & TELEMETRY STYLES (Linear Method)
+   ========================================================================== */
+
+.sidebar-run-entry.is-incremental-room {
+  border-left: 2px solid #35d0ba !important;
+  background: rgba(53, 208, 186, 0.04);
+}
+
+.sidebar-run-entry.is-incremental-room:hover {
+  background: rgba(53, 208, 186, 0.08);
+}
+
+.sidebar-run-entry.is-incremental-room.active {
+  background: rgba(53, 208, 186, 0.14) !important;
+  border-left-color: #35d0ba !important;
+}
+
+.incremental-tag {
+  display: inline-block;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  color: #35d0ba;
+  letter-spacing: 0.03em;
+}
+
+.impact-flows-count {
+  color: #35d0ba;
+  font-weight: 600;
+}
+
+/* Incremental Room Telemetry Banner on Overview */
+.incremental-room-telemetry-banner {
+  margin-bottom: 20px;
+  background: #0f1626;
+  border: 1px solid rgba(53, 208, 186, 0.35);
+  border-radius: 8px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  animation: fadeInTelemetry 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeInTelemetry {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.telemetry-banner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+}
+
+.telemetry-banner-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.telemetry-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #35d0ba;
+  box-shadow: 0 0 8px #35d0ba;
+  animation: pulseDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.telemetry-banner-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #35d0ba;
+  text-transform: uppercase;
+}
+
+.telemetry-commit-pill {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.telemetry-branch-tag {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.telemetry-btn-parent-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.telemetry-btn-parent-jump:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.telemetry-banner-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.telemetry-commit-message {
+  font-size: 13.5px;
+  color: #e2e8f0;
+  line-height: 1.5;
+}
+
+.telemetry-author {
+  margin-left: 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.telemetry-grid-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  padding-top: 8px;
+}
+
+.telemetry-detail-cell {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.telemetry-cell-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.telemetry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.telemetry-tag-module {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(53, 208, 186, 0.15);
+  color: #35d0ba;
+  border: 1px solid rgba(53, 208, 186, 0.3);
+}
+
+.telemetry-tag-muted {
+  font-size: 11px;
+  color: #64748b;
+  font-style: italic;
+}
+
+.telemetry-files-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.telemetry-file-code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  color: #cbd5e1;
+}
+
+.telemetry-more-files {
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+.telemetry-stat-value {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.telemetry-stat-value strong.text-emerald {
+  color: #22c55e;
+  font-size: 15px;
+}
+
+.telemetry-stat-value span.text-dim {
+  color: #64748b;
+}
+
+/* Baseline updates available strip */
+.baseline-updates-available-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding: 10px 16px;
+  background: rgba(53, 208, 186, 0.08);
+  border: 1px dashed rgba(53, 208, 186, 0.4);
+  border-radius: 6px;
+}
+
+.updates-strip-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #cbd5e1;
+}
+
+.updates-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #35d0ba;
+  box-shadow: 0 0 6px #35d0ba;
+}
+
+.updates-strip-pills {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-update-room-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  background: #111827;
+  border: 1px solid rgba(53, 208, 186, 0.4);
+  border-radius: 9999px;
+  color: #35d0ba;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.btn-update-room-chip:hover {
+  background: #35d0ba;
+  color: #0b0f19;
+  transform: translateY(-1px);
+}
+
+.chip-status-check {
+  font-size: 10px;
+  font-weight: bold;
+}
+

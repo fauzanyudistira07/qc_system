@@ -111,4 +111,23 @@ export type DiscoveryJob = {
   qualityAudit?: QualityAuditState;
   findingStatuses?: Record<string, FindingWorkflowStatus>;
   workspace?: { projectSlug: string; runLabel: string; projectPath: string; runPath: string; milestonesPath: string };
+  parentJobId?: string;
+  kind?: 'baseline' | 'incremental-room';
+  commitInfo?: {
+    sha: string;
+    message: string;
+    author: string;
+    branch: string;
+    filesChanged: string[];
+    diffSummary?: string;
+    repoUrl?: string;
+  };
+  impactReport?: {
+    impactedModules: string[];
+    impactedRoutes: string[];
+    totalFlowsTested: number;
+    passed: number;
+    failed: number;
+    summary?: string;
+  };
 };

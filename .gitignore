@@ -36,3 +36,4 @@ Thumbs.db
 # Binary & Mobile builds
 *.apk
 *.aab
+tools/

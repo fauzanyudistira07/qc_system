@@ -124,7 +124,8 @@ app.addHook('onRequest', async (request, reply) => {
     pathOnly.startsWith('/api/v1/auth/config') ||
     pathOnly.includes('/artifacts/') ||
     pathOnly.endsWith('/report') ||
-    pathOnly.startsWith('/api/v1/system/probe-target')
+    pathOnly.startsWith('/api/v1/system/probe-target') ||
+    pathOnly.startsWith('/api/v1/webhooks/')
   ) {
     return;
   }
@@ -1604,6 +1605,83 @@ app.post<{ Params: { id: string }; Body: { flowIds?: string[] } }>('/api/v1/disc
     return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
   }
 });
+
+// GitHub Webhook listener for automatic push-triggered incremental QA
+app.post<{ Querystring: { parentJobId?: string } }>('/api/v1/webhooks/github', async (request, reply) => {
+  const event = request.headers['x-github-event'] as string;
+  if (event === 'ping') {
+    return reply.send({ status: 'ok', message: 'Pong! Webhook QC Maestro aktif.' });
+  }
+
+  const body = request.body as any;
+  if (!body) return reply.code(400).send({ error: 'Payload webhook kosong.' });
+
+  const commits = body.commits || [];
+  const headCommit = body.head_commit || (commits.length > 0 ? commits[commits.length - 1] : undefined);
+  if (!headCommit && !body.after) {
+    return reply.send({ status: 'ignored', message: 'Event bukan push commit.' });
+  }
+
+  const allFiles = new Set<string>();
+  for (const c of commits) {
+    (c.added || []).forEach((f: string) => allFiles.add(f));
+    (c.modified || []).forEach((f: string) => allFiles.add(f));
+    (c.removed || []).forEach((f: string) => allFiles.add(f));
+  }
+  if (headCommit) {
+    (headCommit.added || []).forEach((f: string) => allFiles.add(f));
+    (headCommit.modified || []).forEach((f: string) => allFiles.add(f));
+    (headCommit.removed || []).forEach((f: string) => allFiles.add(f));
+  }
+
+  const branch = (body.ref as string)?.replace('refs/heads/', '') || 'main';
+  const commitSha = headCommit?.id || body.after || 'head';
+  const commitMessage = headCommit?.message || 'Push update';
+  const author = headCommit?.author?.name || 'Developer';
+  const repoUrl = body.repository?.html_url || body.repository?.clone_url;
+  const repoName = body.repository?.name;
+
+  try {
+    const room = await discoveryService.createIncrementalRoomFromCommit({
+      repositoryUrl: repoUrl,
+      repoName: repoName,
+      branch: branch,
+      commitSha: commitSha,
+      commitMessage: commitMessage,
+      author: author,
+      filesChanged: Array.from(allFiles),
+      parentJobId: request.query?.parentJobId,
+    });
+    return reply.code(201).send({
+      status: 'accepted',
+      roomId: room.id,
+      roomName: room.name,
+      impact: room.impactReport,
+      message: 'Dedicated Room dibuat & pengujian terarah dimulai.'
+    });
+  } catch (err) {
+    return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Manual trigger for commit update room
+app.post<{ Params: { id: string }; Body: { filesChanged: string[]; commitMessage?: string; commitSha?: string; author?: string } }>(
+  '/api/v1/discovery/jobs/:id/trigger-commit-update',
+  async (request, reply) => {
+    try {
+      const room = await discoveryService.createIncrementalRoomFromCommit({
+        parentJobId: request.params.id,
+        commitSha: request.body?.commitSha || Math.random().toString(16).slice(2, 10),
+        commitMessage: request.body?.commitMessage || 'Manual Trigger Update',
+        author: request.body?.author || 'Manual User',
+        filesChanged: request.body?.filesChanged || [],
+      });
+      return reply.code(201).send(room);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+);
 
 app.put<{ Params: { id: string; flowId: string }; Body: { source: string } }>('/api/v1/discovery/jobs/:id/flows/:flowId', async (request, reply) => {
   if (!request.body?.source) return reply.code(400).send({ error: 'source wajib diisi.' });

@@ -28,9 +28,11 @@ export function ProjectSwitcher({
   const projectList = useMemo(() => {
     const map = new Map<string, Job[]>();
     for (const j of jobs) {
-      const list = map.get(j.name) ?? [];
+      const parentJob = j.parentJobId ? jobs.find(p => p.id === j.parentJobId) : null;
+      const groupName = (j.kind === 'incremental-room' && parentJob) ? parentJob.name : j.name;
+      const list = map.get(groupName) ?? [];
       list.push(j);
-      map.set(j.name, list);
+      map.set(groupName, list);
     }
     return Array.from(map.entries()).map(([name, runs]) => {
       const sorted = [...runs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -162,17 +164,20 @@ export function ProjectSwitcher({
                         const isRunActive = run.id === activeJobId;
                         const runNum = project.runs.length - idx;
                         const summary = getRunSummary(run);
+                        const isIncremental = run.kind === 'incremental-room';
+                        const commitShaShort = run.commitInfo?.sha ? run.commitInfo.sha.slice(0, 7) : null;
 
                         return (
                           <div
                             key={run.id}
-                            className={`sidebar-run-entry ${isRunActive ? 'active' : ''}`}
+                            className={`sidebar-run-entry ${isRunActive ? 'active' : ''} ${isIncremental ? 'is-incremental-room' : ''}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              // Ketika percobaan dipilih, ubah hasil ke percobaan tersebut
                               onSelectJob(run.id);
                             }}
-                            title={`Pilih Pengecekan #${runNum} (${summary.isFailed ? 'Gagal' : 'Berhasil'})`}
+                            title={isIncremental 
+                              ? `Dedicated Update Room #${commitShaShort}: ${run.commitInfo?.message || run.name}`
+                              : `Pilih Pengecekan #${runNum} (${summary.isFailed ? 'Gagal' : 'Berhasil'})`}
                           >
                             <div className="run-entry-left">
                               <span
@@ -188,11 +193,21 @@ export function ProjectSwitcher({
                               </span>
                               <div className="run-entry-text">
                                 <div className="run-entry-title-row">
-                                  <span className="run-entry-title">Pengecekan #{runNum}</span>
+                                  {isIncremental ? (
+                                    <span className="run-entry-title incremental-title" title={run.commitInfo?.message || run.name}>
+                                      <span className="incremental-tag">⚡ UPDATE #{commitShaShort}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="run-entry-title">Baseline #{runNum}</span>
+                                  )}
                                 </div>
                                 <span className="run-entry-sub">
                                   {idx === 0 && <span className="run-entry-latest-tag">TERBARU</span>}
-                                  {summary.detail ? `${summary.detail} · ` : ''}
+                                  {isIncremental && run.impactReport ? (
+                                    <span className="impact-flows-count">{run.impactReport.totalFlowsTested} flow terdampak · </span>
+                                  ) : (
+                                    summary.detail ? `${summary.detail} · ` : ''
+                                  )}
                                   {summary.dateStr}
                                 </span>
                               </div>
@@ -207,7 +222,9 @@ export function ProjectSwitcher({
                                   : 'badge-neutral'
                               }`}
                             >
-                              {summary.isFailed ? 'GAGAL' : summary.isPassed ? 'BERHASIL' : summary.isInterrupted ? 'TERHENTI' : run.status}
+                              {isIncremental
+                                ? (summary.isPassed ? 'PASSED' : summary.isFailed ? 'FAILED' : run.status)
+                                : (summary.isFailed ? 'GAGAL' : summary.isPassed ? 'BERHASIL' : summary.isInterrupted ? 'TERHENTI' : run.status)}
                             </span>
                           </div>
                         );

@@ -99,7 +99,44 @@ export type Step = { id?: string; index?: number; action?: string; status: strin
 export type Artifact = { type?: string; path?: string; name?: string; url?: string };
 export type Result = { flowId: string; status: string; steps: Step[]; artifacts: (Artifact | string)[]; runId?: string; finishedAt?: string; errorOrigin?: 'user_target_application' | 'qc_maestro_engine' };
 export type JobWorkspace = { projectSlug: string; runLabel: string; projectPath: string; runPath: string; milestonesPath: string };
-export type Job = { id: string; name: string; status: string; phase: string; progress: number; createdAt: string; finishedAt?: string; message?: string; logs: { time: string; category: string; message: string }[]; inventory?: Inventory; businessFlowMap?: BusinessFlowMap; flows?: Flow[]; results?: Result[]; qualityAudit?: QualityAuditState; findingStatuses?: Record<string, FindingWorkflowStatus>; config?: Partial<Config>; workspace?: JobWorkspace };
+export type Job = {
+  id: string;
+  name: string;
+  status: string;
+  phase: string;
+  progress: number;
+  createdAt: string;
+  finishedAt?: string;
+  message?: string;
+  logs: { time: string; category: string; message: string }[];
+  inventory?: Inventory;
+  businessFlowMap?: BusinessFlowMap;
+  flows?: Flow[];
+  results?: Result[];
+  qualityAudit?: QualityAuditState;
+  findingStatuses?: Record<string, FindingWorkflowStatus>;
+  config?: Partial<Config>;
+  workspace?: JobWorkspace;
+  parentJobId?: string;
+  kind?: 'baseline' | 'incremental-room';
+  commitInfo?: {
+    sha: string;
+    message: string;
+    author: string;
+    branch: string;
+    filesChanged: string[];
+    diffSummary?: string;
+    repoUrl?: string;
+  };
+  impactReport?: {
+    impactedModules: string[];
+    impactedRoutes: string[];
+    totalFlowsTested: number;
+    passed: number;
+    failed: number;
+    summary: string;
+  };
+};
 export type Capability = { available: boolean; message: string; devices?: string[] };
 export type SystemStatus = Record<'docker' | 'playwright' | 'maestro' | 'adb', Capability>;
 export type LegacyRun = { id: string; name: string; status: string; mode: string; createdAt: string; message?: string; stepResults?: Step[]; result?: { status: string; steps: Step[]; artifacts: Artifact[] } };

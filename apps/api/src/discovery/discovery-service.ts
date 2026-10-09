@@ -21,6 +21,7 @@ import { buildRoleActionPlan } from './role-planner.ts';
 import { buildFeatureContractPlan } from './feature-contract.ts';
 import { buildBusinessFlowMap, refreshBusinessFlowSummary, type BusinessFlowMap } from './business-flow.ts';
 import { runtimePolicy } from '../runtime-policy.ts';
+import { analyzeCommitImpact } from './impact-analyzer.ts';
 
 
 export class DiscoveryService {
@@ -1851,5 +1852,145 @@ export class DiscoveryService {
       }
       void this.persist();
     }
+  }
+
+  public async createIncrementalRoomFromCommit(payload: {
+    repositoryUrl?: string;
+    repoName?: string;
+    branch?: string;
+    commitSha: string;
+    commitMessage: string;
+    author: string;
+    filesChanged: string[];
+    diffSummary?: string;
+    parentJobId?: string;
+  }): Promise<DiscoveryJob> {
+    // 1. Cari baseline job
+    let baselineJob: DiscoveryJob | undefined;
+    if (payload.parentJobId) {
+      baselineJob = this.jobs.get(payload.parentJobId);
+    }
+    if (!baselineJob && payload.repositoryUrl) {
+      baselineJob = Array.from(this.jobs.values())
+        .filter(j => j.config?.repositoryUrl === payload.repositoryUrl || (payload.repoName && j.config?.name?.toLowerCase().includes(payload.repoName.toLowerCase())))
+        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+    }
+    if (!baselineJob) {
+      // Fallback ke job terakhir yang status COMPLETED dan memiliki flows
+      baselineJob = Array.from(this.jobs.values())
+        .filter(j => j.status === 'COMPLETED' && j.flows && j.flows.length > 0)
+        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+    }
+
+    if (!baselineJob) {
+      throw new Error('Tidak ditemukan baseline QA run untuk proyek ini. Harap jalankan baseline QA pertama terlebih dahulu.');
+    }
+
+    // 2. Analisis dampak perubahan commit
+    const impact = analyzeCommitImpact(payload.filesChanged, baselineJob.flows, baselineJob.inventory);
+
+    const id = randomUUID();
+    const abortController = new AbortController();
+    this.abortControllers.set(id, abortController);
+
+    const commitShaShort = payload.commitSha.slice(0, 7);
+    const roomName = `[Update #${commitShaShort}] ${payload.commitMessage || 'Commit Update'}`;
+
+    const job: DiscoveryJob = {
+      id,
+      name: roomName,
+      status: 'QUEUED',
+      phase: 'PREPARING',
+      progress: 0,
+      createdAt: new Date().toISOString(),
+      logs: [],
+      config: {
+        ...baselineJob.config,
+        name: roomName,
+      },
+      inventory: baselineJob.inventory,
+      businessFlowMap: baselineJob.businessFlowMap,
+      flows: impact.selectedFlows.map(f => ({ ...f, status: 'READY' })),
+      results: [],
+      parentJobId: baselineJob.id,
+      kind: 'incremental-room',
+      commitInfo: {
+        sha: payload.commitSha,
+        message: payload.commitMessage,
+        author: payload.author,
+        branch: payload.branch || 'main',
+        filesChanged: payload.filesChanged,
+        diffSummary: payload.diffSummary,
+        repoUrl: payload.repositoryUrl,
+      },
+      impactReport: {
+        impactedModules: impact.impactedModules,
+        impactedRoutes: impact.impactedRoutes,
+        totalFlowsTested: impact.selectedFlows.length,
+        passed: 0,
+        failed: 0,
+        summary: impact.summary,
+      },
+    };
+
+    await this.prepareWorkspace(job, job.config as any);
+    this.jobs.set(id, job);
+
+    const baselinePassword = this.runtimeAuditPasswords.get(baselineJob.id);
+    if (baselinePassword) {
+      this.runtimeAuditPasswords.set(id, baselinePassword);
+    }
+
+    void this.persist();
+    this.addLog(job, 'system', `Dedicated Room dibuat untuk commit #${commitShaShort} (${payload.author}).`);
+    this.addLog(job, 'system', `Analisis Dampak: ${impact.summary}`);
+
+    // Eksekusi terarah (targeted execution) secara asinkron
+    void (async () => {
+      try {
+        job.status = 'RUNNING';
+        job.phase = 'EXECUTING_TESTS';
+        job.progress = 20;
+        void this.persist();
+
+        if (impact.selectedFlows.length === 0) {
+          job.status = 'COMPLETED';
+          job.phase = 'COMPLETED';
+          job.progress = 100;
+          job.finishedAt = new Date().toISOString();
+          job.message = 'Commit tidak mengubah file alur bisnis. Tidak ada pengujian yang diperlukan.';
+          this.addLog(job, 'system', `✅ ${job.message}`);
+          void this.persist();
+          return;
+        }
+
+        await this.runFlows(job.id, impact.selectedFlows.map(f => f.id));
+
+        const passed = job.results.filter(r => r.status === 'PASSED').length;
+        const failed = job.results.length - passed;
+        if (job.impactReport) {
+          job.impactReport.passed = passed;
+          job.impactReport.failed = failed;
+        }
+
+        job.status = 'COMPLETED';
+        job.phase = 'COMPLETED';
+        job.progress = 100;
+        job.finishedAt = new Date().toISOString();
+        job.message = `Incremental QA Selesai: ${passed}/${impact.selectedFlows.length} skenario terdampak lulus.`;
+        this.addLog(job, 'system', `✅ ${job.message}`);
+        await this.writeWorkspaceSnapshot(job);
+        void this.persist();
+      } catch (err) {
+        job.status = 'FAILED';
+        job.phase = 'FAILED';
+        job.finishedAt = new Date().toISOString();
+        job.message = err instanceof Error ? err.message : String(err);
+        this.addLog(job, 'system', `Incremental QA Gagal: ${job.message}`);
+        void this.persist();
+      }
+    })();
+
+    return job;
   }
 }
