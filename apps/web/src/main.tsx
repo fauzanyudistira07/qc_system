@@ -911,7 +911,8 @@ export function App() {
     void refreshJobs();
     const interval = setInterval(() => {
       void refreshSystem();
-    }, 10000);
+      void refreshJobs();
+    }, 6000);
     return () => clearInterval(interval);
   }, [authToken, refreshSystem, refreshJobs]);
 
