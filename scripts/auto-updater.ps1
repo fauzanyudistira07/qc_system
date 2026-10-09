@@ -37,10 +37,16 @@ while ($true) {
 
             Write-Host "[$Timestamp] SUKSES! Server QC Maestro berhasil diupdate & siap melayani." -ForegroundColor Green
             Write-Host "----------------------------------------------------------" -ForegroundColor DarkGray
+
+            # Kirim notifikasi WhatsApp via Fonnte
+            $author = (git log -1 --pretty=format:"%an" origin/$Branch 2>$null).Trim()
+            $cleanMsg = (git log -1 --pretty=format:"%s" origin/$Branch 2>$null).Trim()
+            node "scripts\notify-deploy-wa.mjs" --sha "$RemoteHash" --msg "$cleanMsg" --author "$author" --status "success"
         }
     }
     catch {
         Write-Warning "Peringatan saat memeriksa pembaruan: $_"
+        node "scripts\notify-deploy-wa.mjs" --sha "$RemoteHash" --msg "Error pada watcher" --status "failed" --details "$_"
     }
 
     Start-Sleep -Seconds $IntervalSeconds

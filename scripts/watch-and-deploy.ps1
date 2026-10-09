@@ -43,10 +43,16 @@ while ($true) {
             git pull origin main
 
             # 2. Pastikan kontainer infrastruktur tetap sehat
-            Write-Host "`n[2/2] Memastikan kontainer database & cache aktif..." -ForegroundColor Cyan
+            Write-Host "`n[2/3] Memastikan kontainer database & cache aktif..." -ForegroundColor Cyan
             docker compose -f infrastructure\compose\docker-compose.yml up -d
             Write-Host "`n[SUCCESS] Server QC Maestro berhasil diperbarui ke commit terbaru ($remoteSha)!" -ForegroundColor Green
             Write-Host "Perubahan kode langsung aktif via hot-reload dev server.`n" -ForegroundColor Green
+
+            # 3. Kirim notifikasi WhatsApp
+            Write-Host "[3/3] Mengirim konfirmasi pembaruan ke WhatsApp..." -ForegroundColor Cyan
+            $author = (git log -1 --pretty=format:"%an" origin/main 2>$null).Trim()
+            $cleanMsg = (git log -1 --pretty=format:"%s" origin/main 2>$null).Trim()
+            node "scripts\notify-deploy-wa.mjs" --sha "$remoteSha" --msg "$cleanMsg" --author "$author" --status "success"
         } else {
             # Idle heartbeat
             $timeNow = (Get-Date).ToString("HH:mm:ss")
@@ -55,6 +61,7 @@ while ($true) {
     }
     catch {
         Write-Host "`n[ERROR] Terjadi kendala saat memeriksa update: $_" -ForegroundColor Red
+        node "scripts\notify-deploy-wa.mjs" --sha "$remoteSha" --msg "$commitMsg" --status "failed" --details "$_"
     }
 
     Start-Sleep -Seconds $CheckIntervalSeconds
