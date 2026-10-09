@@ -120,59 +120,115 @@ async function ensureCloudflared(cloudflaredExe, toolsDir) {
   }
 }
 
-// 4. Main Process
+// Helper: Tunggu koneksi internet aktif (misal saat boot WiFi belum konek)
+async function waitForInternet() {
+  console.log('[TunnelNotifier] Memeriksa koneksi internet...');
+  while (true) {
+    try {
+      const res = await fetch('https://1.1.1.1', { signal: AbortSignal.timeout(3000) });
+      if (res.ok || res.status) {
+        console.log('[TunnelNotifier] Koneksi internet AKTIF.');
+        return;
+      }
+    } catch (_) {
+      console.log('[TunnelNotifier] Menunggu koneksi internet aktif (WiFi menyambung)... coba lagi dalam 3 detik.');
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+}
+
+// Helper: Tunggu Web Server siap listening di port target
+async function waitForPort(port) {
+  console.log(`[TunnelNotifier] Memeriksa kesiapan Web Server di port ${port}...`);
+  const startTime = Date.now();
+  while (Date.now() - startTime < 180000) { // maksimal 3 menit
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(2000) });
+      if (res.status >= 200 && res.status < 500) {
+        console.log(`[TunnelNotifier] Web Server di port ${port} SIAP dan merespons.`);
+        return true;
+      }
+    } catch (_) {
+      // server belum listening
+    }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  console.log(`[TunnelNotifier] Web Server port ${port} belum merespons, tetap melanjutkan tunnel...`);
+  return false;
+}
+
+// 4. Main Process dengan Auto-Restart Loop
+async function runTunnelSession(cloudflaredExe, env, localIp) {
+  return new Promise((resolve) => {
+    console.log(`[TunnelNotifier] Membuka Cloudflare Tunnel ke http://127.0.0.1:${env.PORT}...`);
+    
+    const tunnelProc = spawn(cloudflaredExe, [
+      'tunnel',
+      '--protocol', 'http2',
+      '--url', `http://127.0.0.1:${env.PORT}`
+    ]);
+
+    let currentTunnelUrl = null;
+
+    const handleOutput = (data) => {
+      const text = data.toString();
+      process.stdout.write(text);
+
+      const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
+      if (match && match[0]) {
+        const publicUrl = match[0];
+        if (publicUrl !== currentTunnelUrl) {
+          currentTunnelUrl = publicUrl;
+          console.log('\n======================================================');
+          console.log(`[TunnelNotifier] URL TUNNEL AKTIF: ${publicUrl}`);
+          console.log('======================================================\n');
+
+          fs.writeFileSync(path.join(rootDir, 'active-tunnel-url.txt'), publicUrl, 'utf8');
+          sendWhatsAppNotification(env.FONNTE_TOKEN, env.FONNTE_TARGET, publicUrl, localIp);
+        }
+      }
+    };
+
+    tunnelProc.stdout.on('data', handleOutput);
+    tunnelProc.stderr.on('data', handleOutput);
+
+    tunnelProc.on('close', (code) => {
+      console.log(`[TunnelNotifier] Cloudflared terhenti (exit code: ${code}). Mengulang dalam 5 detik...`);
+      resolve(code);
+    });
+
+    tunnelProc.on('error', (err) => {
+      console.error('[TunnelNotifier] Error proses cloudflared:', err.message);
+      resolve(1);
+    });
+  });
+}
+
 async function main() {
   const env = loadEnv();
-  const localIp = getLocalIp();
   const toolsDir = path.join(rootDir, 'tools');
   const cloudflaredExe = path.join(toolsDir, 'cloudflared.exe');
 
+  // 1. Tunggu internet
+  await waitForInternet();
+
+  // 2. Pastikan file executable cloudflared ada
   const ready = await ensureCloudflared(cloudflaredExe, toolsDir);
   if (!ready) {
-    console.error(`[TunnelNotifier] cloudflared.exe tidak siap.`);
+    console.error(`[TunnelNotifier] Gagal menyiapkan cloudflared.exe`);
     process.exit(1);
   }
 
-  console.log(`[TunnelNotifier] Menjalankan Cloudflare Tunnel ke http://127.0.0.1:${env.PORT}...`);
-  console.log(`[TunnelNotifier] IP LAN Terdeteksi: http://${localIp}:${env.PORT}`);
+  // 3. Tunggu web server listening di port 4180
+  await waitForPort(env.PORT);
 
-  const tunnelProc = spawn(cloudflaredExe, [
-    'tunnel',
-    '--protocol', 'http2',
-    '--url', `http://127.0.0.1:${env.PORT}`
-  ]);
-
-  let currentTunnelUrl = null;
-
-  const handleOutput = (data) => {
-    const text = data.toString();
-    process.stdout.write(text);
-
-    // Cari pola URL *.trycloudflare.com
-    const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
-    if (match && match[0]) {
-      const publicUrl = match[0];
-      if (publicUrl !== currentTunnelUrl) {
-        currentTunnelUrl = publicUrl;
-        console.log('\n======================================================');
-        console.log(`[TunnelNotifier] URL TUNNEL AKTIF: ${publicUrl}`);
-        console.log('======================================================\n');
-
-        // Simpan ke file teks untuk referensi lokal
-        fs.writeFileSync(path.join(rootDir, 'active-tunnel-url.txt'), publicUrl, 'utf8');
-
-        // Kirim WhatsApp
-        sendWhatsAppNotification(env.FONNTE_TOKEN, env.FONNTE_TARGET, publicUrl, localIp);
-      }
-    }
-  };
-
-  tunnelProc.stdout.on('data', handleOutput);
-  tunnelProc.stderr.on('data', handleOutput);
-
-  tunnelProc.on('close', (code) => {
-    console.log(`[TunnelNotifier] Cloudflared process exit with code ${code}`);
-  });
+  // 4. Loop abadi (jika mati atau koneksi putus, otomatis hidup lagi!)
+  while (true) {
+    const localIp = getLocalIp();
+    console.log(`[TunnelNotifier] IP LAN Terdeteksi: http://${localIp}:${env.PORT}`);
+    await runTunnelSession(cloudflaredExe, env, localIp);
+    await new Promise(r => setTimeout(r, 5000));
+  }
 }
 
 main().catch(console.error);

@@ -68,6 +68,10 @@ Write-StatusItem -Name "Web Dashboard UI (Port 4180)" -IsOk $webOk -Details $(if
 
 # 5. Cloudflare Tunnel
 $tunnelProc = Get-Process cloudflared -ErrorAction SilentlyContinue
+if (-not $tunnelProc) {
+    $notifier = Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like "*tunnel-notifier.mjs*" }
+    if ($notifier) { $tunnelProc = $notifier }
+}
 $tunnelOk = ($tunnelProc -ne $null)
 $tunnelUrl = ""
 $urlFile = Join-Path $PSScriptRoot "..\active-tunnel-url.txt"
