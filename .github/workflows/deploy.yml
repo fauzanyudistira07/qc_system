@@ -1,0 +1,15 @@
+name: Deploy to Self-Hosted Server
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy Docker Compose
+        run: docker compose up -d --build
