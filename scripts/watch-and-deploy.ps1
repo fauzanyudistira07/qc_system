@@ -45,9 +45,14 @@ while ($true) {
             # 2. Rebuild & Restart Docker Containers
             Write-Host "`n[2/2] Memperbarui container Docker (docker compose up -d --build)..." -ForegroundColor Cyan
             docker compose up -d --build
-
-            Write-Host "`n[SUCCESS] Server QC Maestro berhasil diperbarui ke commit terbaru ($remoteSha)!" -ForegroundColor Green
-            Write-Host "Kontainer web & API sudah live dengan kode teranyar.`n" -ForegroundColor Green
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "`n[WARNING] Docker compose build gagal (mungkin DNS Docker Desktop bermasalah)." -ForegroundColor Yellow
+                Write-Host "Mencoba menyalakan container yang ada tanpa rebuild..." -ForegroundColor Yellow
+                docker compose up -d
+            } else {
+                Write-Host "`n[SUCCESS] Server QC Maestro berhasil diperbarui ke commit terbaru ($remoteSha)!" -ForegroundColor Green
+                Write-Host "Kontainer web & API sudah live dengan kode teranyar.`n" -ForegroundColor Green
+            }
         } else {
             # Idle heartbeat
             $timeNow = (Get-Date).ToString("HH:mm:ss")
