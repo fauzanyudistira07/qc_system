@@ -1381,28 +1381,7 @@ export class DiscoveryService {
         }
 
         if (!targetAlreadyRunning) {
-          // Probe common alternate local ports if configured port is down
-          const candidatePorts = [5000, 5001, 5173, 5174, 8000, 3000, 8080, 4173];
-          const configuredPort = Number(new URL(config.baseUrl).port);
-          for (const port of candidatePorts) {
-            if (port === configuredPort) continue;
-            try {
-              const testUrl = `http://127.0.0.1:${port}`;
-              const res = await fetch(testUrl, { signal: AbortSignal.timeout(1500) });
-              if (res.ok || res.status < 500) {
-                this.addLog(job, 'runtime', `⚠️ [PORT ADAPTASI] Target URL ${config.baseUrl} tidak merespons, namun service aktif terdeteksi di ${testUrl}.`);
-                this.addLog(job, 'runtime', `✓ Mengalihkan target otomatis ke ${testUrl} agar pengujian dapat langsung berjalan.`);
-                config.baseUrl = testUrl;
-                targetBaseUrl = testUrl;
-                job.config.baseUrl = testUrl;
-                targetAlreadyRunning = true;
-                break;
-              }
-            } catch { /* continue */ }
-          }
-          if (!targetAlreadyRunning) {
-            this.addLog(job, 'runtime', `Target port ${config.baseUrl} belum aktif. Mempersiapkan runtime source.`);
-          }
+          this.addLog(job, 'runtime', `Target port ${config.baseUrl} belum aktif. Mempersiapkan runtime source dari repository...`);
         }
         if (!targetAlreadyRunning) {
         const sourceType = config.sourceType ?? (config.localPath || (config.repositoryUrl && !config.repositoryUrl.startsWith('http')) ? 'local-folder' : 'github');
