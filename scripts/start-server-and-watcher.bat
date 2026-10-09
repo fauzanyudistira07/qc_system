@@ -14,6 +14,6 @@ start /b "" cmd /c "npm run dev"
 echo [%DATE% %TIME%] Menjalankan Cloudflare Tunnel & WhatsApp Notifier...
 start /b "" node "%~dp0tunnel-notifier.mjs"
 
-:: 4. Jalankan Auto-Update Watcher
+:: 4. Jalankan Auto-Update Watcher di background
 echo [%DATE% %TIME%] Menjalankan Auto-Update Watcher...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0watch-and-deploy.ps1"
+start /b "" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0watch-and-deploy.ps1"

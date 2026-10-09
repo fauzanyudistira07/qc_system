@@ -12,8 +12,8 @@ const rootDir = path.resolve(__dirname, '..');
 function loadEnv() {
   const envPath = path.join(rootDir, '.env');
   const config = {
-    FONNTE_TOKEN: '',
-    FONNTE_TARGET: '',
+    FONNTE_TOKEN: 'eE8DG7vGPArkv1SewzJd',
+    FONNTE_TARGET: '08882017549',
     PORT: '4180'
   };
 
@@ -26,7 +26,7 @@ function loadEnv() {
       if (idx !== -1) {
         const key = trimmed.slice(0, idx).trim();
         const val = trimmed.slice(idx + 1).trim();
-        if (key in config) {
+        if (key in config && val) {
           config[key] = val;
         }
       }
@@ -96,6 +96,30 @@ Waktu: ${now} WIB`;
   }
 }
 
+// Helper: Download cloudflared.exe jika belum ada di laptop server
+async function ensureCloudflared(cloudflaredExe, toolsDir) {
+  if (fs.existsSync(cloudflaredExe)) return true;
+
+  if (!fs.existsSync(toolsDir)) {
+    fs.mkdirSync(toolsDir, { recursive: true });
+  }
+
+  console.log('[TunnelNotifier] cloudflared.exe belum ada di server. Mengunduh otomatis dari Cloudflare GitHub...');
+  const downloadUrl = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe';
+
+  try {
+    const res = await fetch(downloadUrl, { redirect: 'follow' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const buffer = await res.arrayBuffer();
+    fs.writeFileSync(cloudflaredExe, Buffer.from(buffer));
+    console.log('[TunnelNotifier] Unduhan cloudflared.exe berhasil!');
+    return true;
+  } catch (err) {
+    console.error('[TunnelNotifier] Gagal mengunduh cloudflared.exe otomatis:', err.message);
+    return false;
+  }
+}
+
 // 4. Main Process
 async function main() {
   const env = loadEnv();
@@ -103,8 +127,9 @@ async function main() {
   const toolsDir = path.join(rootDir, 'tools');
   const cloudflaredExe = path.join(toolsDir, 'cloudflared.exe');
 
-  if (!fs.existsSync(cloudflaredExe)) {
-    console.error(`[TunnelNotifier] cloudflared.exe tidak ditemukan di ${cloudflaredExe}`);
+  const ready = await ensureCloudflared(cloudflaredExe, toolsDir);
+  if (!ready) {
+    console.error(`[TunnelNotifier] cloudflared.exe tidak siap.`);
     process.exit(1);
   }
 
