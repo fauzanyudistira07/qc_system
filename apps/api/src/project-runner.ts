@@ -145,20 +145,17 @@ async function findManifestDirectories(sourceDir: string, filename: string, maxD
   return directories;
 }
 
-export function serverPort(port: number, fallback = 5000): number {
-  if (Number.isInteger(port) && port >= 5000 && port <= 6000) return port;
-  // Map any outside port into 5000-6000 range
-  const mapped = 5000 + (Math.abs(port) % 1001);
-  return mapped >= 5000 && mapped <= 6000 ? mapped : fallback;
+export function serverPort(port: number, fallback = 3000): number {
+  if (Number.isInteger(port) && port >= 1024 && port <= 65535) return port;
+  return fallback;
 }
 
-function basePort(baseUrl: string, fallback: number, enforceServerRange = true) {
+function basePort(baseUrl: string, fallback: number, _enforceServerRange = false) {
   try {
-    const raw = Number(new URL(baseUrl).port) || fallback;
-    return enforceServerRange ? serverPort(raw, fallback) : raw;
-  } catch {
-    return enforceServerRange ? serverPort(fallback, fallback) : fallback;
-  }
+    const raw = Number(new URL(baseUrl).port);
+    if (raw && raw >= 1024 && raw <= 65535) return raw;
+  } catch {}
+  return fallback;
 }
 
 function isLaravelPreset(service: ManagedService) {
@@ -226,7 +223,7 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
       workingDir: relativeWorkingDir(sourceDir, directory),
       installCommand,
       startCommand,
-      healthCheck: laravelDirs.length > 0 ? '' : project.baseUrl,
+      healthCheck: laravelDirs.length > 0 ? '' : (port ? `http://127.0.0.1:${port}` : project.baseUrl),
       port,
       runtimeImage: detectedNode.recommendedImage,
       dependsOn: laravelDirs.length > 0 ? laravelDirs.map((directory) => `laravel-${serviceSlug(sourceDir, directory)}`) : []
@@ -715,8 +712,13 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
       if (child.spawnError) throw new Error(`sandbox service ${service.name} tidak dapat dijalankan: ${redact(child.spawnError.message, projectSecrets)}`);
       if (child.exitCode !== null) throw new Error(`service ${service.name} berhenti dengan exit code ${child.exitCode}`);
       updateService(service, 'RUNNING');
+      const port = containerPort(service);
       if (service.healthCheck.trim()) {
-        await waitForHealth(service.healthCheck, healthTimeout, (message) => hooks.update({ message: `${service.name}: ${message}` }));
+        const checkUrl = port ? service.healthCheck.replace(/:\d+/, `:${port}`) : service.healthCheck;
+        await waitForHealth(checkUrl, healthTimeout, (message) => hooks.update({ message: `${service.name}: ${message}` }));
+        if (service.kind === 'frontend' || service.name === 'node-app' || service.id === 'node-app') {
+          project.baseUrl = port ? project.baseUrl.replace(/:\d+/, `:${port}`) : project.baseUrl;
+        }
       }
       updateService(service, 'PASSED');
     }
