@@ -21,6 +21,9 @@
     "build": "npm run build --workspace @qc/web",
     "validate:example": "tsx packages/flow-schema/src/cli.ts docs/examples/login.yaml",
     "playwright:install": "playwright install chromium",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
     "infra:up": "docker compose -f infrastructure/compose/docker-compose.yml up -d",
     "infra:down": "docker compose -f infrastructure/compose/docker-compose.yml down",
     "seed:jamaahku": "node scripts/seed-jamaahku.mjs"

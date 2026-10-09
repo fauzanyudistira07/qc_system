@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: qc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: qc
+      POSTGRES_PASSWORD: qc_dev_password
+      POSTGRES_DB: qc_maestro
+    ports:
+      - "0.0.0.0:5432:5432"
+    volumes:
+      - qc-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qc -d qc_maestro"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: qc-redis
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:6379:6379"
+    volumes:
+      - qc-redis:/data
+
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    container_name: qc-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: qcadmin
+      MINIO_ROOT_PASSWORD: qc_dev_minio_password
+    ports:
+      - "0.0.0.0:9000:9000"
+      - "0.0.0.0:9001:9001"
+    volumes:
+      - qc-minio:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: qc-api
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:4100:4100"
+    environment:
+      QC_API_PORT: 4100
+      QC_API_HOST: "0.0.0.0"
+      DATABASE_URL: "postgresql://qc:qc_dev_password@postgres:5432/qc_maestro"
+      REDIS_URL: "redis://redis:6379"
+      ARTIFACT_ROOT: "/app/.qc-artifacts"
+      QC_ADMIN_ENABLED: "true"
+      QC_ADMIN_EMAIL: "admin@qcmaestro.com"
+      QC_ADMIN_PASSWORD: "admin12345"
+      QC_ADMIN_SECRET: "qc_maestro_super_secret_staging_jwt_key_2026"
+    volumes:
+      - ./.qc-artifacts:/app/.qc-artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: qc-web
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:4180:4180"
+    depends_on:
+      - api
+
+volumes:
+  qc-postgres:
+  qc-redis:
+  qc-minio:

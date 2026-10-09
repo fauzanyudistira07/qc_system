@@ -191,31 +191,10 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
     return androidFlows;
   }
   const flows: GeneratedFlow[] = [];
-  const rules = config.rules;
+  const rules: Partial<DiscoveryConfig['rules']> = config.rules || {};
   const capabilityProfile = inventory.capabilities ?? detectCapabilities({ pages: inventory.pages, routes: inventory.routes, api: inventory.api });
   const authenticationDetected = capabilityProfile.capabilities.some((capability) => capability.id === 'authentication');
-  const loginSteps = (): FlowStep[] => authenticationDetected && rules.loginPath && rules.emailSelector && rules.passwordSelector && rules.submitSelector && rules.successUrl ? [
-    { id: 'login-page', action: 'open', url: rules.loginPath },
-    { id: 'login-email', action: 'input', target: { selector: rules.emailSelector }, value: '${QC_EMAIL}' },
-    { id: 'login-password', action: 'input', target: { selector: rules.passwordSelector }, value: '${QC_PASSWORD}' },
-    { id: 'login-submit', action: 'click', target: { selector: rules.submitSelector } },
-    { id: 'login-success', action: 'assertUrl', value: rules.successUrl },
-    { id: 'login-screenshot', action: 'screenshot', name: 'dashboard-after-login' }
-  ] : [];
-  const defaultVars: Record<string, string> = {};
-  if (config.accounts && config.accounts.length > 0) {
-    defaultVars.QC_EMAIL = config.accounts[0].email;
-    defaultVars.QC_PASSWORD = config.accounts[0].password;
-  }
-  const toSource = (name: string, steps: FlowStep[]) => stringify({
-    schemaVersion: '1.0',
-    name,
-    target: { platform: 'web', baseUrl: config.baseUrl },
-    variables: defaultVars,
-    execution: { timeoutMs: 45000, retries: 0, screenshot: 'always', trace: 'retain-on-failure', video: 'on' },
-    steps
-  });
-
+  
   // ── Ambil route statis dari inventory routes & pages ──────────────────────
   const allRoutes = new Set<string>();
   if (inventory.routes) {
@@ -234,8 +213,41 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
   }
   const staticRoutes = Array.from(allRoutes);
 
+  const loginPath = rules.loginPath || '/login';
+  const emailSelector = rules.emailSelector || "input[name='email'], #email, input[type='email'], input[name='username']";
+  const passwordSelector = rules.passwordSelector || "input[name='password'], #password, input[type='password']";
+  const submitSelector = rules.submitSelector || "button[type='submit'], .btn-primary, button:has-text('Masuk'), button:has-text('Login')";
+  const successUrl = rules.successUrl || '/dashboard';
+
+  const hasAuthNeed = authenticationDetected ||
+    staticRoutes.some(r => /login|auth|dashboard|admin|user/i.test(r)) ||
+    Boolean(config.accounts && config.accounts.length > 0);
+
+  const loginSteps = (): FlowStep[] => hasAuthNeed ? [
+    { id: 'login-page', action: 'open', url: loginPath },
+    { id: 'login-email', action: 'input', target: { selector: emailSelector }, value: '${QC_EMAIL}' },
+    { id: 'login-password', action: 'input', target: { selector: passwordSelector }, value: '${QC_PASSWORD}' },
+    { id: 'login-submit', action: 'click', target: { selector: submitSelector } },
+    { id: 'login-success', action: 'assertUrl', value: successUrl },
+    { id: 'login-screenshot', action: 'screenshot', name: 'dashboard-after-login' }
+  ] : [];
+
+  const defaultVars: Record<string, string> = {
+    QC_EMAIL: config.accounts?.[0]?.email || 'admin@zannora.com',
+    QC_PASSWORD: config.accounts?.[0]?.password || 'password'
+  };
+
+  const toSource = (name: string, steps: FlowStep[]) => stringify({
+    schemaVersion: '1.0',
+    name,
+    target: { platform: 'web', baseUrl: config.baseUrl },
+    variables: defaultVars,
+    execution: { timeoutMs: 45000, retries: 0, screenshot: 'always', trace: 'retain-on-failure', video: 'on' },
+    steps
+  });
+
   // Filter kategori
-  const publicRoutes = staticRoutes.filter(r => /^\/(?:about|contact|flights|home|info|search|pricing|faq)?$/i.test(r) && r !== rules.loginPath);
+  const publicRoutes = staticRoutes.filter(r => /^\/(?:about|contact|flights|home|info|search|pricing|faq)?$/i.test(r) && r !== loginPath);
   const adminResourceRoutes = staticRoutes.filter(r => /^\/admin\/(?:airlines|airplanes|airports|flights|seats|masters?)/i.test(r));
   const adminOpsRoutes = staticRoutes.filter(r => /^\/admin\/(?:bookings|payments|tickets|users|reports|contact-messages|profile)/i.test(r));
   const customerRoutes = staticRoutes.filter(r => /^\/(?:user\/dashboard|my-bookings|booking|passengers|notifications|tickets)/i.test(r));
@@ -273,7 +285,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
   }
 
   // ── Flow 3: Eksplorasi Data Master & Armada (Admin) ────────────────────────
-  if (!inventory.capabilities && loginSteps().length && adminResourceRoutes.length > 0) {
+  if (loginSteps().length && adminResourceRoutes.length > 0) {
     const masterSteps: FlowStep[] = [...loginSteps()];
     const selectedMasters = adminResourceRoutes.slice(0, 4);
     for (const [idx, r] of selectedMasters.entries()) {
@@ -293,7 +305,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
   }
 
   // ── Flow 4: Manajemen Operasional, Transaksi & Laporan (Admin) ─────────────
-  if (!inventory.capabilities && loginSteps().length && adminOpsRoutes.length > 0) {
+  if (loginSteps().length && adminOpsRoutes.length > 0) {
     const opsSteps: FlowStep[] = [...loginSteps()];
     const selectedOps = adminOpsRoutes.slice(0, 4);
     for (const [idx, r] of selectedOps.entries()) {
@@ -313,7 +325,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
   }
 
   // ── Flow 5: Eksplorasi Layanan Pelanggan (Customer / User) ────────────────
-  if (!inventory.capabilities && loginSteps().length && customerRoutes.length > 0) {
+  if (loginSteps().length && customerRoutes.length > 0) {
     const custSteps: FlowStep[] = [...loginSteps()];
     const selectedCust = customerRoutes.slice(0, 4);
     for (const [idx, r] of selectedCust.entries()) {
@@ -340,7 +352,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
   for (const capability of capabilityProfile.capabilities) {
     if (generatedCapabilityIds.has(capability.id)) continue;
     const routes = [...new Set(capability.evidence.routes)]
-      .filter((route) => route.startsWith('/') && !route.includes('{') && !/\/api(?:\/|$)/i.test(route) && route !== rules.loginPath)
+      .filter((route) => route.startsWith('/') && !route.includes('{') && !/\/api(?:\/|$)/i.test(route) && route !== loginPath)
       .slice(0, 8);
     if (!routes.length) continue;
     const slug = capability.id.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');

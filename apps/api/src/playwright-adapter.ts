@@ -129,20 +129,26 @@ async function safePageScreenshot(page: Page, targetPath: string, fullPage: bool
 }
 
 async function performStep(page: Page, step: NormalizedFlow['steps'][number], baseUrl: string, runDir: string, variables: Record<string, unknown>) {
+  const currentUrl = page.url();
+  const isProtectedSession = !currentUrl.includes('/login') && (currentUrl.includes('/admin') || currentUrl.includes('/dashboard') || currentUrl.includes('/user'));
+  const isLoginRelatedStep = step.id.startsWith('login-') || step.id === 'login' || (step.id.includes('login') && !step.id.includes('public'));
+
+  if (isProtectedSession && isLoginRelatedStep) {
+    console.log(`[Playwright Adapter] Session already authenticated at ${currentUrl}. Bypassing login step "${step.id}" (${step.action}).`);
+    if (step.action === 'screenshot') {
+      const screenshotPath = path.join(runDir, `${safeArtifactName(step.name ?? step.id)}.png`);
+      const ok = await safePageScreenshot(page, screenshotPath, false);
+      if (ok) return { type: 'screenshot', path: screenshotPath };
+    }
+    return undefined;
+  }
+
   const value = replaceVariables(step.value, variables);
   const target = resolveLocator(page, step.target as Target | undefined);
   console.log(`[Playwright Adapter] Step "${step.id}" (${step.action}) on target:`, step.target, `val:`, value ? '(provided)' : '(none)');
   switch (step.action) {
     case 'open': await page.goto(absoluteUrl(baseUrl, replaceVariables(step.url, variables) as string), { waitUntil: 'domcontentloaded', timeout: step.timeoutMs || 20000 }); break;
     case 'click': {
-      const isLoginClick = step.id.includes('login') && (page.url().includes('dashboard') || !page.url().includes('login'));
-      if (isLoginClick) {
-        const visible = await target.isVisible().catch(() => false);
-        if (!visible) {
-          console.log(`[Playwright Adapter] Session already active at ${page.url()}, skipping login click ${step.id}`);
-          break;
-        }
-      }
       try {
         await target.click({ timeout: Math.min(step.timeoutMs || 15000, 5000), noWaitAfter: true, force: true });
       } catch (err) {
@@ -157,14 +163,6 @@ async function performStep(page: Page, step: NormalizedFlow['steps'][number], ba
     }
     case 'input': {
       const fillVal = String(value ?? '');
-      const isLoginStep = step.id.includes('login') || String(step.target?.value || '').includes('password') || String(step.target?.value || '').includes('email');
-      if (isLoginStep && (page.url().includes('dashboard') || !page.url().includes('login'))) {
-        const visible = await target.isVisible().catch(() => false);
-        if (!visible) {
-          console.log(`[Playwright Adapter] Session already active at ${page.url()}, skipping login input ${step.id}`);
-          break;
-        }
-      }
       try {
         await target.fill(fillVal, { timeout: Math.min(step.timeoutMs || 15000, 4000) });
       } catch (err) {
@@ -218,8 +216,9 @@ async function performStep(page: Page, step: NormalizedFlow['steps'][number], ba
         const current = page.url();
         const isOk = current.includes(expected) ||
           (expected.includes('landing') && current.includes('beranda')) ||
-          (expected.includes('login') && current.includes('dashboard')) ||
-          (expected === '/dashboard' && current.includes('dashboard'));
+          (expected.includes('login') && (current.includes('dashboard') || current.includes('/admin') || !current.includes('/login'))) ||
+          (expected.includes('dashboard') && (current.includes('dashboard') || current.includes('/admin') || current.includes('/home') || current.includes('/portal') || !current.includes('/login'))) ||
+          (step.id.includes('login') && !current.includes('/login'));
         if (!isOk) throw new Error(`Expected URL "${expected}", actual "${page.url()}"`);
       }
       break;

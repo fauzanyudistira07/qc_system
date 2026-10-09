@@ -28,7 +28,7 @@ import { isAuthEnabled, getAdminConfig, verifyAdminCredentials, createToken, ver
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '../../..');
 const port = Number(process.env.QC_API_PORT ?? 4100);
-const host = process.env.QC_API_HOST ?? '127.0.0.1';
+const host = process.env.QC_API_HOST ?? '0.0.0.0';
 const artifactRoot = path.resolve(root, process.env.ARTIFACT_ROOT ?? '.qc-artifacts');
 const discoveryService = new DiscoveryService(artifactRoot, root); // active discovery service v2
 const retention = runtimePolicy();

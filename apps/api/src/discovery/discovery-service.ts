@@ -187,11 +187,15 @@ export class DiscoveryService {
     void this.persist();
     void this.writeWorkspaceSnapshot(job);
     if (job.businessFlowMap.status === 'APPROVED') {
+      job.config.executeFlows = true;
+      job.flows.forEach((flow) => {
+        flow.status = 'READY';
+      });
       const waiter = this.businessFlowWaiters.get(id);
       if (waiter) {
         waiter.resolve();
         this.businessFlowWaiters.delete(id);
-      } else if (job.status === 'WAITING_REVIEW' || job.phase === 'BUSINESS_FLOW_REVIEW') {
+      } else if (job.status === 'WAITING_REVIEW' || job.phase === 'BUSINESS_FLOW_REVIEW' || job.status === 'COMPLETED') {
         job.status = 'RUNNING';
         job.phase = 'EXECUTING_TESTS';
         job.progress = 90;
@@ -599,6 +603,8 @@ export class DiscoveryService {
       }
       const normalized = validation.normalized;
       const runtimeAccount = job.config.accounts?.[0];
+      const effectivePassword = runtimePassword || this.runtimeAuditPasswords.get(id) || (runtimeAccount as any)?.password || 'password';
+      const effectiveEmail = runtimeAccount?.email || 'admin@zannora.com';
       const executableFlow = {
         ...normalized,
         ...(normalized.target.platform === 'web' ? {
@@ -609,8 +615,8 @@ export class DiscoveryService {
         } : {}),
         variables: {
           ...normalized.variables,
-          ...(runtimeAccount?.email ? { QC_EMAIL: runtimeAccount.email } : {}),
-          ...(runtimePassword ? { QC_PASSWORD: runtimePassword } : {}),
+          QC_EMAIL: effectiveEmail,
+          QC_PASSWORD: effectivePassword,
         },
       };
       const runId = `run-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
