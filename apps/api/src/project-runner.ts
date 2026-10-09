@@ -1,10 +1,32 @@
 import childProcess, { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { NormalizedFlow } from '@qc/flow-schema';
 import { executeWebFlow, type RunStepResult, type WebRunResult } from './playwright-adapter.ts';
 import { detectProjectRuntime, ensureRuntimeImage } from './runtimes/index.ts';
+
+export function resolveGitToken(root?: string): string | undefined {
+  if (process.env.GITHUB_TOKEN?.trim()) return process.env.GITHUB_TOKEN.trim();
+  if (process.env.GH_TOKEN?.trim()) return process.env.GH_TOKEN.trim();
+  const searchDirs = [root, process.cwd(), path.resolve(process.cwd(), '..'), path.resolve(process.cwd(), '../..')].filter(Boolean) as string[];
+  for (const dir of searchDirs) {
+    try {
+      const envPath = path.join(dir, '.env');
+      if (existsSync(envPath)) {
+        const text = readFileSync(envPath, 'utf8');
+        const match = text.match(/^\s*(?:GITHUB_TOKEN|GH_TOKEN)\s*=\s*(["']?)(.*?)\1\s*$/m);
+        if (match && match[2]?.trim()) {
+          const found = match[2].trim();
+          process.env.GITHUB_TOKEN = found;
+          return found;
+        }
+      }
+    } catch {}
+  }
+  return undefined;
+}
 
 export type ManagedService = {
   id: string;
@@ -256,8 +278,19 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
 }
 
 export async function cloneRepository(repositoryUrl: string, ref: string, sourceDir: string, root: string, env: NodeJS.ProcessEnv, gitToken: string | undefined, onOutput: (message: string) => void) {
+  const token = gitToken || resolveGitToken(root);
   const isGitRepo = await exists(path.join(sourceDir, '.git'));
   let gitEnv = env;
+  if (token) {
+    gitEnv = {
+      ...env,
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
+      GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
+    };
+  }
+  const secrets = token ? [token] : [];
   if (isGitRepo) {
     onOutput('Repository sudah ada di workspace; memperbarui referensi dari origin…');
     await runProcess('git', ['fetch', '--depth', '1', 'origin', ref], { cwd: sourceDir, env: gitEnv, commandLabel: 'git fetch ref', timeoutMs: 120_000, onOutput });
@@ -271,7 +304,10 @@ export async function cloneRepository(repositoryUrl: string, ref: string, source
       }
     });
   }
-  const args = ['clone', '--depth', '1', '--filter=blob:none', '--no-tags', repositoryUrl, sourceDir];
+  const cloneTargetUrl = token && repositoryUrl.startsWith('https://github.com/')
+    ? repositoryUrl.replace('https://github.com/', `https://x-access-token:${token}@github.com/`)
+    : repositoryUrl;
+  const args = ['clone', '--depth', '1', '--filter=blob:none', '--no-tags', cloneTargetUrl, sourceDir];
   try {
     await runProcess('git', args, { cwd: root, env, commandLabel: 'git clone', timeoutMs: 180_000, onOutput });
   } catch (error) {
@@ -510,7 +546,7 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
   };
   const env = makeRuntimeEnvironment(project.environment);
   const gitEnv: NodeJS.ProcessEnv = { ...env, GIT_TERMINAL_PROMPT: '0' };
-  const gitToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const gitToken = resolveGitToken(root);
   if (gitToken) {
     gitEnv.GIT_CONFIG_COUNT = '1';
     gitEnv.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
