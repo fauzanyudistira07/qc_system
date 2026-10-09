@@ -5955,21 +5955,21 @@ button.quiet:hover,
 }
 
 /* ==========================================================================
-   INCREMENTAL AUTONOMOUS QA ROOMS & TELEMETRY STYLES (Linear Method)
+   INCREMENTAL AUTONOMOUS QA ROOMS & TELEMETRY STYLES (Swiss Industrial Paper)
    ========================================================================== */
 
 .sidebar-run-entry.is-incremental-room {
-  border-left: 2px solid #35d0ba !important;
-  background: rgba(53, 208, 186, 0.04);
+  border-left: 2px solid #8E7C6C !important;
+  background: #FAF6F0;
 }
 
 .sidebar-run-entry.is-incremental-room:hover {
-  background: rgba(53, 208, 186, 0.08);
+  background: #F2ECE3;
 }
 
 .sidebar-run-entry.is-incremental-room.active {
-  background: rgba(53, 208, 186, 0.14) !important;
-  border-left-color: #35d0ba !important;
+  background: #EBE3D7 !important;
+  border-left-color: #211812 !important;
 }
 
 .incremental-tag {
@@ -5977,28 +5977,28 @@ button.quiet:hover,
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   font-weight: 700;
-  color: #35d0ba;
+  color: #8E7C6C;
   letter-spacing: 0.03em;
 }
 
 .impact-flows-count {
-  color: #35d0ba;
+  color: #2E7D32;
   font-weight: 600;
 }
 
-/* Incremental Room Telemetry Banner on Overview */
+/* Incremental Room Telemetry Banner on Overview (Swiss Industrial Theme) */
 .incremental-room-telemetry-banner {
   margin-bottom: 20px;
-  background: #0f1626;
-  border: 1px solid rgba(53, 208, 186, 0.35);
+  background: #FFFFFF;
+  border: 1px solid #D5C2AF;
   border-radius: 8px;
-  padding: 16px 20px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: 0 2px 8px rgba(70, 50, 35, 0.04);
+  overflow: hidden;
   animation: fadeInTelemetry 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes fadeInTelemetry {
-  from { opacity: 0; transform: translateY(-4px); }
+  from { opacity: 0; transform: translateY(-3px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -6006,9 +6006,9 @@ button.quiet:hover,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding-bottom: 12px;
-  margin-bottom: 14px;
+  background: #FAF6F0;
+  border-bottom: 1px solid #E4D7C8;
+  padding: 12px 18px;
 }
 
 .telemetry-banner-title {
@@ -6018,42 +6018,43 @@ button.quiet:hover,
 }
 
 .telemetry-pulse-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #35d0ba;
-  box-shadow: 0 0 8px #35d0ba;
+  background: #16A34A;
+  box-shadow: 0 0 6px rgba(22, 163, 74, 0.5);
   animation: pulseDot 2s infinite ease-in-out;
 }
 
 @keyframes pulseDot {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
+  50% { opacity: 0.6; transform: scale(0.85); }
 }
 
 .telemetry-banner-badge {
+  font-family: var(--font-mono, monospace);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 750;
   letter-spacing: 0.06em;
-  color: #35d0ba;
+  color: #211812;
   text-transform: uppercase;
 }
 
 .telemetry-commit-pill {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   padding: 2px 7px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #f1f5f9;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #EFE8DE;
+  color: #211812;
+  border: 1px solid #D5C2AF;
 }
 
 .telemetry-branch-tag {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: #94a3b8;
+  color: #6B5D52;
 }
 
 .telemetry-btn-parent-jump {
@@ -6062,61 +6063,66 @@ button.quiet:hover,
   gap: 6px;
   padding: 6px 12px;
   font-size: 12px;
-  font-weight: 600;
-  color: #cbd5e1;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-weight: 650;
+  color: #211812;
+  background: #FFFFFF;
+  border: 1px solid #D5C2AF;
   border-radius: 6px;
   cursor: pointer;
   transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .telemetry-btn-parent-jump:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
+  background: #F4EDE3;
+  border-color: #8E7C6C;
   transform: translateY(-1px);
 }
 
 .telemetry-banner-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  padding: 16px 20px;
 }
 
 .telemetry-commit-message {
   font-size: 13.5px;
-  color: #e2e8f0;
+  color: #14181D;
   line-height: 1.5;
+  background: #FCFAF7;
+  border: 1px dashed #D5C2AF;
+  border-radius: 6px;
+  padding: 10px 14px;
 }
 
 .telemetry-author {
   margin-left: 10px;
   font-size: 12px;
-  color: #94a3b8;
+  color: #6B5D52;
 }
 
 .telemetry-grid-details {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 14px;
-  padding-top: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
 }
 
 .telemetry-detail-cell {
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #FAF6F0;
+  border: 1px solid #E4D7C8;
   border-radius: 6px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .telemetry-cell-label {
+  font-family: var(--font-mono, monospace);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 750;
   letter-spacing: 0.06em;
-  color: #64748b;
+  color: #8E7C6C;
   text-transform: uppercase;
 }
 
@@ -6129,17 +6135,17 @@ button.quiet:hover,
 .telemetry-tag-module {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: rgba(53, 208, 186, 0.15);
-  color: #35d0ba;
-  border: 1px solid rgba(53, 208, 186, 0.3);
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #EAE2D5;
+  color: #211812;
+  border: 1px solid #D5C2AF;
 }
 
 .telemetry-tag-muted {
-  font-size: 11px;
-  color: #64748b;
+  font-size: 11.5px;
+  color: #8E7C6C;
   font-style: italic;
 }
 
@@ -6153,42 +6159,252 @@ button.quiet:hover,
 .telemetry-file-code {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  padding: 1px 6px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 2px 7px;
+  background: #FFFFFF;
+  border: 1px solid #D5C2AF;
   border-radius: 4px;
-  color: #cbd5e1;
+  color: #14181D;
 }
 
 .telemetry-more-files {
-  font-size: 10.5px;
-  color: #94a3b8;
+  font-size: 11px;
+  color: #6B5D52;
 }
 
 .telemetry-stat-value {
   font-family: var(--font-mono, monospace);
-  font-size: 13px;
+  font-size: 13.5px;
   letter-spacing: 0.02em;
+  color: #14181D;
 }
 
 .telemetry-stat-value strong.text-emerald {
-  color: #22c55e;
+  color: #16A34A;
   font-size: 15px;
 }
 
 .telemetry-stat-value span.text-dim {
-  color: #64748b;
+  color: #8E7C6C;
 }
 
-/* Baseline updates available strip */
+/* ==========================================================================
+   BEFORE vs AFTER IMPACT AUDIT PANEL (Swiss Industrial Print)
+   ========================================================================== */
+
+.before-after-container {
+  margin-top: 14px;
+  border-top: 1px solid #E4D7C8;
+  padding-top: 16px;
+}
+
+.before-after-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.before-after-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #211812;
+  text-transform: uppercase;
+}
+
+.before-after-toggle-btn {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: #6B5D52;
+  background: transparent;
+  border: 1px solid #D5C2AF;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.before-after-toggle-btn:hover {
+  background: #FAF6F0;
+  color: #211812;
+}
+
+/* 2-Column Comparison Grid */
+.before-after-columns-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 768px) {
+  .before-after-columns-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.compare-card {
+  border-radius: 6px;
+  border: 1px solid #D5C2AF;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.compare-card.card-before {
+  background: #FAF6F0;
+}
+
+.compare-card.card-after {
+  background: #FFFFFF;
+  border-color: #2E7D32;
+  box-shadow: 0 1px 4px rgba(46, 125, 50, 0.08);
+}
+
+.compare-card-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #E4D7C8;
+  padding-bottom: 8px;
+}
+
+.badge-compare-before {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  color: #6B5D52;
+  background: #EFE8DE;
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid #D5C2AF;
+}
+
+.badge-compare-after {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  color: #166534;
+  background: #DCFCE7;
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid #86EFAC;
+}
+
+.compare-stat-lead {
+  font-size: 14px;
+  font-weight: 700;
+  color: #14181D;
+  margin: 0;
+}
+
+.compare-stat-lead.text-emerald {
+  color: #16A34A;
+}
+
+.compare-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #4B3E34;
+  line-height: 1.45;
+}
+
+.compare-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.compare-bullet {
+  font-family: var(--font-mono, monospace);
+  color: #8E7C6C;
+  font-size: 11px;
+}
+
+.compare-item-highlight {
+  font-weight: 600;
+  color: #211812;
+}
+
+/* Diff Inspector Box */
+.diff-inspector-box {
+  margin-top: 14px;
+  background: #14181D;
+  border: 1px solid #332B25;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diff-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #1F242C;
+  padding: 8px 14px;
+  border-bottom: 1px solid #2B333E;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: #94A3B8;
+}
+
+.diff-filename {
+  color: #F1F5F9;
+  font-weight: 600;
+}
+
+.diff-code-scroll {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #E2E8F0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-line-add {
+  color: #4ADE80;
+  background: rgba(74, 222, 128, 0.1);
+  display: block;
+  padding: 0 4px;
+  border-left: 2px solid #4ADE80;
+}
+
+.diff-line-del {
+  color: #F87171;
+  background: rgba(248, 113, 113, 0.1);
+  display: block;
+  padding: 0 4px;
+  border-left: 2px solid #F87171;
+}
+
+.diff-line-hunk {
+  color: #38BDF8;
+  font-weight: 600;
+  display: block;
+  padding: 2px 0;
+}
+
+/* Baseline updates available strip (Swiss Industrial Theme) */
 .baseline-updates-available-strip {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
   padding: 10px 16px;
-  background: rgba(53, 208, 186, 0.08);
-  border: 1px dashed rgba(53, 208, 186, 0.4);
+  background: #FAF6F0;
+  border: 1px dashed #D5C2AF;
   border-radius: 6px;
 }
 
@@ -6197,15 +6413,15 @@ button.quiet:hover,
   align-items: center;
   gap: 8px;
   font-size: 12.5px;
-  color: #cbd5e1;
+  color: #211812;
 }
 
 .updates-pulse-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #35d0ba;
-  box-shadow: 0 0 6px #35d0ba;
+  background: #16A34A;
+  box-shadow: 0 0 6px rgba(22, 163, 74, 0.4);
 }
 
 .updates-strip-pills {
@@ -6218,10 +6434,10 @@ button.quiet:hover,
   align-items: center;
   gap: 6px;
   padding: 3px 9px;
-  background: #111827;
-  border: 1px solid rgba(53, 208, 186, 0.4);
+  background: #FFFFFF;
+  border: 1px solid #D5C2AF;
   border-radius: 9999px;
-  color: #35d0ba;
+  color: #211812;
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   font-weight: 600;
@@ -6230,13 +6446,15 @@ button.quiet:hover,
 }
 
 .btn-update-room-chip:hover {
-  background: #35d0ba;
-  color: #0b0f19;
+  background: #F4EDE3;
+  border-color: #8E7C6C;
   transform: translateY(-1px);
 }
 
 .chip-status-check {
   font-size: 10px;
   font-weight: bold;
+  color: #16A34A;
 }
+
 

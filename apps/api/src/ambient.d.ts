@@ -4,6 +4,7 @@ declare module 'node:*' {
   const all: any;
   export default all;
   export const spawn: any;
+  export const execSync: any;
   export type ChildProcess = any;
   export const ChildProcess: any;
   export const mkdir: any;

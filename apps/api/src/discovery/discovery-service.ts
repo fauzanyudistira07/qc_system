@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, rm, lstat, readdir, copyFile } from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import type { NormalizedFlow } from '@qc/flow-schema';
 import { validateFlow } from '@qc/flow-schema';
 import { scanSource, type InventoryPage } from './source-scanner.ts';
@@ -1870,15 +1870,20 @@ export class DiscoveryService {
     if (payload.parentJobId) {
       baselineJob = this.jobs.get(payload.parentJobId);
     }
-    if (!baselineJob && payload.repositoryUrl) {
+    if (!baselineJob && (payload.repositoryUrl || payload.repoName)) {
+      const repoNameLower = (payload.repoName || '').toLowerCase();
       baselineJob = Array.from(this.jobs.values())
-        .filter(j => j.config?.repositoryUrl === payload.repositoryUrl || (payload.repoName && j.config?.name?.toLowerCase().includes(payload.repoName.toLowerCase())))
+        .filter(j => 
+          j.kind !== 'incremental-room' &&
+          ((payload.repositoryUrl && j.config?.repositoryUrl === payload.repositoryUrl) ||
+           (repoNameLower && (j.name?.toLowerCase().includes(repoNameLower) || j.config?.name?.toLowerCase().includes(repoNameLower))))
+        )
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
     }
     if (!baselineJob) {
-      // Fallback ke job terakhir yang status COMPLETED dan memiliki flows
+      // Fallback ke job non-incremental terakhir yang status COMPLETED dan memiliki flows
       baselineJob = Array.from(this.jobs.values())
-        .filter(j => j.status === 'COMPLETED' && j.flows && j.flows.length > 0)
+        .filter(j => j.kind !== 'incremental-room' && j.status === 'COMPLETED' && j.flows && j.flows.length > 0)
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
     }
 
@@ -1895,6 +1900,28 @@ export class DiscoveryService {
 
     const commitShaShort = payload.commitSha.slice(0, 7);
     const roomName = `[Update #${commitShaShort}] ${payload.commitMessage || 'Commit Update'}`;
+
+    let resolvedDiffSummary = payload.diffSummary;
+    if (!resolvedDiffSummary) {
+      const possibleDirs = [
+        baselineJob.config?.localPath,
+        baselineJob.workspace?.projectPath,
+        'C:\\xampp\\htdocs\\Zannora',
+        path.join(this.projectRoot, '..', payload.repoName || '')
+      ].filter((d): d is string => Boolean(d && typeof d === 'string'));
+
+      for (const dir of possibleDirs) {
+        try {
+          const out = execSync(`git show ${payload.commitSha} -U2 --color=never`, { cwd: dir, encoding: 'utf8', timeout: 4000 });
+          if (out && out.includes('diff --git')) {
+            resolvedDiffSummary = out.trim();
+            break;
+          }
+        } catch {
+          // ignore error
+        }
+      }
+    }
 
     const job: DiscoveryJob = {
       id,
@@ -1920,7 +1947,7 @@ export class DiscoveryService {
         author: payload.author,
         branch: payload.branch || 'main',
         filesChanged: payload.filesChanged,
-        diffSummary: payload.diffSummary,
+        diffSummary: resolvedDiffSummary,
         repoUrl: payload.repositoryUrl,
       },
       impactReport: {
