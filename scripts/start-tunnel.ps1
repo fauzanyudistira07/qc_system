@@ -41,4 +41,5 @@ Write-Host "4. Content type: application/json"
 Write-Host "5. Events      : Just the push event"
 Write-Host "========================================================`n" -ForegroundColor Yellow
 
-& $Binary tunnel --url "http://127.0.0.1:$Port"
+# Gunakan protocol http2 (TCP) agar kebal dari pemblokiran UDP/QUIC oleh ISP atau router WiFi
+& $Binary tunnel --protocol http2 --url "http://127.0.0.1:$Port"
