@@ -126,3 +126,61 @@ export const date = (value?: string) => {
 };
 
 export const duration = (start: string, end?: string) => { const s = Math.max(0, Math.round(((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 1000)); return Number.isFinite(s) ? s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s` : '—'; };
+
+export interface NextcloudConfigInfo {
+  configured: boolean;
+  url: string;
+  username: string;
+  baseFolder: string;
+}
+
+export interface NextcloudFolderCheck {
+  exists: boolean;
+  projectName: string;
+  targetFolder: string;
+  fullPath: string;
+  suggestedNewFolder: string;
+  webUrl: string;
+}
+
+export interface NextcloudUploadPayload {
+  folderName: string;
+  items: Array<{
+    url: string;
+    featureName: string;
+    type: 'photo' | 'video';
+    fileName?: string;
+    title?: string;
+  }>;
+  jobId?: string;
+}
+
+export interface NextcloudUploadResponse {
+  success: boolean;
+  uploadedCount: number;
+  failedCount: number;
+  targetFolder: string;
+  fullPath: string;
+  webUrl: string;
+  files: Array<{
+    name: string;
+    feature: string;
+    type: 'photo' | 'video';
+    remotePath: string;
+    status: 'uploaded' | 'failed';
+    error?: string;
+  }>;
+}
+
+export async function getNextcloudConfig(): Promise<NextcloudConfigInfo> {
+  return request<NextcloudConfigInfo>('/api/v1/nextcloud/config');
+}
+
+export async function checkNextcloudFolder(projectName: string): Promise<NextcloudFolderCheck> {
+  return send<NextcloudFolderCheck>('/api/v1/nextcloud/check-folder', { projectName });
+}
+
+export async function uploadToNextcloud(payload: NextcloudUploadPayload): Promise<NextcloudUploadResponse> {
+  return send<NextcloudUploadResponse>('/api/v1/nextcloud/upload-media', payload);
+}
+

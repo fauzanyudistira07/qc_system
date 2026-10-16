@@ -24,6 +24,7 @@ import { buildJsonReport } from './report/report-json.ts';
 import { generatePdfReport } from './report/report-pdf.ts';
 import { cleanupRetention, runtimePolicy } from './runtime-policy.ts';
 import { isAuthEnabled, getAdminConfig, verifyAdminCredentials, createToken, verifyToken, type AdminUser } from './auth.ts';
+import { getNextcloudConfig, checkNextcloudFolder, uploadMediaBatch, type MediaUploadItem } from './nextcloud-service.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '../../..');
@@ -125,7 +126,8 @@ app.addHook('onRequest', async (request, reply) => {
     pathOnly.includes('/artifacts/') ||
     pathOnly.endsWith('/report') ||
     pathOnly.startsWith('/api/v1/system/probe-target') ||
-    pathOnly.startsWith('/api/v1/webhooks/')
+    pathOnly.startsWith('/api/v1/webhooks/') ||
+    pathOnly.startsWith('/api/v1/nextcloud/')
   ) {
     return;
   }
@@ -1822,6 +1824,57 @@ app.get<{ Params: { '*': string } }>('/api/v1/zannora-evidence/artifacts/*', asy
     return reply.type(mime).header('Content-Disposition', 'inline').header('Cache-Control', 'no-cache').send(await readFile(filePath));
   } catch {
     return reply.code(404).send({ error: 'Evidence artifact tidak ditemukan' });
+  }
+});
+
+// Nextcloud WebDAV Integration endpoints
+app.get('/api/v1/nextcloud/config', async () => {
+  const cfg = getNextcloudConfig();
+  return {
+    configured: Boolean(cfg.url && cfg.username && cfg.password),
+    url: cfg.url,
+    username: cfg.username,
+    baseFolder: cfg.baseFolder
+  };
+});
+
+app.post<{ Body: { projectName?: string } }>('/api/v1/nextcloud/check-folder', async (request, reply) => {
+  const projectName = request.body?.projectName?.trim() || 'QC Project';
+  try {
+    const result = await checkNextcloudFolder(projectName);
+    return result;
+  } catch (err) {
+    return reply.code(500).send({
+      error: `Gagal memeriksa folder di Nextcloud: ${err instanceof Error ? err.message : String(err)}`
+    });
+  }
+});
+
+app.post<{
+  Body: {
+    folderName?: string;
+    items?: MediaUploadItem[];
+    jobId?: string;
+  }
+}>('/api/v1/nextcloud/upload-media', async (request, reply) => {
+  const folderName = request.body?.folderName?.trim();
+  const items = request.body?.items;
+  const jobId = request.body?.jobId;
+
+  if (!folderName) {
+    return reply.code(400).send({ error: 'Nama folder proyek Nextcloud wajib diisi' });
+  }
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return reply.code(400).send({ error: 'Daftar item media untuk diunggah tidak boleh kosong' });
+  }
+
+  try {
+    const result = await uploadMediaBatch(folderName, items, artifactRoot, jobId);
+    return result;
+  } catch (err) {
+    return reply.code(500).send({
+      error: `Gagal mengunggah media ke Nextcloud: ${err instanceof Error ? err.message : String(err)}`
+    });
   }
 });
 

@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Job, ZannoraEvidence, Artifact } from './types';
 import { Icon, Empty } from './ui';
-import { request, download, artifactUrl } from './api';
+import {
+  request,
+  download,
+  artifactUrl,
+  checkNextcloudFolder,
+  uploadToNextcloud,
+  type NextcloudFolderCheck,
+  type NextcloudUploadResponse
+} from './api';
 
 export interface MediaItem {
   id: string;
@@ -218,6 +226,156 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
   const [isZoomed, setIsZoomed] = useState(false);
   const [fetchedEvidence, setFetchedEvidence] = useState<ZannoraEvidence | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+
+  interface NcModalState {
+    isOpen: boolean;
+    step: 'checking' | 'confirm' | 'uploading' | 'completed' | 'error';
+    items: MediaItem[];
+    folderMode: 'same' | 'new';
+    customFolderName: string;
+    checkResult: NextcloudFolderCheck | null;
+    uploadProgress: { current: number; total: number; currentFileName: string };
+    uploadResult: NextcloudUploadResponse | null;
+    errorMessage: string | null;
+  }
+
+  const [ncModal, setNcModal] = useState<NcModalState>({
+    isOpen: false,
+    step: 'checking',
+    items: [],
+    folderMode: 'new',
+    customFolderName: '',
+    checkResult: null,
+    uploadProgress: { current: 0, total: 0, currentFileName: '' },
+    uploadResult: null,
+    errorMessage: null
+  });
+
+  const projectName = useMemo(() => {
+    return (
+      job?.config?.name ||
+      job?.name ||
+      evidence?.project ||
+      'Project QC'
+    ).replace(/[\\/:*?"<>|]+/g, ' ').trim();
+  }, [job?.config?.name, job?.name, evidence?.project]);
+
+  const handleDownloadItem = async (item: MediaItem, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const isVideo = item.type === 'video';
+    const ext = isVideo ? (item.url.endsWith('.mp4') ? 'mp4' : 'webm') : 'png';
+    const cleanTitle = (item.title || 'media')
+      .replace(/[\\/:*?"<>|]+/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const filename = `${cleanTitle}.${ext}`;
+
+    try {
+      const res = await fetch(item.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      download(blob, filename, blob.type);
+    } catch {
+      const a = document.createElement('a');
+      a.href = item.url;
+      a.download = filename;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+  };
+
+  const openNextcloudModal = async (itemsToUpload: MediaItem[]) => {
+    if (!itemsToUpload.length) return;
+    setNcModal({
+      isOpen: true,
+      step: 'checking',
+      items: itemsToUpload,
+      folderMode: 'new',
+      customFolderName: '',
+      checkResult: null,
+      uploadProgress: { current: 0, total: itemsToUpload.length, currentFileName: '' },
+      uploadResult: null,
+      errorMessage: null
+    });
+
+    try {
+      const check = await checkNextcloudFolder(projectName);
+      setNcModal(prev => ({
+        ...prev,
+        step: 'confirm',
+        checkResult: check,
+        folderMode: check.exists ? 'same' : 'new',
+        customFolderName: check.suggestedNewFolder
+      }));
+    } catch {
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+      const fallbackSuggested = `${projectName} (${dateStr} ${timeStr})`;
+      setNcModal(prev => ({
+        ...prev,
+        step: 'confirm',
+        checkResult: {
+          exists: false,
+          projectName,
+          targetFolder: projectName,
+          fullPath: `CMM Service/Timbang Image and Video/${projectName}`,
+          suggestedNewFolder: fallbackSuggested,
+          webUrl: ''
+        },
+        folderMode: 'new',
+        customFolderName: fallbackSuggested
+      }));
+    }
+  };
+
+  const closeNextcloudModal = () => {
+    if (ncModal.step === 'uploading') return;
+    setNcModal(prev => ({ ...prev, isOpen: false }));
+  };
+
+  const handleStartUpload = async () => {
+    if (!ncModal.items.length) return;
+    const finalFolder = ncModal.folderMode === 'new'
+      ? (ncModal.customFolderName.trim() || ncModal.checkResult?.suggestedNewFolder || projectName)
+      : (ncModal.checkResult?.targetFolder || projectName);
+
+    setNcModal(prev => ({
+      ...prev,
+      step: 'uploading',
+      uploadProgress: { current: 0, total: prev.items.length, currentFileName: 'Memproses pengunggahan media...' }
+    }));
+
+    try {
+      const uploadItems = ncModal.items.map(item => ({
+        url: item.url,
+        featureName: item.flowName || 'General',
+        type: item.type,
+        title: item.title,
+        fileName: `${(item.title || 'media').replace(/[\\/:*?"<>|]+/g, '_').trim()}.${item.type === 'video' ? 'mp4' : 'png'}`
+      }));
+
+      const res = await uploadToNextcloud({
+        folderName: finalFolder,
+        items: uploadItems,
+        jobId: job?.id
+      });
+
+      setNcModal(prev => ({
+        ...prev,
+        step: 'completed',
+        uploadResult: res
+      }));
+    } catch (err) {
+      setNcModal(prev => ({
+        ...prev,
+        step: 'error',
+        errorMessage: err instanceof Error ? err.message : String(err)
+      }));
+    }
+  };
 
   // Auto-fetch quality-evidence if job is provided
   useEffect(() => {
@@ -491,9 +649,25 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
     }
   };
 
+  const handleDownloadAll = async () => {
+    if (allMediaItems.length === 0) return;
+    for (let i = 0; i < allMediaItems.length; i++) {
+      await handleDownloadItem(allMediaItems[i]);
+      if (i < allMediaItems.length - 1) {
+        await new Promise(r => setTimeout(r, 220));
+      }
+    }
+  };
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (ncModal.isOpen) {
+        if (e.key === 'Escape' && ncModal.step !== 'uploading') {
+          closeNextcloudModal();
+        }
+        return;
+      }
       if (e.target instanceof HTMLInputElement) return;
       if (e.key === 'ArrowLeft') handlePrev();
       else if (e.key === 'ArrowRight') handleNext();
@@ -554,6 +728,31 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
           <span className="qc-media-stat-icon total"><Icon name="overview" size={16} /></span>
           <div><strong>{allMediaItems.length}</strong><small>Total Media</small></div>
         </div>
+
+        <div className="qc-media-sync-actions">
+          <button
+            type="button"
+            className="tool-btn"
+            onClick={handleDownloadAll}
+            disabled={allMediaItems.length === 0}
+            title="Unduh seluruh foto dan video pengujian ke komputer lokal"
+            style={{ gap: 6, padding: '7px 12px' }}
+          >
+            <Icon name="download" size={14} />
+            <span>Unduh Semua ({allMediaItems.length})</span>
+          </button>
+          <button
+            type="button"
+            className="tool-btn primary"
+            onClick={() => openNextcloudModal(allMediaItems)}
+            disabled={allMediaItems.length === 0}
+            title="Sinkronisasi seluruh hasil screenshot dan video ke Nextcloud SOLU"
+            style={{ gap: 6, padding: '7px 14px' }}
+          >
+            <Icon name="cloud" size={14} />
+            <span>Export ke Nextcloud ({allMediaItems.length})</span>
+          </button>
+        </div>
       </div>
 
       {allMediaItems.length === 0 ? (
@@ -588,6 +787,26 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
 
               {activeItem && (
                 <div className="qc-stage-header-actions">
+                  <button
+                    type="button"
+                    className="tool-btn"
+                    onClick={(e) => handleDownloadItem(activeItem, e)}
+                    title={`Unduh ${activeItem.type === 'video' ? 'rekaman video' : 'screenshot foto'} ini`}
+                    style={{ gap: 6 }}
+                  >
+                    <Icon name="download" size={13} />
+                    <span>Download {activeItem.type === 'video' ? 'Video' : 'Foto'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="tool-btn primary"
+                    onClick={() => openNextcloudModal([activeItem])}
+                    title="Unggah media ini langsung ke folder Nextcloud"
+                    style={{ gap: 6 }}
+                  >
+                    <Icon name="cloud" size={13} />
+                    <span>Upload Nextcloud</span>
+                  </button>
                   {activeItem.type === 'photo' && (
                     <button type="button" className="tool-btn" onClick={() => setIsZoomed(!isZoomed)} title={isZoomed ? 'Sesuaikan ke Layar' : 'Lihat Ukuran Asli 100%'}>
                       {isZoomed ? 'Fit Screen' : 'Zoom 100%'}
@@ -878,6 +1097,16 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
                                 ) : null}
                               </small>
                             </div>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className="qc-playlist-quick-dl"
+                              onClick={(e) => handleDownloadItem(item, e)}
+                              title={`Unduh ${item.type === 'video' ? 'video' : 'foto'} ini`}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handleDownloadItem(item); }}
+                            >
+                              <Icon name="download" size={12} />
+                            </span>
                           </button>
                         );
                       })}
@@ -915,6 +1144,261 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
               )}
             </div>
           </aside>
+        </div>
+      )}
+
+      {/* NEXTCLOUD SYNC MODAL */}
+      {ncModal.isOpen && (
+        <div className="qc-nc-modal-backdrop" onClick={closeNextcloudModal}>
+          <div className="qc-nc-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="qc-nc-modal-header">
+              <h3>
+                <span style={{ color: 'var(--cyan)', display: 'inline-flex' }}><Icon name="cloud" size={18} /></span>
+                <span>Unggah ke Nextcloud SOLU</span>
+              </h3>
+              <button
+                type="button"
+                className="tool-btn"
+                onClick={closeNextcloudModal}
+                disabled={ncModal.step === 'uploading'}
+                style={{ padding: '4px 8px' }}
+                title="Tutup (Esc)"
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+
+            <div className="qc-nc-modal-body">
+              {/* Step 1: Checking */}
+              {ncModal.step === 'checking' && (
+                <div style={{ textAlign: 'center', padding: '36px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    width: 32,
+                    height: 32,
+                    border: '3px solid rgba(43, 133, 228, 0.2)',
+                    borderTopColor: 'var(--cyan)',
+                    borderRadius: '50%',
+                    animation: 'spin 0.8s linear infinite'
+                  }} />
+                  <strong>Memeriksa direktori di Nextcloud...</strong>
+                  <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+                    Menghubungi WebDAV Nextcloud di <code>CMM Service/Timbang Image and Video/{projectName}</code>
+                  </span>
+                </div>
+              )}
+
+              {/* Step 2: Confirm & Collision Choice */}
+              {ncModal.step === 'confirm' && (
+                <>
+                  {ncModal.checkResult?.exists ? (
+                    <div className="qc-nc-banner warning">
+                      <span style={{ flexShrink: 0, marginTop: 1, display: 'inline-flex' }}><Icon name="warning" size={18} /></span>
+                      <div>
+                        <strong>Folder Proyek Sudah Ditemukan di Nextcloud</strong>
+                        <p style={{ margin: '4px 0 0 0' }}>
+                          Folder <code>{ncModal.checkResult.targetFolder}</code> sudah ada di <code>CMM Service/Timbang Image and Video</code> karena pengujian pernah diminta sebelumnya.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="qc-nc-banner info">
+                      <span style={{ flexShrink: 0, marginTop: 1, display: 'inline-flex' }}><Icon name="check" size={18} /></span>
+                      <div>
+                        <strong>Siap Membuat Folder Baru di Nextcloud</strong>
+                        <p style={{ margin: '4px 0 0 0' }}>
+                          Folder <code>{ncModal.checkResult?.targetFolder || projectName}</code> akan otomatis dibuat di <code>CMM Service/Timbang Image and Video</code>.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* If folder already exists: ask user whether to merge or create new */}
+                  {ncModal.checkResult?.exists && (
+                    <div className="qc-nc-options-group">
+                      <label className={`qc-nc-option-card ${ncModal.folderMode === 'same' ? 'selected' : ''}`}>
+                        <input
+                          type="radio"
+                          name="folderMode"
+                          checked={ncModal.folderMode === 'same'}
+                          onChange={() => setNcModal(prev => ({ ...prev, folderMode: 'same' }))}
+                        />
+                        <div className="qc-nc-option-content">
+                          <strong>Letakkan di Folder yang Sama</strong>
+                          <p>
+                            Simpan ke dalam folder yang sudah ada: <code>{ncModal.checkResult?.targetFolder}</code>.
+                            Subfolder fitur foto &amp; video akan digabungkan atau diperbarui secara otomatis.
+                          </p>
+                        </div>
+                      </label>
+
+                      <label className={`qc-nc-option-card ${ncModal.folderMode === 'new' ? 'selected' : ''}`}>
+                        <input
+                          type="radio"
+                          name="folderMode"
+                          checked={ncModal.folderMode === 'new'}
+                          onChange={() => setNcModal(prev => ({ ...prev, folderMode: 'new' }))}
+                        />
+                        <div className="qc-nc-option-content">
+                          <strong>Buat Folder Baru di Nextcloud</strong>
+                          <p>
+                            Pisahkan hasil pengujian ini ke folder terpisah agar riwayat tidak tertumpuk dengan batch sebelumnya.
+                          </p>
+                          {ncModal.folderMode === 'new' && (
+                            <div style={{ marginTop: 8 }}>
+                              <input
+                                type="text"
+                                className="finding-search-input"
+                                value={ncModal.customFolderName}
+                                onChange={(e) => setNcModal(prev => ({ ...prev, customFolderName: e.target.value }))}
+                                placeholder="Nama folder baru..."
+                                style={{ width: '100%', fontSize: 12, padding: '6px 10px' }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* Summary Pills */}
+                  <div>
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: '0.05em' }}>
+                      Ringkasan Media Yang Akan Diunggah
+                    </span>
+                    <div className="qc-nc-stats-pills" style={{ marginTop: 8 }}>
+                      <span className="qc-nc-pill">
+                        📸 {ncModal.items.filter(i => i.type === 'photo').length} Foto
+                      </span>
+                      <span className="qc-nc-pill">
+                        🎥 {ncModal.items.filter(i => i.type === 'video').length} Video
+                      </span>
+                      <span className="qc-nc-pill">
+                        🗂️ {new Set(ncModal.items.map(i => i.flowName || 'General')).size} Subfolder Fitur
+                      </span>
+                      <span className="qc-nc-pill">
+                        Total: {ncModal.items.length} Berkas
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Tree Structure Preview */}
+                  <div>
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: '0.05em' }}>
+                      Struktur Hierarki Folder Nextcloud
+                    </span>
+                    <div className="qc-nc-tree" style={{ marginTop: 8 }}>
+                      {`📁 All files > CMM Service > Timbang Image and Video > ${ncModal.folderMode === 'new' ? (ncModal.customFolderName || ncModal.checkResult?.suggestedNewFolder || projectName) : (ncModal.checkResult?.targetFolder || projectName)}/
+${Array.from(new Set(ncModal.items.map(i => i.flowName || 'General'))).slice(0, 4).map((f, idx, arr) => {
+  const isLast = idx === arr.length - 1 && arr.length <= 4;
+  const branch = isLast ? '└──' : '├──';
+  const subBranch = isLast ? '    ' : '│   ';
+  return `  ${branch} 📁 ${f}/
+  ${subBranch}├── 📁 foto/
+  ${subBranch}└── 📁 video/`;
+}).join('\n')}${new Set(ncModal.items.map(i => i.flowName || 'General')).size > 4 ? '\n  └── ... dan subfolder fitur lainnya' : ''}`}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Step 3: Uploading */}
+              {ncModal.step === 'uploading' && (
+                <div style={{ textAlign: 'center', padding: '30px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div className="qc-nc-progress-wrap">
+                    <div
+                      className="qc-nc-progress-bar"
+                      style={{
+                        width: `${ncModal.uploadProgress.total > 0 ? Math.max(15, (ncModal.uploadProgress.current / ncModal.uploadProgress.total) * 100) : 30}%`
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: 14 }}>Mengunggah Media ke Nextcloud SOLU...</strong>
+                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 4 }}>
+                      Mohon tunggu, berkas sedang ditransfer langsung melalui koneksi WebDAV yang aman.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 4: Completed */}
+              {ncModal.step === 'completed' && ncModal.uploadResult && (
+                <div className="qc-nc-success-box">
+                  <div className="qc-nc-success-icon">
+                    <Icon name="check" size={24} />
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: 15, color: '#15803d' }}>
+                      Berhasil Mengunggah {ncModal.uploadResult.uploadedCount} Media ke Nextcloud!
+                    </strong>
+                    <p style={{ margin: '6px 0 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                      Folder: <code>{ncModal.uploadResult.fullPath}</code>
+                    </p>
+                    {ncModal.uploadResult.failedCount > 0 && (
+                      <p style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>
+                        {ncModal.uploadResult.failedCount} berkas gagal diunggah.
+                      </p>
+                    )}
+                  </div>
+
+                  <a
+                    href={ncModal.uploadResult.webUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="qc-nc-btn-open"
+                  >
+                    <span>Buka Folder di Nextcloud</span>
+                    <Icon name="arrow" size={13} />
+                  </a>
+                </div>
+              )}
+
+              {/* Step 5: Error */}
+              {ncModal.step === 'error' && (
+                <div style={{ padding: '20px 0', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                  <span style={{ color: 'var(--red)', display: 'inline-flex' }}><Icon name="warning" size={32} /></span>
+                  <strong style={{ color: 'var(--red)' }}>Gagal Mengunggah ke Nextcloud</strong>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 440 }}>
+                    {ncModal.errorMessage || 'Terjadi kesalahan saat berkomunikasi dengan server Nextcloud.'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="qc-nc-modal-footer">
+              {ncModal.step === 'confirm' && (
+                <>
+                  <button type="button" className="tool-btn" onClick={closeNextcloudModal}>
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    className="tool-btn primary"
+                    onClick={handleStartUpload}
+                    style={{ gap: 6, padding: '7px 16px' }}
+                  >
+                    <Icon name="cloud" size={14} />
+                    <span>Mulai Unggah ke Nextcloud ({ncModal.items.length})</span>
+                  </button>
+                </>
+              )}
+              {ncModal.step === 'completed' && (
+                <button type="button" className="tool-btn primary" onClick={closeNextcloudModal}>
+                  Selesai
+                </button>
+              )}
+              {ncModal.step === 'error' && (
+                <>
+                  <button type="button" className="tool-btn" onClick={closeNextcloudModal}>
+                    Tutup
+                  </button>
+                  <button type="button" className="tool-btn primary" onClick={() => openNextcloudModal(ncModal.items)}>
+                    Coba Lagi
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
