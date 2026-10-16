@@ -11,6 +11,7 @@ type Result = {
   paymentId: number | null;
   checks: Array<{ name: string; passed: boolean; detail?: string }>;
   videos: string[];
+  screenshots: string[];
 };
 
 async function login(page: Page, baseUrl: string, email: string, password: string, admin = false) {
@@ -58,9 +59,27 @@ async function main() {
   const transactionCode = `QC_WEB_TRX_${suffix}`;
   const runDir = path.resolve('.qc-artifacts/test-runs', 'zannora', 'web-booking', runStamp);
   const videoDir = path.join(runDir, '.videos');
+  const screenshotDir = path.join(runDir, 'screenshots');
   await mkdir(videoDir, { recursive: true });
+  await mkdir(screenshotDir, { recursive: true });
 
-  const result: Result = { status: 'FAILED', passengerName, bookingId: null, bookingCode: '', paymentId: null, checks: [], videos: [] };
+  const screenshots: string[] = [];
+  const captureScreenshot = async (page: Page | undefined, name: string) => {
+    if (!page || page.isClosed()) return;
+    const filename = `${String(screenshots.length + 1).padStart(2, '0')}-${name}.png`;
+    const target = path.join(screenshotDir, filename);
+    try {
+      await page.screenshot({ path: target, fullPage: true, animations: 'disabled', timeout: 8_000 });
+      screenshots.push(target);
+    } catch {
+      try {
+        await page.screenshot({ path: target, fullPage: false, animations: 'disabled', timeout: 4_000 });
+        screenshots.push(target);
+      } catch {}
+    }
+  };
+
+  const result: Result = { status: 'FAILED', passengerName, bookingId: null, bookingCode: '', paymentId: null, checks: [], videos: [], screenshots: [] };
   const check = (name: string, passed: boolean, detail?: string) => {
     result.checks.push({ name, passed, detail });
     if (!passed) throw new Error(detail || name);
@@ -92,11 +111,13 @@ async function main() {
     ]);
     await customerPage.waitForLoadState('domcontentloaded');
     check('customer UI passenger create', (await customerPage.locator('body').innerText()).includes(passengerName));
+    await captureScreenshot(customerPage, 'customer-passenger-created');
 
     await customerPage.goto(`${baseUrl}/booking?flight=1`, { waitUntil: 'domcontentloaded' });
     const passengerLabel = customerPage.locator('label').filter({ hasText: passengerName }).first();
     check('booking UI passenger fixture visible', await passengerLabel.count() === 1);
     await passengerLabel.locator('input[type=checkbox]').check();
+    await captureScreenshot(customerPage, 'booking-passenger-selected');
     await customerPage.getByRole('button', { name: 'Next' }).click();
     const seats = customerPage.locator('button[title]');
     let seatSelected = false;
@@ -108,16 +129,19 @@ async function main() {
       }
     }
     check('booking UI available seat select', seatSelected);
+    await captureScreenshot(customerPage, 'booking-seat-selected');
     await customerPage.getByRole('button', { name: 'Next' }).click();
     await customerPage.waitForTimeout(250);
     const summaryHeading = customerPage.locator('h2').filter({ hasText: 'Booking Summary' });
     check('booking UI summary visible', await summaryHeading.isVisible());
+    await captureScreenshot(customerPage, 'booking-summary');
     await customerPage.getByRole('button', { name: 'Confirm Booking' }).click({ noWaitAfter: true });
     await customerPage.waitForURL(/\/payment\?booking=\d+/, { waitUntil: 'domcontentloaded' });
     const bookingUrl = new URL(customerPage.url());
     result.bookingId = Number(bookingUrl.searchParams.get('booking'));
     check('booking UI creates pending booking', Number.isInteger(result.bookingId) && result.bookingId > 0);
     check('payment UI page renders', (await customerPage.locator('body').innerText()).includes('Pembayaran Midtrans'));
+    await captureScreenshot(customerPage, 'payment-midtrans-rendered');
 
     const loginPayload = await apiCall(baseUrl, 'POST', '/api/v1/login', undefined, { email: 'user@zannora.com', password });
     const customerToken = loginPayload?.data?.token;
@@ -131,6 +155,7 @@ async function main() {
 
     await customerPage.goto(`${baseUrl}/my-bookings/${result.bookingId}`, { waitUntil: 'domcontentloaded' });
     check('customer booking detail pending visible', (await customerPage.locator('body').innerText()).includes('Pending'));
+    await captureScreenshot(customerPage, 'customer-booking-pending');
 
     adminContext = await browser.newContext({ viewport: VIDEO_RECORDING.viewport, recordVideo: { dir: videoDir, ...VIDEO_RECORDING.recordVideo } });
     adminPage = await adminContext.newPage();
@@ -139,6 +164,7 @@ async function main() {
     await login(adminPage, baseUrl, 'admin@zannora.com', password, true);
     await adminPage.goto(`${baseUrl}/admin/payments/${result.paymentId}`, { waitUntil: 'domcontentloaded' });
     check('admin payment detail visible', (await adminPage.locator('body').innerText()).includes(String(result.paymentId)));
+    await captureScreenshot(adminPage, 'admin-payment-detail');
     await adminPage.locator('input[placeholder="Transaction Code"]').fill(transactionCode);
     await Promise.all([
       adminPage.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === `/admin/payments/${result.paymentId}/verify`),
@@ -146,19 +172,23 @@ async function main() {
     ]);
     await adminPage.waitForLoadState('domcontentloaded');
     check('admin verifies payment in UI', (await adminPage.locator('body').innerText()).includes('Paid'));
+    await captureScreenshot(adminPage, 'admin-payment-verified');
     const adminTicketLink = adminPage.getByRole('link', { name: 'Lihat Ticket' }).first();
     check('admin ticket issued after UI verification', await adminTicketLink.count() === 1);
     await adminTicketLink.click({ noWaitAfter: true });
     await adminPage.waitForURL(/\/admin\/tickets\/\d+/, { waitUntil: 'domcontentloaded' });
     check('admin ticket detail renders', (await adminPage.locator('body').innerText()).includes('Ticket'));
+    await captureScreenshot(adminPage, 'admin-ticket-detail');
 
     await customerPage.goto(`${baseUrl}/my-bookings/${result.bookingId}`, { waitUntil: 'domcontentloaded' });
     check('customer confirmed booking visible', (await customerPage.locator('body').innerText()).includes('Confirmed'));
+    await captureScreenshot(customerPage, 'customer-booking-confirmed');
     const userTicketLink = customerPage.getByRole('link', { name: 'Download Ticket' });
     check('customer ticket link visible', await userTicketLink.count() === 1);
     await userTicketLink.click({ noWaitAfter: true });
     await customerPage.waitForURL(/\/tickets\/\d+/, { waitUntil: 'domcontentloaded' });
     check('customer e-ticket page renders', (await customerPage.locator('body').innerText()).toLowerCase().includes('e-ticket'));
+    await captureScreenshot(customerPage, 'customer-e-ticket');
 
     result.status = 'PASSED';
   } finally {
@@ -167,6 +197,7 @@ async function main() {
     await rm(videoDir, { recursive: true, force: true }).catch(() => {});
     await browser.close().catch(() => {});
   }
+  result.screenshots = screenshots;
 
   const resultDir = path.resolve('.qc-artifacts/zannora/runs', 'web-booking');
   await mkdir(resultDir, { recursive: true });

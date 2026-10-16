@@ -7,8 +7,21 @@ async function main() {
   const email = process.env.QC_ZANNORA_EMAIL;
   const password = process.env.QC_ZANNORA_PASSWORD;
   if (!email || !password) throw new Error('Set QC_ZANNORA_EMAIL and QC_ZANNORA_PASSWORD before running navigation flow.');
-  const sourcePath = '.qc-artifacts/zannora/flows/navigation.yaml';
-  const source = (await readFile(sourcePath, 'utf8'))
+  const candidatePaths = [
+    '.qc-artifacts/zannora/flows/navigation.yaml',
+    'fixtures/flows/zannora-navigation.yaml'
+  ];
+  let sourcePath = candidatePaths[0];
+  let sourceContent: string | undefined;
+  for (const cand of candidatePaths) {
+    try {
+      sourceContent = await readFile(cand, 'utf8');
+      sourcePath = cand;
+      break;
+    } catch {}
+  }
+  if (!sourceContent) throw new Error('Navigation flow file not found in candidates: ' + candidatePaths.join(', '));
+  const source = sourceContent
     .replace('${QC_ZANNORA_EMAIL}', JSON.stringify(email))
     .replace('${QC_ZANNORA_PASSWORD}', JSON.stringify(password));
   const validation = validateFlow(source);

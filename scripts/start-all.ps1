@@ -174,7 +174,27 @@ if (-not $NoBrowser) {
 }
 
 # ---------------------------------------------------------
-# 5. MENJALANKAN DEV SERVERS (API + WEB)
+# 5. MENJALANKAN TUNNEL WHATSAPP & GITHUB WATCHER
+# ---------------------------------------------------------
+Write-Host ""
+Write-Host "🌐 Menyiapkan Cloudflare Remote Tunnel & WhatsApp Notifier..." -ForegroundColor Yellow
+$tunnelJob = Start-Job -ScriptBlock {
+    param($root)
+    Set-Location $root
+    node "scripts\tunnel-notifier.mjs"
+} -ArgumentList $ProjectRoot
+Write-Host "   ✅ Tunnel & WhatsApp Notifier berjalan di background." -ForegroundColor Green
+
+Write-Host "🔄 Menyiapkan GitHub Auto-Update Watcher..." -ForegroundColor Yellow
+$watcherJob = Start-Job -ScriptBlock {
+    param($root)
+    Set-Location $root
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\watch-and-deploy.ps1"
+} -ArgumentList $ProjectRoot
+Write-Host "   ✅ GitHub Auto-Update Watcher aktif memantau branch 'main'." -ForegroundColor Green
+
+# ---------------------------------------------------------
+# 6. MENJALANKAN DEV SERVERS (API + WEB)
 # ---------------------------------------------------------
 Write-Host ""
 Write-Host "⚡ [5/5] Memulai QC Maestro API & Web Dashboard..." -ForegroundColor Cyan
@@ -182,6 +202,7 @@ Write-Host "  ================================================================" 
 Write-Host "   🌍 Web Dashboard : http://localhost:4180" -ForegroundColor Green
 Write-Host "   🔌 Backend API   : http://localhost:4100" -ForegroundColor Green
 Write-Host "   🔑 Login Admin   : admin@qcmaestro.com / admin12345" -ForegroundColor Yellow
+Write-Host "   📱 Notifikasi WA : Otomatis dikirim ke nomor WhatsApp" -ForegroundColor Yellow
 Write-Host "   🛑 Cara Berhenti : Tekan Ctrl + C pada jendela ini" -ForegroundColor Magenta
 Write-Host "  ================================================================" -ForegroundColor DarkGray
 Write-Host ""
@@ -195,5 +216,13 @@ try {
     if ($browserJob) {
         Stop-Job $browserJob -ErrorAction SilentlyContinue
         Remove-Job $browserJob -ErrorAction SilentlyContinue
+    }
+    if ($tunnelJob) {
+        Stop-Job $tunnelJob -ErrorAction SilentlyContinue
+        Remove-Job $tunnelJob -ErrorAction SilentlyContinue
+    }
+    if ($watcherJob) {
+        Stop-Job $watcherJob -ErrorAction SilentlyContinue
+        Remove-Job $watcherJob -ErrorAction SilentlyContinue
     }
 }

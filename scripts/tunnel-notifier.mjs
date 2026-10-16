@@ -96,26 +96,32 @@ Waktu: ${now} WIB`;
   }
 }
 
-// Helper: Download cloudflared.exe jika belum ada di laptop server
-async function ensureCloudflared(cloudflaredExe, toolsDir) {
-  if (fs.existsSync(cloudflaredExe)) return true;
+// Helper: Download cloudflared jika belum ada di laptop server
+async function ensureCloudflared(cloudflaredBin, toolsDir) {
+  if (fs.existsSync(cloudflaredBin)) return true;
 
   if (!fs.existsSync(toolsDir)) {
     fs.mkdirSync(toolsDir, { recursive: true });
   }
 
-  console.log('[TunnelNotifier] cloudflared.exe belum ada di server. Mengunduh otomatis dari Cloudflare GitHub...');
-  const downloadUrl = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe';
+  const isWindows = process.platform === 'win32';
+  console.log(`[TunnelNotifier] cloudflared belum ada di server. Mengunduh otomatis untuk ${isWindows ? 'Windows' : 'Linux'}...`);
+  const downloadUrl = isWindows
+    ? 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
+    : 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64';
 
   try {
     const res = await fetch(downloadUrl, { redirect: 'follow' });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     const buffer = await res.arrayBuffer();
-    fs.writeFileSync(cloudflaredExe, Buffer.from(buffer));
-    console.log('[TunnelNotifier] Unduhan cloudflared.exe berhasil!');
+    fs.writeFileSync(cloudflaredBin, Buffer.from(buffer));
+    if (!isWindows) {
+      fs.chmodSync(cloudflaredBin, 0o755);
+    }
+    console.log('[TunnelNotifier] Unduhan cloudflared berhasil!');
     return true;
   } catch (err) {
-    console.error('[TunnelNotifier] Gagal mengunduh cloudflared.exe otomatis:', err.message);
+    console.error('[TunnelNotifier] Gagal mengunduh cloudflared otomatis:', err.message);
     return false;
   }
 }
@@ -207,15 +213,16 @@ async function runTunnelSession(cloudflaredExe, env, localIp) {
 async function main() {
   const env = loadEnv();
   const toolsDir = path.join(rootDir, 'tools');
-  const cloudflaredExe = path.join(toolsDir, 'cloudflared.exe');
+  const isWindows = process.platform === 'win32';
+  const cloudflaredBin = path.join(toolsDir, isWindows ? 'cloudflared.exe' : 'cloudflared');
 
   // 1. Tunggu internet
   await waitForInternet();
 
   // 2. Pastikan file executable cloudflared ada
-  const ready = await ensureCloudflared(cloudflaredExe, toolsDir);
+  const ready = await ensureCloudflared(cloudflaredBin, toolsDir);
   if (!ready) {
-    console.error(`[TunnelNotifier] Gagal menyiapkan cloudflared.exe`);
+    console.error(`[TunnelNotifier] Gagal menyiapkan cloudflared`);
     process.exit(1);
   }
 
@@ -226,7 +233,7 @@ async function main() {
   while (true) {
     const localIp = getLocalIp();
     console.log(`[TunnelNotifier] IP LAN Terdeteksi: http://${localIp}:${env.PORT}`);
-    await runTunnelSession(cloudflaredExe, env, localIp);
+    await runTunnelSession(cloudflaredBin, env, localIp);
     await new Promise(r => setTimeout(r, 5000));
   }
 }

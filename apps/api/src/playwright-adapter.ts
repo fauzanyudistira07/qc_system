@@ -118,12 +118,18 @@ function safeArtifactName(value: string) {
   return value.replace(/[^a-z0-9._-]/gi, '-').replace(/^\.+/, '') || 'step';
 }
 
-async function safePageScreenshot(page: Page, targetPath: string, fullPage: boolean = false): Promise<boolean> {
+async function safePageScreenshot(page: Page, targetPath: string, fullPage: boolean = true): Promise<boolean> {
   try {
     if (page.isClosed()) return false;
     await page.screenshot({ path: targetPath, fullPage, timeout: 8000, animations: 'disabled' });
     return true;
   } catch {
+    try {
+      if (fullPage && !page.isClosed()) {
+        await page.screenshot({ path: targetPath, fullPage: false, timeout: 5000, animations: 'disabled' });
+        return true;
+      }
+    } catch {}
     return false;
   }
 }
@@ -137,7 +143,7 @@ async function performStep(page: Page, step: NormalizedFlow['steps'][number], ba
     console.log(`[Playwright Adapter] Session already authenticated at ${currentUrl}. Bypassing login step "${step.id}" (${step.action}).`);
     if (step.action === 'screenshot') {
       const screenshotPath = path.join(runDir, `${safeArtifactName(step.name ?? step.id)}.png`);
-      const ok = await safePageScreenshot(page, screenshotPath, false);
+      const ok = await safePageScreenshot(page, screenshotPath, true);
       if (ok) return { type: 'screenshot', path: screenshotPath };
     }
     return undefined;
@@ -225,7 +231,7 @@ async function performStep(page: Page, step: NormalizedFlow['steps'][number], ba
     }
     case 'screenshot': {
       const screenshotPath = path.join(runDir, `${safeArtifactName(step.name ?? step.id)}.png`);
-      const ok = await safePageScreenshot(page, screenshotPath, false);
+      const ok = await safePageScreenshot(page, screenshotPath, true);
       if (ok) return { type: 'screenshot', path: screenshotPath };
       return undefined;
     }
@@ -409,7 +415,7 @@ export async function executeWebFlow(
       if (stepSucceeded) {
         if (flow.execution.screenshot === 'always' && step.action !== 'screenshot') {
           const screenshotPath = path.join(screenshotDir, `step-${index + 1}.png`);
-          const ok = await safePageScreenshot(page!, screenshotPath, false);
+          const ok = await safePageScreenshot(page!, screenshotPath, true);
           if (ok) artifacts.push({ type: 'screenshot', path: screenshotPath });
         }
         const stepResult = { id: step.id, index, action: step.action, status: 'PASSED' as const, durationMs: Date.now() - started };
@@ -418,7 +424,7 @@ export async function executeWebFlow(
         const message = lastError instanceof Error ? lastError.message : String(lastError);
         if (flow.execution.screenshot !== 'off') {
           const screenshotPath = path.join(screenshotDir, `failure-step-${index + 1}.png`);
-          const ok = await safePageScreenshot(page!, screenshotPath, false);
+          const ok = await safePageScreenshot(page!, screenshotPath, true);
           if (ok) artifacts.push({ type: 'screenshot', path: screenshotPath });
         }
         const lowerMsg = message.toLowerCase();

@@ -440,15 +440,13 @@ export async function crawlUI(
           if (observed.state === 'observed') for (const link of links) enqueue(link, item.depth + 1);
           try {
             const stem = `${runKey}-${observed.id}`;
-            const masks = [page.locator('input,textarea,select,[contenteditable="true"],[data-sensitive],iframe')];
-            await page.screenshot({ path: path.join(screenshots, `${stem}.png`), fullPage: false, mask: masks, animations: 'disabled', timeout: 8_000 }).catch(async () => {
+            await page.screenshot({ path: path.join(screenshots, `${stem}.png`), fullPage: true, animations: 'disabled', timeout: 12_000 }).catch(async () => {
               await page.screenshot({ path: path.join(screenshots, `${stem}.png`), fullPage: false, animations: 'disabled', timeout: 5_000 }).catch(() => {});
             });
             observed.screenshot = `screenshots/${stem}.png`;
-            // Optional accessibility evidence: clear form values before serializing, never save raw DOM.
+            // Optional accessibility evidence without clearing form values
             const body = page.locator('body');
             if (typeof body.ariaSnapshot === 'function') {
-              await page.evaluate(`(${browserFunctionSource(clearFormValues)})()`).catch(() => {});
               const snapshot = await body.ariaSnapshot({ timeout: 2_000 }).catch(() => '');
               if (snapshot) await writeFile(path.join(screenshots, `${stem}.aria.txt`), scrubText(snapshot.replace(/https?:\/\/[^\s"<>]+/g, raw => scrubUrl(raw)))).catch(() => {});
             }
@@ -460,6 +458,13 @@ export async function crawlUI(
           const msg = err instanceof Error ? err.message : String(err);
           observed.state = blockedNavigation ? 'blocked' : 'error';
           error(blockedNavigation ? 'Navigation blocked by crawl policy.' : `Page inspection failed: ${msg}`);
+          try {
+            const stem = `${runKey}-${observed.id}-error`;
+            await page.screenshot({ path: path.join(screenshots, `${stem}.png`), fullPage: false, animations: 'disabled', timeout: 5_000 }).catch(() => {});
+            observed.screenshot = `screenshots/${stem}.png`;
+          } catch {
+            // Error screenshot is best-effort
+          }
         }
         observed.errors = [...errors]; observed.network = [...network];
         output.set(canonicalPath, observed);

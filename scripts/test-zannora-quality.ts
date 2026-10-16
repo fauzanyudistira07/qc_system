@@ -61,6 +61,7 @@ async function login(page: Page, email: string, expected: RegExp, record = true)
 async function auditPage(page: Page, browser: string, viewport: Viewport, route: string) {
   const response = await page.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(150);
+  await screenshot(page, `${browser}-${viewport.name}-${slug(route)}`).catch(() => {});
   const result = await page.evaluate(String.raw`(() => {
     const visible = (element) => {
       const style = getComputedStyle(element);

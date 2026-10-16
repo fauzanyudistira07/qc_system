@@ -33,7 +33,9 @@ async function main() {
     const runStamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/:/g, '-');
     const runDir = path.resolve('.qc-artifacts/test-runs', 'zannora', 'web-roles', role, runStamp);
     const videoDir = path.join(runDir, '.videos');
+    const screenshotDir = path.join(runDir, 'screenshots');
     await mkdir(videoDir, { recursive: true });
+    await mkdir(screenshotDir, { recursive: true });
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: VIDEO_RECORDING.viewport, recordVideo: { dir: videoDir, ...VIDEO_RECORDING.recordVideo } });
     const page = await context.newPage();
@@ -50,7 +52,16 @@ async function main() {
         const status = response?.status() ?? 0;
         const finalPath = new URL(page.url()).pathname;
         const passed = status === test.expectedStatus && (!test.expectedPath || test.expectedPath.test(finalPath));
-        results.push({ ...test, status, finalPath, passed });
+        const slug = test.route.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'index';
+        const screenshotPath = path.join(screenshotDir, `${role}-${slug}.png`);
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: true, animations: 'disabled', timeout: 8_000 });
+        } catch {
+          try {
+            await page.screenshot({ path: screenshotPath, fullPage: false, animations: 'disabled', timeout: 4_000 });
+          } catch {}
+        }
+        results.push({ ...test, status, finalPath, passed, screenshot: screenshotPath });
         if (!passed) throw new Error(`${role} ${test.route}: expected ${test.expectedStatus}/${test.expectedPath} got ${status}/${finalPath}`);
       }
     } finally {
