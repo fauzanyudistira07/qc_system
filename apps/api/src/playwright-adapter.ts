@@ -98,15 +98,24 @@ function replaceVariables(value: unknown, variables: Record<string, unknown>): u
 function resolveLocator(page: Page, raw?: Target) {
   if (!raw) return page.locator('body');
   const exact = raw.exact ?? true;
-  switch (raw.strategy) {
-    case 'testId': return page.getByTestId(raw.value);
-    case 'role': return page.getByRole(raw.role as never, { name: raw.name ?? raw.value, exact });
-    case 'label': return page.getByLabel(raw.value, { exact });
-    case 'placeholder': return page.getByPlaceholder(raw.value, { exact });
-    case 'text': return page.getByText(raw.value, { exact });
-    case 'id': return page.locator(raw.value.startsWith('#') ? raw.value : `#${raw.value}`);
-    case 'css': return page.locator(raw.value);
-    default: throw new Error(`Locator strategy ${raw.strategy} tidak didukung Playwright`);
+  const rawAny = raw as any;
+  const strategy = raw.strategy || (rawAny.selector ? 'css' : rawAny.text ? 'text' : rawAny.id ? 'id' : undefined);
+  const value = raw.value ?? rawAny.selector ?? rawAny.text ?? rawAny.id ?? '';
+
+  switch (strategy) {
+    case 'testId': return page.getByTestId(value);
+    case 'role': return page.getByRole(raw.role as never, { name: raw.name ?? value, exact });
+    case 'label': return page.getByLabel(value, { exact });
+    case 'placeholder': return page.getByPlaceholder(value, { exact });
+    case 'text': return page.getByText(value, { exact });
+    case 'id': return page.locator(String(value).startsWith('#') ? value : `#${value}`);
+    case 'css': return page.locator(value);
+    default: {
+      if (typeof value === 'string' && value.trim()) {
+        return page.locator(value);
+      }
+      return page.locator('body');
+    }
   }
 }
 
@@ -364,30 +373,35 @@ export async function executeWebFlow(
       const isPublicFlow = flowKey === 'web-public' || flowKey.includes('landing') || flowKey.includes('public');
       if (!isPublicFlow) {
         try {
-          const backendBase = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
-          const authData = await getCachedAuthToken(backendBase);
+          const isTravelAgent = process.env.PROJECT_TYPE === 'travel-agent' ||
+            baseUrl.includes('travel') ||
+            baseUrl.includes('jamaahku');
+          if (isTravelAgent) {
+            const backendBase = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+            const authData = await getCachedAuthToken(backendBase);
 
-          if (authData?.token) {
-            await context.addCookies([
-              {
-                name: 'session-travel-agent',
-                value: authData.token,
-                url: baseUrl
-              },
-              {
-                name: 'id_user',
-                value: String(authData.id_user || 42),
-                url: baseUrl
-              }
-            ]);
-            await context.addInitScript(({ token, uid }) => {
-              try {
-                document.cookie = `session-travel-agent=${token}; path=/;`;
-                document.cookie = `id_user=${uid}; path=/;`;
-                localStorage.setItem('session-travel-agent', token);
-                localStorage.setItem('id_user', uid);
-              } catch {}
-            }, { token: authData.token, uid: String(authData.id_user || 42) });
+            if (authData?.token) {
+              await context.addCookies([
+                {
+                  name: 'session-travel-agent',
+                  value: authData.token,
+                  url: baseUrl
+                },
+                {
+                  name: 'id_user',
+                  value: String(authData.id_user || 42),
+                  url: baseUrl
+                }
+              ]);
+              await context.addInitScript(({ token, uid }) => {
+                try {
+                  document.cookie = `session-travel-agent=${token}; path=/;`;
+                  document.cookie = `id_user=${uid}; path=/;`;
+                  localStorage.setItem('session-travel-agent', token);
+                  localStorage.setItem('id_user', uid);
+                } catch {}
+              }, { token: authData.token, uid: String(authData.id_user || 42) });
+            }
           }
         } catch {}
       }

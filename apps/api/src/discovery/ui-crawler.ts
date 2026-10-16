@@ -199,40 +199,48 @@ export async function crawlUI(
     browser = await chromium.launch({ headless: true, timeout: 20_000 });
     check();
 
-    // Auto-discover backend API token for local authenticated crawl sessions if available
+    // Auto-discover backend API token for travel-agent authenticated crawl sessions if applicable
     let autoToken: string | undefined;
     let autoUserId = '42';
-    const authCredentials = [
-      ...accounts.map(a => ({ username: a.email, password: a.password, role: a.role })),
-      { username: 'QC_PATCH_TA', password: 'password123', role: 'travel-agent' }
-    ];
+    const isTravelAgent = process.env.PROJECT_TYPE === 'travel-agent' ||
+      base.href.includes('travel') ||
+      base.href.includes('jamaahku') ||
+      accounts.some(a => a.role === 'travel-agent');
 
-    for (const cred of authCredentials) {
-      if (!cred.username || !cred.password) continue;
-      try {
-        const authRes = await fetch('http://127.0.0.1:8000/api/v1/web/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: cred.username, password: cred.password }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (authRes.ok) {
-          const authData = await authRes.json() as any;
-          autoToken = authData.token || authData.data?.token || authData.access_token;
-          const user = authData.data || authData.user || { id_user: 42 };
-          autoUserId = String(user.id_user || 42);
-          if (autoToken) {
-            progress(`Auto-auth: Backend session acquired for user '${cred.username}' (ID ${autoUserId}).`);
-            break;
+    if (isTravelAgent) {
+      const authEndpoint = new URL('/api/v1/web/auth/login', process.env.BACKEND_URL || base.origin).toString();
+      const authCredentials = [
+        ...accounts.map(a => ({ username: a.email, password: a.password, role: a.role })),
+        { username: 'QC_PATCH_TA', password: 'password123', role: 'travel-agent' }
+      ];
+
+      for (const cred of authCredentials) {
+        if (!cred.username || !cred.password) continue;
+        try {
+          const authRes = await fetch(authEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: cred.username, password: cred.password }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (authRes.ok) {
+            const authData = await authRes.json() as any;
+            autoToken = authData.token || authData.data?.token || authData.access_token;
+            const user = authData.data || authData.user || { id_user: 42 };
+            autoUserId = String(user.id_user || 42);
+            if (autoToken) {
+              progress(`Auto-auth: Backend session acquired for user '${cred.username}' (ID ${autoUserId}).`);
+              break;
+            }
           }
+        } catch (e) {
+          progress(`Auto-auth attempt for '${cred.username}' note: ${e instanceof Error ? e.message : String(e)}`);
         }
-      } catch (e) {
-        progress(`Auto-auth attempt for '${cred.username}' note: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 
     // Prioritize direct token-authenticated session if available, otherwise fallback to form login
-    const effectiveAccounts: Account[] = autoToken
+    const effectiveAccounts: Account[] = (autoToken && isTravelAgent)
       ? [{ email: 'QC_PATCH_TA', password: 'password123', role: 'travel-agent' }]
       : (loginConfigured ? accounts.slice(0, 5) : []);
     const sessions: Array<Account | undefined> = [...effectiveAccounts, undefined];

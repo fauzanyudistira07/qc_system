@@ -1259,7 +1259,7 @@ app.post<{ Body: { localPath: string } }>('/api/v1/uploads/apk-local', async (re
   } catch { /* ignore */ }
 
   // Fallback metadata if aapt dump is not available
-  if (!metadata.packageId && filename.includes('app-release') || filename.includes('app-debug')) {
+  if (!metadata.packageId && (filename.includes('app-release') || filename.includes('app-debug'))) {
     if (resolvedPath.toLowerCase().includes('tasdig')) {
       metadata.packageId = 'com.taskia.digital';
       metadata.appName = 'Taskia Digital';

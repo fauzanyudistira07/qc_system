@@ -21,11 +21,13 @@ async function main() {
     } catch {}
   }
   if (!sourceContent) throw new Error('Navigation flow file not found in candidates: ' + candidatePaths.join(', '));
-  const source = sourceContent
-    .replace('${QC_ZANNORA_EMAIL}', JSON.stringify(email))
-    .replace('${QC_ZANNORA_PASSWORD}', JSON.stringify(password));
-  const validation = validateFlow(source);
+  const validation = validateFlow(sourceContent);
   if (!validation.valid || !validation.normalized) throw new Error(`Navigation flow validation failed: ${JSON.stringify(validation.errors)}`);
+  validation.normalized.variables = {
+    ...validation.normalized.variables,
+    QC_ZANNORA_EMAIL: email,
+    QC_ZANNORA_PASSWORD: password,
+  };
   const runStamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/:/g, '-');
   const runId = `zannora/navigation/${runStamp}`;
   const result = await executeWebFlow(validation.normalized, runId, process.env.QC_ZANNORA_BASE_URL || 'http://127.0.0.1:8000', path.resolve('.qc-artifacts/test-runs'), (step) => {

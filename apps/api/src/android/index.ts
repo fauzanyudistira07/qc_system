@@ -819,12 +819,14 @@ export async function executeAndroidRawFlow(
     if (!targetDevice || !recordProc) return;
     try {
       appendLog('Menghentikan perekaman video Android...');
-      // Gunakan kill via pid lebih reliable dari pkill -2 di semua Android versi
       const pidRes = await runCli('adb', ['-s', targetDevice, 'shell', 'pidof', 'screenrecord'], 3000);
-      const pid = pidRes.stdout.trim();
-      if (pid) {
-        await runCli('adb', ['-s', targetDevice, 'shell', 'kill', '-SIGTERM', pid], 3000);
-        appendLog(`screenrecord PID ${pid} dihentikan via SIGTERM`);
+      const rawPid = pidRes.stdout.trim();
+      const pids = rawPid.split(/\s+/).filter(Boolean);
+      if (pids.length > 0) {
+        for (const pid of pids) {
+          await runCli('adb', ['-s', targetDevice, 'shell', 'kill', '-SIGTERM', pid], 3000);
+          appendLog(`screenrecord PID ${pid} dihentikan via SIGTERM`);
+        }
       } else {
         // Fallback: pkill jika pidof tidak tersedia
         await runCli('adb', ['-s', targetDevice, 'shell', 'pkill', '-SIGTERM', 'screenrecord'], 3000);

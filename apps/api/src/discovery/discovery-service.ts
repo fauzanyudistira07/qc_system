@@ -540,49 +540,122 @@ export class DiscoveryService {
       }
     }
 
-    for (const flowItem of targetFlows) {
-      // ── Deteksi raw Maestro YAML (Android native format) ──────────────────
-      // Flow yang dibangun oleh inventory-to-flow.ts baru menggunakan format:
-      //   appId: com.xxx.xxx
-      //   name: "..."
-      //   ---
-      //   - tapOn: ...
-      // Format ini langsung bisa dieksekusi oleh Maestro CLI tanpa perlu
-      // parsing skema QC Flow terlebih dahulu.
-      const isRawMaestroYaml = typeof flowItem.source === 'string' &&
-        flowItem.source.trimStart().startsWith('appId:');
+    try {
+      for (const flowItem of targetFlows) {
+        // ── Deteksi raw Maestro YAML (Android native format) ──────────────────
+        // Flow yang dibangun oleh inventory-to-flow.ts baru menggunakan format:
+        //   appId: com.xxx.xxx
+        //   name: "..."
+        //   ---
+        //   - tapOn: ...
+        // Format ini langsung bisa dieksekusi oleh Maestro CLI tanpa perlu
+        // parsing skema QC Flow terlebih dahulu.
+        const isRawMaestroYaml = typeof flowItem.source === 'string' &&
+          flowItem.source.trimStart().startsWith('appId:');
 
-      if (isRawMaestroYaml && flowItem.platform === 'android') {
+        if (isRawMaestroYaml && flowItem.platform === 'android') {
+          const runId = `run-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+          this.addLog(job, 'runner', `Menjalankan: ${flowItem.name} (android)`);
+          try {
+            const apkUploadId = (job.config as any)?.apkUploadId;
+            const apkUpload = apkUploadId ? this.getUpload(apkUploadId) : undefined;
+            const apkPath = (apkUpload as any)?.path;
+            const shouldInstall = Boolean(apkPath && !installedApks.has(apkPath));
+            const runResult = await executeAndroidRawFlow(
+              flowItem.source,
+              flowItem.name,
+              job.config.appId || 'com.sopan.digital',
+              runId,
+              jobArtifactDir,
+              job.config.deviceId,
+              undefined,
+              shouldInstall ? apkPath : undefined
+            );
+            if (apkPath && shouldInstall) installedApks.add(apkPath);
+            job.results.push({
+              ...runResult,
+              flowId: flowItem.id,
+              runId,
+              finishedAt: new Date().toISOString()
+            });
+            flowItem.status = runResult.status;
+            this.addLog(job, 'runner', `Selesai: ${flowItem.name} -> ${runResult.status}`);
+            void this.persist();
+          } catch (err) {
+            this.addLog(job, 'runner', `Gagal menjalankan ${flowItem.name}: ${err instanceof Error ? err.message : String(err)}`);
+            flowItem.status = 'FAILED';
+            job.results.push({
+              status: 'INFRA_ERROR',
+              steps: [],
+              artifacts: [],
+              flowId: flowItem.id,
+              runId,
+              finishedAt: new Date().toISOString()
+            });
+            void this.persist();
+          }
+          continue;
+        }
+
+        // ── Flow schema QC biasa ───────────────────────────────────────────────
+        const validation = validateFlow(flowItem.source);
+        if (!validation.valid || !validation.normalized) {
+          this.addLog(job, 'runner', `Flow ${flowItem.name} tidak valid: skip.`);
+          continue;
+        }
+        const normalized = validation.normalized;
+        const runtimeAccount = job.config.accounts?.[0];
+        const effectivePassword = runtimePassword || this.runtimeAuditPasswords.get(id) || (runtimeAccount as any)?.password || 'password';
+        const effectiveEmail = runtimeAccount?.email || 'admin@zannora.com';
+        const executableFlow = {
+          ...normalized,
+          ...(normalized.target.platform === 'web' ? {
+            execution: {
+              ...normalized.execution,
+              video: 'on' as const,
+            }
+          } : {}),
+          variables: {
+            ...normalized.variables,
+            QC_EMAIL: effectiveEmail,
+            QC_PASSWORD: effectivePassword,
+          },
+        };
         const runId = `run-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
-        this.addLog(job, 'runner', `Menjalankan: ${flowItem.name} (android)`);
+        this.addLog(job, 'runner', `Menjalankan: ${flowItem.name} (${normalized.target.platform})`);
+
         try {
-          const apkUploadId = (job.config as any)?.apkUploadId;
-          const apkUpload = apkUploadId ? this.getUpload(apkUploadId) : undefined;
-          const apkPath = (apkUpload as any)?.path;
-          const shouldInstall = Boolean(apkPath && !installedApks.has(apkPath));
-          const runResult = await executeAndroidRawFlow(
-            flowItem.source,
-            flowItem.name,
-            job.config.appId || 'com.sopan.digital',
-            runId,
-            jobArtifactDir,
-            job.config.deviceId,
-            undefined,
-            shouldInstall ? apkPath : undefined
-          );
-          if (apkPath && shouldInstall) installedApks.add(apkPath);
+          let runResult: WebRunResult;
+          if (normalized.target.platform === 'android') {
+            const apkUploadId = (job.config as any)?.apkUploadId;
+            const apkUpload = apkUploadId ? this.getUpload(apkUploadId) : undefined;
+            const apkPath = (apkUpload as any)?.path;
+            const shouldInstall = Boolean(apkPath && !installedApks.has(apkPath));
+            runResult = await executeAndroidFlow(normalized, runId, jobArtifactDir, job.config.deviceId, undefined, shouldInstall ? apkPath : undefined);
+            if (apkPath && shouldInstall) installedApks.add(apkPath);
+          } else {
+            runResult = await executeWebFlow(
+              executableFlow,
+              runId,
+              job.config.baseUrl,
+              jobArtifactDir,
+              (step) => {
+                this.addLog(job, 'runner', `Step ${step.index + 1}: ${step.action} -> ${step.status}`);
+              },
+              webRecordingSession
+            );
+          }
+
           job.results.push({
             ...runResult,
             flowId: flowItem.id,
             runId,
             finishedAt: new Date().toISOString()
           });
-          flowItem.status = runResult.status;
+
           this.addLog(job, 'runner', `Selesai: ${flowItem.name} -> ${runResult.status}`);
-          void this.persist();
         } catch (err) {
           this.addLog(job, 'runner', `Gagal menjalankan ${flowItem.name}: ${err instanceof Error ? err.message : String(err)}`);
-          flowItem.status = 'FAILED';
           job.results.push({
             status: 'INFRA_ERROR',
             steps: [],
@@ -591,98 +664,27 @@ export class DiscoveryService {
             runId,
             finishedAt: new Date().toISOString()
           });
-          void this.persist();
         }
-        continue;
       }
-
-      // ── Flow schema QC biasa ───────────────────────────────────────────────
-      const validation = validateFlow(flowItem.source);
-      if (!validation.valid || !validation.normalized) {
-        this.addLog(job, 'runner', `Flow ${flowItem.name} tidak valid: skip.`);
-        continue;
-      }
-      const normalized = validation.normalized;
-      const runtimeAccount = job.config.accounts?.[0];
-      const effectivePassword = runtimePassword || this.runtimeAuditPasswords.get(id) || (runtimeAccount as any)?.password || 'password';
-      const effectiveEmail = runtimeAccount?.email || 'admin@zannora.com';
-      const executableFlow = {
-        ...normalized,
-        ...(normalized.target.platform === 'web' ? {
-          execution: {
-            ...normalized.execution,
-            video: 'on' as const,
+    } finally {
+      if (webRecordingSession) {
+        try {
+          const fullFlowVideoPath = path.join(jobArtifactDir, 'full-flow.webm');
+          const savedVideo = await finishWebRecordingSession(webRecordingSession, fullFlowVideoPath);
+          if (savedVideo) {
+            const evidenceVideoPath = path.join(jobArtifactDir, 'evidence', 'videos', 'full-flow.webm');
+            await mkdir(path.dirname(evidenceVideoPath), { recursive: true });
+            await copyFile(savedVideo, evidenceVideoPath).catch(() => {});
+            this.addLog(job, 'runner', '🎬 Video full flow (30 FPS 720p) berhasil direkam & disimpan.');
+            if (job.results.length > 0) {
+              job.results[0].artifacts.unshift({ type: 'video', path: fullFlowVideoPath });
+            }
           }
-        } : {}),
-        variables: {
-          ...normalized.variables,
-          QC_EMAIL: effectiveEmail,
-          QC_PASSWORD: effectivePassword,
-        },
-      };
-      const runId = `run-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
-      this.addLog(job, 'runner', `Menjalankan: ${flowItem.name} (${normalized.target.platform})`);
-
-      try {
-        let runResult: WebRunResult;
-        if (normalized.target.platform === 'android') {
-          const apkUploadId = (job.config as any)?.apkUploadId;
-          const apkUpload = apkUploadId ? this.getUpload(apkUploadId) : undefined;
-          const apkPath = (apkUpload as any)?.path;
-          const shouldInstall = Boolean(apkPath && !installedApks.has(apkPath));
-          runResult = await executeAndroidFlow(normalized, runId, jobArtifactDir, job.config.deviceId, undefined, shouldInstall ? apkPath : undefined);
-          if (apkPath && shouldInstall) installedApks.add(apkPath);
-        } else {
-          runResult = await executeWebFlow(
-            executableFlow,
-            runId,
-            job.config.baseUrl,
-            jobArtifactDir,
-            (step) => {
-              this.addLog(job, 'runner', `Step ${step.index + 1}: ${step.action} -> ${step.status}`);
-            },
-            webRecordingSession
-          );
+        } catch (videoFinalizeErr) {
+          this.addLog(job, 'runner', `Peringatan finalisasi video full flow: ${videoFinalizeErr}`);
+        } finally {
+          await rm(rawVideoDir, { recursive: true, force: true }).catch(() => {});
         }
-
-        job.results.push({
-          ...runResult,
-          flowId: flowItem.id,
-          runId,
-          finishedAt: new Date().toISOString()
-        });
-
-        this.addLog(job, 'runner', `Selesai: ${flowItem.name} -> ${runResult.status}`);
-      } catch (err) {
-        this.addLog(job, 'runner', `Gagal menjalankan ${flowItem.name}: ${err instanceof Error ? err.message : String(err)}`);
-        job.results.push({
-          status: 'INFRA_ERROR',
-          steps: [],
-          artifacts: [],
-          flowId: flowItem.id,
-          runId,
-          finishedAt: new Date().toISOString()
-        });
-      }
-    }
-
-    if (webRecordingSession) {
-      try {
-        const fullFlowVideoPath = path.join(jobArtifactDir, 'full-flow.webm');
-        const savedVideo = await finishWebRecordingSession(webRecordingSession, fullFlowVideoPath);
-        if (savedVideo) {
-          const evidenceVideoPath = path.join(jobArtifactDir, 'evidence', 'videos', 'full-flow.webm');
-          await mkdir(path.dirname(evidenceVideoPath), { recursive: true });
-          await copyFile(savedVideo, evidenceVideoPath).catch(() => {});
-          this.addLog(job, 'runner', '🎬 Video full flow (30 FPS 720p) berhasil direkam & disimpan.');
-          if (job.results.length > 0) {
-            job.results[0].artifacts.unshift({ type: 'video', path: fullFlowVideoPath });
-          }
-        }
-      } catch (videoFinalizeErr) {
-        this.addLog(job, 'runner', `Peringatan finalisasi video full flow: ${videoFinalizeErr}`);
-      } finally {
-        await rm(rawVideoDir, { recursive: true, force: true }).catch(() => {});
       }
     }
 
@@ -1799,7 +1801,10 @@ export class DiscoveryService {
       job.phase = 'COMPLETED';
       job.progress = 100;
       job.finishedAt = new Date().toISOString();
-      job.message = `Discovery selesai. ${inventory.pages.length} layar terpetakan, ${flows.length} skenario dihasilkan.`;
+      const runSummary = (job.results && job.results.length > 0)
+        ? `Eksekusi: ${job.results.filter(r => r.status === 'PASSED').length}/${job.results.length} flow lulus.`
+        : `${flows.length} skenario dihasilkan.`;
+      job.message = `Discovery selesai. ${inventory.pages.length} layar terpetakan. ${runSummary}`;
       this.addLog(job, 'system', '════════════════════════════════════════');
       this.addLog(job, 'system', `✅ ${job.message}`);
       this.addLog(job, 'system', `🕒 Selesai pada: ${new Intl.DateTimeFormat('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'full', timeStyle: 'medium' }).format(new Date())} WIB`);
