@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile, readdir, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseAllDocuments } from 'yaml';
@@ -855,6 +856,9 @@ export async function executeAndroidRawFlow(
     }
   };
 
+  const hasExplicitScreenshots = rawCommands.some((c) => Boolean(c.takeScreenshot));
+  let lastCapturedHash = '';
+
   try {
     for (let idx = 0; idx < rawCommands.length; idx++) {
       if (signal?.aborted) {
@@ -873,12 +877,29 @@ export async function executeAndroidRawFlow(
           actionName = `takeScreenshot: ${snapName}`;
           appendLog(`Mengambil screenshot: ${snapName}...`);
           if (targetDevice) {
-            const snap = await captureDeviceScreen(targetDevice);
+            let snap = await captureDeviceScreen(targetDevice);
             if (snap.success && snap.buffer) {
-              const snapPath = path.join(runDir, `${snapName}.png`);
-              await writeFile(snapPath, snap.buffer);
-              artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
-              appendLog(`Screenshot tersimpan: ${snapPath} (${snap.buffer.length} bytes)`);
+              let snapHash = createHash('sha256').update(snap.buffer).digest('hex');
+              // Jika buffer identik dengan capture sebelumnya, beri waktu jeda 1.5s agar transisi layar selesai lalu coba sekali lagi
+              if (snapHash === lastCapturedHash) {
+                appendLog(`Layar belum berubah dari capture sebelumnya. Menunggu transisi 1500ms...`);
+                await new Promise((r) => setTimeout(r, 1500));
+                const retrySnap = await captureDeviceScreen(targetDevice);
+                if (retrySnap.success && retrySnap.buffer) {
+                  snap = retrySnap;
+                  snapHash = createHash('sha256').update(snap.buffer).digest('hex');
+                }
+              }
+
+              if (snapHash === lastCapturedHash) {
+                appendLog(`Peringatan: Layar tidak berubah setelah aksi (${snapName} identik dengan capture sebelumnya). Screenshot duplikat tidak disimpan ulang.`);
+              } else {
+                lastCapturedHash = snapHash;
+                const snapPath = path.join(runDir, `${snapName}.png`);
+                await writeFile(snapPath, snap.buffer);
+                artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
+                appendLog(`Screenshot tersimpan: ${snapPath} (${snap.buffer.length} bytes)`);
+              }
             } else {
               appendLog(`Peringatan: Screencap gagal: ${snap.error}`);
             }
@@ -888,6 +909,18 @@ export async function executeAndroidRawFlow(
           const text = String(tapSpec.text || '').trim();
           const isOptional = Boolean(tapSpec.optional);
           actionName = `tapOn: "${text || tapSpec.point || 'element'}"`;
+          // Cek apakah langkah navigasi tab dashboard dijalankan saat aplikasi masih tertahan di layar Login
+          if (targetDevice && /beranda|home|absensi|keuangan|informasi|t2q/i.test(text)) {
+            const currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
+            const hasLoginField = currentNodes.some((n) => /nis|password|sandi|masuk/i.test(n.text || n.contentDesc || ''));
+            const hasDashboard = currentNodes.some((n) => /beranda|absensi|keuangan|informasi|t2q/i.test(n.text || n.contentDesc || ''));
+            if (hasLoginField && !hasDashboard) {
+              appendLog(`[Navigation Guard] Tidak dapat membuka tab "${text}" karena aplikasi masih tertahan di layar Login.`);
+              if (isOptional) continue;
+              throw new Error(`Navigasi ke "${text}" dibatalkan: aplikasi belum berhasil login.`);
+            }
+          }
+
           // Cek apakah langkah login perlu dilewati jika aplikasi sudah berada di Beranda/Dashboard
           if (targetDevice && /nis|nisn|password|sandi|masuk/i.test(text) && isOptional) {
             const currentNodes = await readUiNodes(targetDevice).catch(() => []);
@@ -994,18 +1027,24 @@ export async function executeAndroidRawFlow(
                 }
               } catch { /* ignore */ }
             }
-            // Ambil screenshot otomatis setelah setiap tap untuk dokumentasi step
-            try {
-              const snap = await captureDeviceScreen(targetDevice);
-              if (snap.success && snap.buffer) {
-                const safeAction = text.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 30);
-                const snapName = `step-${String(idx + 1).padStart(2, '0')}-tap-${safeAction}`;
-                const snapPath = path.join(runDir, `${snapName}.png`);
-                await writeFile(snapPath, snap.buffer);
-                artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
-                appendLog(`Screenshot step ${idx + 1} tersimpan: ${snapName}.png`);
-              }
-            } catch { /* screenshot opsional, jangan gagalkan step */ }
+            // Ambil screenshot otomatis setelah tap HANYA jika flow tidak mendefinisikan screenshot eksplisit
+            if (!hasExplicitScreenshots) {
+              try {
+                const snap = await captureDeviceScreen(targetDevice);
+                if (snap.success && snap.buffer) {
+                  const snapHash = createHash('sha256').update(snap.buffer).digest('hex');
+                  if (snapHash !== lastCapturedHash) {
+                    lastCapturedHash = snapHash;
+                    const safeAction = text.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 30);
+                    const snapName = `step-${String(idx + 1).padStart(2, '0')}-tap-${safeAction}`;
+                    const snapPath = path.join(runDir, `${snapName}.png`);
+                    await writeFile(snapPath, snap.buffer);
+                    artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
+                    appendLog(`Screenshot step ${idx + 1} tersimpan: ${snapName}.png`);
+                  }
+                }
+              } catch { /* screenshot opsional, jangan gagalkan step */ }
+            }
           }
         } else if (cmd.inputText) {
           const value = String(cmd.inputText);
@@ -1023,18 +1062,24 @@ export async function executeAndroidRawFlow(
             // Masukkan teks ke field yang sedang berfokus
             await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'text', value.replace(/ /g, '%s')], 6000);
             await new Promise((r) => setTimeout(r, 500));
-            // Screenshot setelah input text untuk dokumentasi
-            try {
-              const snap = await captureDeviceScreen(targetDevice);
-              if (snap.success && snap.buffer) {
-                const safeVal = value.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 20);
-                const snapName = `step-${String(idx + 1).padStart(2, '0')}-input-${safeVal}`;
-                const snapPath = path.join(runDir, `${snapName}.png`);
-                await writeFile(snapPath, snap.buffer);
-                artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
-                appendLog(`Screenshot step ${idx + 1} (input) tersimpan: ${snapName}.png`);
-              }
-            } catch { /* screenshot opsional */ }
+            // Screenshot setelah input text HANYA jika flow tidak memiliki screenshot eksplisit
+            if (!hasExplicitScreenshots) {
+              try {
+                const snap = await captureDeviceScreen(targetDevice);
+                if (snap.success && snap.buffer) {
+                  const snapHash = createHash('sha256').update(snap.buffer).digest('hex');
+                  if (snapHash !== lastCapturedHash) {
+                    lastCapturedHash = snapHash;
+                    const safeVal = value.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 20);
+                    const snapName = `step-${String(idx + 1).padStart(2, '0')}-input-${safeVal}`;
+                    const snapPath = path.join(runDir, `${snapName}.png`);
+                    await writeFile(snapPath, snap.buffer);
+                    artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
+                    appendLog(`Screenshot step ${idx + 1} (input) tersimpan: ${snapName}.png`);
+                  }
+                }
+              } catch { /* screenshot opsional */ }
+            }
           }
         } else if (cmd.pressKey) {
           const key = String(cmd.pressKey).toUpperCase();
@@ -1082,6 +1127,11 @@ export async function executeAndroidRawFlow(
             } catch { /* ignore */ }
           }
           if (targetDevice && !visible) {
+            const currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
+            const hasLoginField = currentNodes.some((n) => /nis|password|sandi|masuk/i.test(n.text || n.contentDesc || ''));
+            if (/beranda|home/i.test(text) && hasLoginField) {
+              throw new Error(`Login belum berhasil: aplikasi masih berada di layar Login (elemen "${text}" tidak muncul).`);
+            }
             if (isOptional || /beranda|home/i.test(text)) {
               appendLog(`Assertion "${text}" diverifikasi dengan toleransi navigasi mobile.`);
             } else {
