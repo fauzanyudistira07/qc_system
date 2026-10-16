@@ -21,6 +21,12 @@ if ($currentBranch -ne "main") {
     git checkout main
 }
 
+$StateFile = Join-Path $RepoRoot ".qc-artifacts\.last-deployed-sha"
+$lastDeployedSha = ""
+if (Test-Path $StateFile) {
+    $lastDeployedSha = (Get-Content $StateFile -Raw).Trim()
+}
+
 while ($true) {
     try {
         # Fetch remote update tanpa mengubah file lokal
@@ -29,30 +35,41 @@ while ($true) {
         $localSha = (git rev-parse HEAD 2>$null).Trim()
         $remoteSha = (git rev-parse origin/main 2>$null).Trim()
 
-        if ($localSha -ne "" -and $remoteSha -ne "" -and $localSha -ne $remoteSha) {
+        # Hitung apakah origin memiliki commit baru yang belum ada di HEAD lokal
+        $behindCountStr = (git rev-list "HEAD..origin/main" --count 2>$null).Trim()
+        $behindCount = 0
+        [int]::TryParse($behindCountStr, [ref]$behindCount) | Out-Null
+
+        if ($behindCount -gt 0 -and $remoteSha -ne $lastDeployedSha) {
             $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
             $commitMsg = (git log -1 --pretty=format:"%s (%an)" origin/main 2>$null).Trim()
 
-            Write-Host "`n[$timestamp] >>> COMMIT BARU TERDETEKSI DI GITHUB! <<<" -ForegroundColor Green
+            Write-Host "`n[$timestamp] >>> $behindCount COMMIT BARU TERDETEKSI DI GITHUB! <<<" -ForegroundColor Green
             Write-Host "Commit SHA   : $localSha -> $remoteSha" -ForegroundColor White
             Write-Host "Pesan Commit : $commitMsg" -ForegroundColor Yellow
             Write-Host "Menjalankan update sistem..." -ForegroundColor Cyan
 
             # 1. Pull update
-            Write-Host "`n[1/2] Melakukan git pull origin main..." -ForegroundColor Cyan
-            git pull origin main
+            Write-Host "`n[1/3] Melakukan git pull origin main..." -ForegroundColor Cyan
+            $pullOutput = git pull origin main 2>&1 | Out-String
+            Write-Host $pullOutput
 
-            # 2. Pastikan kontainer infrastruktur tetap sehat
-            Write-Host "`n[2/3] Memastikan kontainer database & cache aktif..." -ForegroundColor Cyan
-            docker compose -f infrastructure\compose\docker-compose.yml up -d
-            Write-Host "`n[SUCCESS] Server QC Maestro berhasil diperbarui ke commit terbaru ($remoteSha)!" -ForegroundColor Green
-            Write-Host "Perubahan kode langsung aktif via hot-reload dev server.`n" -ForegroundColor Green
+            # Simpan state agar tidak looping
+            $lastDeployedSha = $remoteSha
+            Set-Content -Path $StateFile -Value $remoteSha -Force
 
-            # 3. Kirim notifikasi WhatsApp
-            Write-Host "[3/3] Mengirim konfirmasi pembaruan ke WhatsApp..." -ForegroundColor Cyan
-            $author = (git log -1 --pretty=format:"%an" origin/main 2>$null).Trim()
-            $cleanMsg = (git log -1 --pretty=format:"%s" origin/main 2>$null).Trim()
-            node "scripts\notify-deploy-wa.mjs" --sha "$remoteSha" --msg "$cleanMsg" --author "$author" --status "success"
+            if ($LASTEXITCODE -eq 0 -and $pullOutput -notmatch "Already up to date.") {
+                # 2. Pastikan kontainer infrastruktur tetap sehat
+                Write-Host "`n[2/3] Memastikan kontainer database & cache aktif..." -ForegroundColor Cyan
+                docker compose -f infrastructure\compose\docker-compose.yml up -d 2>$null
+                Write-Host "`n[SUCCESS] Server QC Maestro berhasil diperbarui ke commit terbaru ($remoteSha)!" -ForegroundColor Green
+
+                # 3. Kirim notifikasi WhatsApp (tepat 1 kali)
+                Write-Host "[3/3] Mengirim 1x notifikasi pembaruan ke WhatsApp..." -ForegroundColor Cyan
+                $author = (git log -1 --pretty=format:"%an" origin/main 2>$null).Trim()
+                $cleanMsg = (git log -1 --pretty=format:"%s" origin/main 2>$null).Trim()
+                node "scripts\notify-deploy-wa.mjs" --sha "$remoteSha" --msg "$cleanMsg" --author "$author" --status "success"
+            }
         } else {
             # Idle heartbeat
             $timeNow = (Get-Date).ToString("HH:mm:ss")
@@ -61,7 +78,6 @@ while ($true) {
     }
     catch {
         Write-Host "`n[ERROR] Terjadi kendala saat memeriksa update: $_" -ForegroundColor Red
-        node "scripts\notify-deploy-wa.mjs" --sha "$remoteSha" --msg "$commitMsg" --status "failed" --details "$_"
     }
 
     Start-Sleep -Seconds $CheckIntervalSeconds

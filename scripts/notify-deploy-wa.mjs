@@ -103,6 +103,24 @@ async function main() {
   const tunnelUrl = getTunnelUrl();
   const now = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
+  // Anti-Spam: Cek apakah notifikasi untuk commit ini sudah pernah dikirim dalam 10 menit terakhir
+  const artifactsDir = path.join(rootDir, '.qc-artifacts');
+  if (!fs.existsSync(artifactsDir)) fs.mkdirSync(artifactsDir, { recursive: true });
+  const lockFile = path.join(artifactsDir, '.last-wa-notification.json');
+
+  if (sha) {
+    try {
+      if (fs.existsSync(lockFile)) {
+        const lastData = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+        const ageMs = Date.now() - (lastData.timestamp || 0);
+        if (lastData.sha === sha && lastData.status === status && ageMs < 10 * 60 * 1000) {
+          console.log(`[NotifyDeployWA] Notifikasi WA untuk commit #${shortSha} (${status}) sudah pernah dikirim ${Math.round(ageMs / 1000)}s lalu. Dilewati agar tidak spam.`);
+          return;
+        }
+      }
+    } catch {}
+  }
+
   let message = '';
 
   if (status === 'success') {
@@ -153,6 +171,9 @@ Silakan periksa log server untuk penanganan.`;
 
     const data = await res.json();
     console.log('[NotifyDeployWA] Notifikasi WA berhasil dikirim:', data?.detail || data);
+    try {
+      fs.writeFileSync(lockFile, JSON.stringify({ sha, status, timestamp: Date.now() }));
+    } catch {}
   } catch (err) {
     console.error('[NotifyDeployWA] Gagal mengirim WA:', err.message);
   }
