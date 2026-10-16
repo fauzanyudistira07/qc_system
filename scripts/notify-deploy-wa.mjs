@@ -12,7 +12,7 @@ function loadEnv() {
   const envPath = path.join(rootDir, '.env');
   const config = {
     FONNTE_TOKEN: 'eE8DG7vGPArkv1SewzJd',
-    FONNTE_TARGET: '08882017549,120363411589846495@g.us',
+    FONNTE_TARGET: '08882017549,089508717179,120363411589846495@g.us',
     PORT: '4180'
   };
 
