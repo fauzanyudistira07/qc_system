@@ -184,3 +184,41 @@ export async function uploadToNextcloud(payload: NextcloudUploadPayload): Promis
   return send<NextcloudUploadResponse>('/api/v1/nextcloud/upload-media', payload);
 }
 
+export async function downloadMediaZip(payload: {
+  projectName: string;
+  items: Array<{
+    url: string;
+    featureName: string;
+    type: 'photo' | 'video';
+    title?: string;
+    fileName?: string;
+  }>;
+  jobId?: string;
+}): Promise<void> {
+  const token = getAuthToken();
+  const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
+  const res = await fetch('/api/v1/media/download-zip', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      const parsed = JSON.parse(text);
+      message = parsed.error || parsed.message || text;
+    } catch {}
+    throw new Error(message || `Gagal mengunduh ZIP (${res.status})`);
+  }
+
+  const blob = await res.blob();
+  const cleanName = payload.projectName.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'qc-media';
+  download(blob, `${cleanName}-media.zip`, 'application/zip');
+}
+
+

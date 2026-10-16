@@ -24,7 +24,7 @@ import { buildJsonReport } from './report/report-json.ts';
 import { generatePdfReport } from './report/report-pdf.ts';
 import { cleanupRetention, runtimePolicy } from './runtime-policy.ts';
 import { isAuthEnabled, getAdminConfig, verifyAdminCredentials, createToken, verifyToken, type AdminUser } from './auth.ts';
-import { getNextcloudConfig, checkNextcloudFolder, uploadMediaBatch, type MediaUploadItem } from './nextcloud-service.ts';
+import { getNextcloudConfig, checkNextcloudFolder, uploadMediaBatch, createMediaZipArchive, type MediaUploadItem } from './nextcloud-service.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '../../..');
@@ -127,7 +127,8 @@ app.addHook('onRequest', async (request, reply) => {
     pathOnly.endsWith('/report') ||
     pathOnly.startsWith('/api/v1/system/probe-target') ||
     pathOnly.startsWith('/api/v1/webhooks/') ||
-    pathOnly.startsWith('/api/v1/nextcloud/')
+    pathOnly.startsWith('/api/v1/nextcloud/') ||
+    pathOnly.startsWith('/api/v1/media/download-zip')
   ) {
     return;
   }
@@ -1875,6 +1876,41 @@ app.post<{
     return reply.code(500).send({
       error: `Gagal mengunggah media ke Nextcloud: ${err instanceof Error ? err.message : String(err)}`
     });
+  }
+});
+
+app.post<{
+  Body: {
+    projectName?: string;
+    items?: MediaUploadItem[];
+    jobId?: string;
+  }
+}>('/api/v1/media/download-zip', async (request, reply) => {
+  const projectName = request.body?.projectName?.trim() || 'QC Project';
+  const items = request.body?.items;
+  const jobId = request.body?.jobId;
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return reply.code(400).send({ error: 'Daftar item media tidak boleh kosong' });
+  }
+
+  let zipResult: { zipPath: string; cleanup: () => Promise<void>; filename: string } | null = null;
+  try {
+    zipResult = await createMediaZipArchive(projectName, items, artifactRoot, jobId);
+    const buffer = await readFile(zipResult.zipPath);
+    return reply
+      .type('application/zip')
+      .header('Content-Disposition', `attachment; filename="${zipResult.filename}"`)
+      .header('Cache-Control', 'no-cache')
+      .send(buffer);
+  } catch (err) {
+    return reply.code(500).send({
+      error: `Gagal membuat arsip ZIP: ${err instanceof Error ? err.message : String(err)}`
+    });
+  } finally {
+    if (zipResult) {
+      void zipResult.cleanup();
+    }
   }
 });
 

@@ -1,6 +1,8 @@
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { execSync } from 'node:child_process';
 
 export interface NextcloudConfig {
   url: string;
@@ -363,3 +365,72 @@ export async function uploadMediaBatch(
     files: results
   };
 }
+
+/**
+ * Membuat file arsip .ZIP terkompresi dari seluruh media
+ * dengan struktur folder: [ProjectName] / [Fitur] / [foto|video] / [Filename]
+ */
+export async function createMediaZipArchive(
+  projectName: string,
+  items: MediaUploadItem[],
+  artifactRoot: string,
+  jobId?: string
+): Promise<{ zipPath: string; cleanup: () => Promise<void>; filename: string }> {
+  const cleanProject = sanitizePathComponent(projectName || 'Project-QC');
+  const tempBase = path.join(os.tmpdir(), `qc-zip-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  await fs.promises.mkdir(tempBase, { recursive: true });
+
+  const projectDir = path.join(tempBase, cleanProject);
+  await fs.promises.mkdir(projectDir, { recursive: true });
+
+  const usedPaths = new Set<string>();
+
+  for (const item of items) {
+    const featureClean = sanitizePathComponent(item.featureName || 'General');
+    const typeFolder = item.type === 'video' ? 'video' : 'foto';
+    const targetDir = path.join(projectDir, featureClean, typeFolder);
+    await fs.promises.mkdir(targetDir, { recursive: true });
+
+    let baseName = sanitizePathComponent(item.title || item.fileName || path.basename(item.url.replace(/\?.*$/, '')));
+    const ext = item.type === 'video'
+      ? (item.url.endsWith('.mp4') ? '.mp4' : '.webm')
+      : '.png';
+
+    if (!baseName.toLowerCase().endsWith(ext)) {
+      baseName = `${baseName}${ext}`;
+    }
+
+    let destFile = path.join(targetDir, baseName);
+    let counter = 1;
+    while (usedPaths.has(destFile) || fs.existsSync(destFile)) {
+      const parsed = path.parse(baseName);
+      destFile = path.join(targetDir, `${parsed.name}_${counter}${parsed.ext}`);
+      counter++;
+    }
+    usedPaths.add(destFile);
+
+    const resolved = await resolveArtifactBuffer(item.url, artifactRoot, jobId);
+    if (resolved) {
+      await fs.promises.writeFile(destFile, resolved.buffer);
+    }
+  }
+
+  const zipFilename = `${cleanProject}-media.zip`;
+  const outputZipPath = path.join(tempBase, zipFilename);
+
+  // Kompresi maksimal (-9) menggunakan /usr/bin/zip
+  execSync(`zip -r -9 "${zipFilename}" "${cleanProject}"`, { cwd: tempBase });
+
+  const cleanup = async () => {
+    try {
+      await fs.promises.rm(tempBase, { recursive: true, force: true });
+    } catch {}
+  };
+
+  return {
+    zipPath: outputZipPath,
+    cleanup,
+    filename: zipFilename
+  };
+}
+

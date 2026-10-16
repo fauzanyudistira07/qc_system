@@ -7,6 +7,7 @@ import {
   artifactUrl,
   checkNextcloudFolder,
   uploadToNextcloud,
+  downloadMediaZip,
   type NextcloudFolderCheck,
   type NextcloudUploadResponse
 } from './api';
@@ -225,6 +226,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isZoomed, setIsZoomed] = useState(false);
   const [fetchedEvidence, setFetchedEvidence] = useState<ZannoraEvidence | null>(null);
+  const [isZipping, setIsZipping] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
 
   interface NcModalState {
@@ -649,13 +651,27 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
     }
   };
 
-  const handleDownloadAll = async () => {
-    if (allMediaItems.length === 0) return;
-    for (let i = 0; i < allMediaItems.length; i++) {
-      await handleDownloadItem(allMediaItems[i]);
-      if (i < allMediaItems.length - 1) {
-        await new Promise(r => setTimeout(r, 220));
-      }
+  const handleDownloadAllZip = async () => {
+    if (allMediaItems.length === 0 || isZipping) return;
+    setIsZipping(true);
+    try {
+      const items = allMediaItems.map(item => ({
+        url: item.url,
+        featureName: item.flowName || 'General',
+        type: item.type,
+        title: item.title,
+        fileName: `${(item.title || 'media').replace(/[\\/:*?"<>|]+/g, '_').trim()}.${item.type === 'video' ? 'mp4' : 'png'}`
+      }));
+      await downloadMediaZip({
+        projectName,
+        items,
+        jobId: job?.id
+      });
+    } catch (err) {
+      console.error('Gagal mengunduh ZIP:', err);
+      alert(`Gagal mengunduh ZIP: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsZipping(false);
     }
   };
 
@@ -733,13 +749,30 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
           <button
             type="button"
             className="tool-btn"
-            onClick={handleDownloadAll}
-            disabled={allMediaItems.length === 0}
-            title="Unduh seluruh foto dan video pengujian ke komputer lokal"
+            onClick={handleDownloadAllZip}
+            disabled={allMediaItems.length === 0 || isZipping}
+            title="Unduh seluruh foto dan video dalam satu file ZIP terkompresi"
             style={{ gap: 6, padding: '7px 12px' }}
           >
-            <Icon name="download" size={14} />
-            <span>Unduh Semua ({allMediaItems.length})</span>
+            {isZipping ? (
+              <>
+                <div style={{
+                  width: 13,
+                  height: 13,
+                  border: '2px solid rgba(43, 133, 228, 0.2)',
+                  borderTopColor: 'var(--cyan)',
+                  borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+                  display: 'inline-block'
+                }} />
+                <span>Mengompres ZIP...</span>
+              </>
+            ) : (
+              <>
+                <Icon name="download" size={14} />
+                <span>Unduh Semua (.zip)</span>
+              </>
+            )}
           </button>
           <button
             type="button"
