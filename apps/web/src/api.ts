@@ -221,4 +221,96 @@ export async function downloadMediaZip(payload: {
   download(blob, `${cleanName}-media.zip`, 'application/zip');
 }
 
+export interface GenerationStatus {
+  enabled: boolean;
+  provider: 'gemini' | 'solu-ai';
+  model: string;
+  keyMasked?: string;
+  status: 'configured' | 'waiting-for-key';
+}
+
+export async function getGenerationStatus(): Promise<GenerationStatus> {
+  const token = getAuthToken();
+  const res = await fetch('/api/v1/generation/status', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  });
+  if (!res.ok) throw new Error('Gagal memeriksa status AI generation');
+  return res.json();
+}
+
+export async function testGeminiConnection(): Promise<{
+  success: boolean;
+  model: string;
+  message: string;
+  latencyMs: number;
+}> {
+  const token = getAuthToken();
+  const res = await fetch('/api/v1/ai/test-connection', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  });
+  return res.json();
+}
+
+export async function generateFlowWithAi(payload: {
+  prompt: string;
+  platform: 'web' | 'android';
+  baseUrl?: string;
+  appId?: string;
+}): Promise<{
+  id: string;
+  status: string;
+  provider: string;
+  flow?: {
+    name: string;
+    platform: 'web' | 'android';
+    yaml: string;
+    explanation: string;
+    valid: boolean;
+    validationErrors?: string[];
+  };
+}> {
+  const token = getAuthToken();
+  const res = await fetch('/api/v1/generation/jobs', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || data.message || `Gagal menghasilkan flow (${res.status})`);
+  }
+  return data;
+}
+
+export async function diagnoseFailureWithAi(payload: {
+  flowName: string;
+  stepName?: string;
+  error: string;
+  logs?: string[];
+  pageUrl?: string;
+}): Promise<{
+  rootCause: string;
+  recommendation: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  actionableSteps: string[];
+}> {
+  const token = getAuthToken();
+  const res = await fetch('/api/v1/ai/diagnose', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || data.message || `Gagal menganalisis kegagalan (${res.status})`);
+  }
+  return data;
+}
+
 

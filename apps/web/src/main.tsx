@@ -11,6 +11,7 @@ import { request, send, jobPath, artifactUrl, downloadReport, date, duration, er
 import { AdminLoginView } from './login';
 import { ProjectSwitcher } from './project-switcher';
 import { BusinessFlowVisualizer } from './business-flow-visualizer';
+import { GeminiModal } from './gemini-modal';
 
 type ProcessNode = {
   id: string;
@@ -795,6 +796,7 @@ export function App() {
   const [flowEditorSource, setFlowEditorSource] = useState<string>('');
   const [compiledPreview, setCompiledPreview] = useState<{ title: string; content: string } | null>(null);
   const [isDiffExpanded, setIsDiffExpanded] = useState<boolean>(true);
+  const [isGeminiModalOpen, setIsGeminiModalOpen] = useState<boolean>(false);
 
   // Terminal state
   const [logFilter, setLogFilter] = useState<string>('all');
@@ -3042,6 +3044,23 @@ export function App() {
                   <p>Tinjau, sesuaikan skenario uji, atau kompilasi ke Playwright (.spec.ts) dan Maestro (.yaml).</p>
                 </div>
                 <div className="header-actions">
+                  <button
+                    className="quiet"
+                    onClick={() => setIsGeminiModalOpen(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: 'rgba(56, 189, 248, 0.1)',
+                      borderColor: '#38BDF8',
+                      color: '#38BDF8',
+                      fontWeight: 600
+                    }}
+                    title="Generate skenario pengujian dengan Google Gemini AI"
+                  >
+                    <Icon name="sparkles" size={15} />
+                    <span>Gemini AI Generator</span>
+                  </button>
                   <button className="quiet" onClick={handleCompilePlaywright} disabled={loading || !flowEditorSource}>
                     Compile Playwright
                   </button>
@@ -3567,6 +3586,21 @@ export function App() {
                   )}
                 </>
               )}
+
+              {/* MODAL GENERATOR GEMINI AI */}
+              <GeminiModal
+                isOpen={isGeminiModalOpen}
+                onClose={() => setIsGeminiModalOpen(false)}
+                onApplyFlow={(yaml, name) => {
+                  setFlowEditorSource(yaml);
+                  if (name && selectedFlowId && activeJob?.flows) {
+                    const targetFlow = activeJob.flows.find((f) => f.id === selectedFlowId);
+                    if (targetFlow) targetFlow.source = yaml;
+                  }
+                }}
+                defaultPlatform={activeJob?.config?.platform === 'android' ? 'android' : 'web'}
+                defaultTarget={activeJob?.config?.platform === 'android' ? (activeJob?.config?.appId || '') : (activeJob?.config?.baseUrl || '')}
+              />
             </div>
           )}
 
@@ -4209,7 +4243,50 @@ export function App() {
                       if (!seenGallery.has(resolvedUrl)) {
                         seenGallery.add(resolvedUrl);
                         const fileName = clean.split('/').pop() || 'screenshot.png';
-                        const label = flowObj?.name || fileName.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+                        const base = fileName.replace(/\.[^/.]+$/, '').toLowerCase();
+                        let label = flowObj?.name || fileName.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+
+                        if (base.includes('launch-screen') || base.includes('splash')) label = 'Layar Login & Pemilihan Role Demo';
+                        else if (base.includes('dashboard-beranda')) label = 'Dashboard Beranda Siswa (Ahmad Farhan)';
+                        else if (base.includes('dashboard-restored')) label = 'Beranda Setelah Navigasi Tab';
+                        else if (base.includes('tab-beranda')) label = 'Navigasi Tab: Beranda';
+                        else if (base.includes('tab-absensi')) label = 'Navigasi Tab: Absensi Siswa';
+                        else if (base.includes('tab-keuangan')) label = 'Navigasi Tab: Rincian Keuangan';
+                        else if (base.includes('tab-informasi')) label = 'Navigasi Tab: Informasi & Kedisiplinan';
+                        else if (base.includes('tab-t2q')) label = 'Navigasi Tab: Hafalan & Tilawah T2Q';
+                        else if (base.includes('home-top')) label = 'Beranda: Header & Profil Siswa';
+                        else if (base.includes('home-middle')) label = 'Beranda: Widget Presensi & Poin';
+                        else if (base.includes('home-bottom')) label = 'Beranda: Agenda & Mutasi Amal';
+                        else if (base.includes('home-restored-top')) label = 'Beranda: Kembali ke Posisi Atas';
+                        else if (base.includes('amal-form-opened')) label = 'Formulir Mutasi Amal Siswa Terbuka';
+                        else if (base.includes('amal-form-filled')) label = 'Pengisian Checklist Mutasi Amal (Selesai)';
+                        else if (base.includes('amal-completed-return')) label = 'Beranda Siswa Setelah Simpan Amal';
+                        else if (base.includes('absensi-loaded')) label = 'Absensi: Rekap Presensi & Kalender';
+                        else if (base.includes('izin-form-opened')) label = 'Formulir Pengajuan Izin Siswa Terbuka';
+                        else if (base.includes('izin-form-filled')) label = 'Formulir Pengajuan Izin Diisi Lengkap';
+                        else if (base.includes('absensi-riwayat-pengajuan')) label = 'Tab Absensi: Riwayat Pengajuan Izin';
+                        else if (base.includes('absensi-riwayat-kehadiran')) label = 'Tab Absensi: Riwayat Presensi Siswa';
+                        else if (base.includes('keuangan-loaded')) label = 'Keuangan: Daftar Tagihan SPP Siswa';
+                        else if (base.includes('keuangan-tagihan-unpaid')) label = 'Keuangan: Rincian Tagihan Belum Dibayar';
+                        else if (base.includes('keuangan-struk-pembayaran')) label = 'Keuangan: Struk Bukti Pembayaran';
+                        else if (base.includes('keuangan-restored')) label = 'Keuangan: Kembali ke Tampilan Normal';
+                        else if (base.includes('informasi-kedisiplinan')) label = 'Informasi: Rekap Catatan Kedisiplinan';
+                        else if (base.includes('informasi-berita-sekolah')) label = 'Informasi: Pengumuman & Berita Sekolah';
+                        else if (base.includes('informasi-berita-scrolled')) label = 'Informasi: Feed Berita Lengkap';
+                        else if (base.includes('t2q-loaded')) label = 'T2Q: Riwayat Hafalan Tahfidz';
+                        else if (base.includes('t2q-tahsin')) label = 'T2Q: Rekap Pembelajaran Tahsin';
+                        else if (base.includes('t2q-tilawah')) label = 'T2Q: Catatan & Setoran Tilawah';
+                        else if (base.includes('t2q-scrolled')) label = 'T2Q: Riwayat Hafalan Lengkap';
+                        else if (base.includes('role-guru-dashboard')) label = 'Dashboard Dewan Guru (Ustadzah Khadijah, S.Pd)';
+                        else if (base.includes('role-manager-dashboard')) label = 'Dashboard Manager Sarpras (Ir. H. Syarifuddin, M.T.)';
+                        else if (base.includes('role-teknisi-dashboard')) label = 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
+                        else {
+                          const stepMatch = base.match(/^step-(\d+)-(.*)$/i);
+                          if (stepMatch) {
+                            label = `Langkah ${stepMatch[1]}: ${stepMatch[2].replace(/[-_]+/g, ' ')}`;
+                          }
+                        }
+
                         const featureGroup = flowObj?.name?.split(' ')[0] || 'Layar Terverifikasi';
 
                         galleryItems.push({
@@ -4776,9 +4853,14 @@ export function App() {
                                 <img src={item.url} alt={item.label} style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
                               </div>
                               <div style={{ padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <div style={{ minWidth: 0 }}>
-                                  <strong style={{ fontSize: 12, color: '#14181D', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</strong>
-                                  <small style={{ color: '#8E7C6C', fontSize: 10.5, fontFamily: 'var(--font-mono)' }}>{item.name}</small>
+                                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                  <strong style={{ fontSize: 12, color: '#14181D', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={item.label}>
+                                    {item.label}
+                                  </strong>
+                                  <span style={{ fontSize: 10.5, color: '#0284c7', fontWeight: 650, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={item.flowName}>
+                                    {item.flowName}
+                                  </span>
+                                  <small style={{ color: '#8E7C6C', fontSize: 10, fontFamily: 'var(--font-mono)' }}>{item.name}</small>
                                 </div>
                                 <a href={item.url} download={item.name} className="tool-btn"
                                   style={{ fontSize: 11, padding: '4px 8px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>

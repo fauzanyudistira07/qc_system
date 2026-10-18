@@ -90,24 +90,40 @@ function humanizeMediaTitle(raw: string, isVid: boolean, flowId?: string): strin
   }
 
   // Friendly name replacements
-  if (name.includes('dashboard-beranda')) return 'Dashboard Beranda Siswa';
+  if (name.includes('launch-screen') || name.includes('splash')) return 'Layar Login & Pemilihan Role Demo';
+  if (name.includes('dashboard-beranda')) return 'Dashboard Beranda Siswa (Ahmad Farhan)';
+  if (name.includes('dashboard-restored')) return 'Beranda Setelah Navigasi Tab';
   if (name.includes('tab-beranda')) return 'Navigasi Tab: Beranda';
-  if (name.includes('tab-absensi')) return 'Navigasi Tab: Absensi';
-  if (name.includes('tab-keuangan')) return 'Navigasi Tab: Keuangan';
-  if (name.includes('tab-informasi')) return 'Navigasi Tab: Informasi';
-  if (name.includes('tab-t2q')) return 'Navigasi Tab: T2Q';
-  if (name.includes('home-bottom')) return 'Beranda: Agenda & Kegiatan';
-  if (name.includes('home-middle')) return 'Beranda: Widget Poin Siswa';
-  if (name.includes('home-top')) return 'Beranda: Header Profil Siswa';
-  if (name.includes('launch-screen') || name.includes('splash')) return 'Layar Splash & Pembuka';
-  if (name.includes('absensi-loaded')) return 'Absensi: Riwayat Kehadiran';
-  if (name.includes('absensi-scrolled')) return 'Absensi: Daftar Lengkap';
-  if (name.includes('keuangan-loaded')) return 'Keuangan: Tagihan SPP Bulanan';
-  if (name.includes('keuangan-scrolled')) return 'Keuangan: Rincian Invoice';
-  if (name.includes('informasi-loaded')) return 'Informasi: Pengumuman & Berita';
-  if (name.includes('informasi-scrolled')) return 'Informasi: Feed Berita Sekolah';
-  if (name.includes('t2q-loaded')) return 'T2Q: Riwayat Hafalan & Setoran';
-  if (name.includes('t2q-scrolled')) return 'T2Q: Riwayat Surat Lengkap';
+  if (name.includes('tab-absensi')) return 'Navigasi Tab: Absensi Siswa';
+  if (name.includes('tab-keuangan')) return 'Navigasi Tab: Rincian Keuangan';
+  if (name.includes('tab-informasi')) return 'Navigasi Tab: Informasi & Kedisiplinan';
+  if (name.includes('tab-t2q')) return 'Navigasi Tab: Hafalan & Tilawah T2Q';
+  if (name.includes('home-top')) return 'Beranda: Header & Profil Siswa';
+  if (name.includes('home-middle')) return 'Beranda: Widget Presensi & Poin';
+  if (name.includes('home-bottom')) return 'Beranda: Agenda & Mutasi Amal';
+  if (name.includes('home-restored-top')) return 'Beranda: Kembali ke Posisi Atas';
+  if (name.includes('amal-form-opened')) return 'Formulir Mutasi Amal Siswa Terbuka';
+  if (name.includes('amal-form-filled')) return 'Pengisian Checklist Mutasi Amal (Selesai)';
+  if (name.includes('amal-completed-return')) return 'Beranda Siswa Setelah Simpan Amal';
+  if (name.includes('absensi-loaded')) return 'Absensi: Rekap Presensi & Kalender';
+  if (name.includes('izin-form-opened')) return 'Formulir Pengajuan Izin Siswa Terbuka';
+  if (name.includes('izin-form-filled')) return 'Formulir Pengajuan Izin Diisi Lengkap';
+  if (name.includes('absensi-riwayat-pengajuan')) return 'Tab Absensi: Riwayat Pengajuan Izin';
+  if (name.includes('absensi-riwayat-kehadiran')) return 'Tab Absensi: Riwayat Presensi Siswa';
+  if (name.includes('keuangan-loaded')) return 'Keuangan: Daftar Tagihan SPP Siswa';
+  if (name.includes('keuangan-tagihan-unpaid')) return 'Keuangan: Rincian Tagihan Belum Dibayar';
+  if (name.includes('keuangan-struk-pembayaran')) return 'Keuangan: Struk Bukti Pembayaran';
+  if (name.includes('keuangan-restored')) return 'Keuangan: Kembali ke Tampilan Normal';
+  if (name.includes('informasi-kedisiplinan')) return 'Informasi: Rekap Catatan Kedisiplinan';
+  if (name.includes('informasi-berita-sekolah')) return 'Informasi: Pengumuman & Berita Sekolah';
+  if (name.includes('informasi-berita-scrolled')) return 'Informasi: Feed Berita Lengkap';
+  if (name.includes('t2q-loaded')) return 'T2Q: Riwayat Hafalan Tahfidz';
+  if (name.includes('t2q-tahsin')) return 'T2Q: Rekap Pembelajaran Tahsin';
+  if (name.includes('t2q-tilawah')) return 'T2Q: Catatan & Setoran Tilawah';
+  if (name.includes('t2q-scrolled')) return 'T2Q: Riwayat Hafalan Lengkap';
+  if (name.includes('role-guru-dashboard')) return 'Dashboard Dewan Guru (Ustadzah Khadijah, S.Pd)';
+  if (name.includes('role-manager-dashboard')) return 'Dashboard Manager Sarpras (Ir. H. Syarifuddin, M.T.)';
+  if (name.includes('role-teknisi-dashboard')) return 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
 
   // Step formatting: step-04-tap-NIS---NISN -> Langkah 04: Tekan NIS / NISN
   const stepMatch = name.match(/^step-(\d+)-(tap|input|scroll|assert)-(.*)$/i);
@@ -344,31 +360,68 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
       ? (ncModal.customFolderName.trim() || ncModal.checkResult?.suggestedNewFolder || projectName)
       : (ncModal.checkResult?.targetFolder || projectName);
 
+    const total = ncModal.items.length;
     setNcModal(prev => ({
       ...prev,
       step: 'uploading',
-      uploadProgress: { current: 0, total: prev.items.length, currentFileName: 'Memproses pengunggahan media...' }
+      uploadProgress: { current: 0, total, currentFileName: 'Menyiapkan berkas pengunggahan...' }
     }));
 
     try {
-      const uploadItems = ncModal.items.map(item => ({
-        url: item.url,
-        featureName: item.flowName || 'General',
-        type: item.type,
-        title: item.title,
-        fileName: `${(item.title || 'media').replace(/[\\/:*?"<>|]+/g, '_').trim()}.${item.type === 'video' ? 'mp4' : 'png'}`
-      }));
+      let uploadedCount = 0;
+      let failedCount = 0;
+      const allFiles: any[] = [];
+      let fullPath = '';
+      let webUrl = '';
 
-      const res = await uploadToNextcloud({
-        folderName: finalFolder,
-        items: uploadItems,
-        jobId: job?.id
-      });
+      for (let i = 0; i < total; i++) {
+        const item = ncModal.items[i];
+        const fileName = `${(item.title || 'media').replace(/[\\/:*?"<>|]+/g, '_').trim()}.${item.type === 'video' ? 'mp4' : 'png'}`;
+
+        setNcModal(prev => ({
+          ...prev,
+          uploadProgress: {
+            current: i + 1,
+            total,
+            currentFileName: `${item.title || fileName} (${i + 1}/${total})`
+          }
+        }));
+
+        const uploadItem = {
+          url: item.url,
+          featureName: item.flowName || 'General',
+          type: item.type,
+          title: item.title,
+          fileName
+        };
+
+        const res = await uploadToNextcloud({
+          folderName: finalFolder,
+          items: [uploadItem],
+          jobId: job?.id
+        });
+
+        uploadedCount += res.uploadedCount || 0;
+        failedCount += res.failedCount || 0;
+        if (res.files) allFiles.push(...res.files);
+        if (res.fullPath) fullPath = res.fullPath;
+        if (res.webUrl) webUrl = res.webUrl;
+      }
 
       setNcModal(prev => ({
         ...prev,
         step: 'completed',
-        uploadResult: res
+        uploadResult: {
+          success: uploadedCount > 0,
+          projectName,
+          folderName: finalFolder,
+          targetFolder: finalFolder,
+          fullPath,
+          webUrl,
+          uploadedCount,
+          failedCount,
+          files: allFiles
+        } as any
       }));
     } catch (err) {
       setNcModal(prev => ({
@@ -407,6 +460,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
 
     const pushItem = (item: MediaItem) => {
       if (!item.url || seenUrls.has(item.url)) return;
+      if (item.type === 'video' && item.size && item.size < 8192) return;
       seenUrls.add(item.url);
       items.push(item);
     };
@@ -859,7 +913,15 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
               {activeItem ? (
                 <>
                   {activeItem.type === 'video' ? (
-                    <video key={activeItem.url} src={activeItem.url} controls autoPlay className="qc-stage-media" />
+                    <video
+                      key={activeItem.url}
+                      src={activeItem.url}
+                      controls
+                      autoPlay
+                      playsInline
+                      preload="metadata"
+                      className="qc-stage-media"
+                    />
                   ) : (
                     <img key={activeItem.url} src={activeItem.url} alt={activeItem.title} className={`qc-stage-media ${isZoomed ? 'zoom' : ''}`} />
                   )}
@@ -1336,21 +1398,44 @@ ${Array.from(new Set(ncModal.items.map(i => i.flowName || 'General'))).slice(0, 
 
               {/* Step 3: Uploading */}
               {ncModal.step === 'uploading' && (
-                <div style={{ textAlign: 'center', padding: '30px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <div className="qc-nc-progress-wrap">
+                <div style={{ padding: '20px 8px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="led-dot running" style={{ width: 8, height: 8 }} />
+                      <strong style={{ fontSize: 13.5, color: 'var(--text-main, #14181D)' }}>
+                        Mengunggah Media ke Nextcloud...
+                      </strong>
+                    </div>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 800, color: '#0284c7', fontVariantNumeric: 'tabular-nums' }}>
+                      {ncModal.uploadProgress.current} / {ncModal.uploadProgress.total} file ({Math.round((ncModal.uploadProgress.current / Math.max(1, ncModal.uploadProgress.total)) * 100)}%)
+                    </span>
+                  </div>
+
+                  <div className="qc-nc-progress-wrap" style={{ height: 8, background: '#E2E8F0', borderRadius: 999, overflow: 'hidden' }}>
                     <div
                       className="qc-nc-progress-bar"
                       style={{
-                        width: `${ncModal.uploadProgress.total > 0 ? Math.max(15, (ncModal.uploadProgress.current / ncModal.uploadProgress.total) * 100) : 30}%`
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #0284c7, #38bdf8)',
+                        borderRadius: 999,
+                        width: `${ncModal.uploadProgress.total > 0 ? Math.min(100, Math.max(5, (ncModal.uploadProgress.current / ncModal.uploadProgress.total) * 100)) : 10}%`,
+                        transition: 'width 220ms cubic-bezier(0.16, 1, 0.3, 1)'
                       }}
                     />
                   </div>
-                  <div>
-                    <strong style={{ fontSize: 14 }}>Mengunggah Media ke Nextcloud SOLU...</strong>
-                    <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 4 }}>
-                      Mohon tunggu, berkas sedang ditransfer langsung melalui koneksi WebDAV yang aman.
-                    </p>
+
+                  <div style={{ padding: '10px 14px', background: '#F8FAFC', borderRadius: 8, border: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+                      Berkas Sedang Ditransfer:
+                    </span>
+                    <span style={{ fontSize: 12, color: '#0F172A', fontFamily: 'var(--font-mono)', fontWeight: 650, wordBreak: 'break-all' }}>
+                      {ncModal.uploadProgress.currentFileName}
+                    </span>
                   </div>
+
+                  <p style={{ color: '#64748B', fontSize: 11.5, margin: 0 }}>
+                    Mohon tunggu sejenak, berkas dikirim bertahap via WebDAV langsung ke Nextcloud agar tidak membebani koneksi server.
+                  </p>
                 </div>
               )}
 

@@ -42,19 +42,21 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
     const loginCmds = buildLoginYamlCommands(nis, password);
 
     const androidFlows: GeneratedFlow[] = [
-      // ── Flow 1: Launch & Smoke Check (tanpa login) ───────────────────────
+      // ── Flow 1: Launch & Smoke Check ─────────────────────────────────────
       {
         id: 'android-launch',
         name: '1. Launch & Smoke Check',
         platform: 'android',
         status: 'READY',
         source: buildRawMaestroYaml(appId, '1. Launch & Smoke Check', [
+          { tapOn: { text: "Don't allow", optional: true } },
+          { tapOn: { text: "Don\u2019t allow", optional: true } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'launch-screen' }
         ])
       },
 
       // ── Flow 2: Login & Masuk Dashboard ──────────────────────────────────
-      // Mengisi form login dengan NIS + password, lalu verifikasi dashboard
       {
         id: 'android-login',
         name: '2. Login & Masuk Dashboard',
@@ -63,127 +65,233 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
         source: buildRawMaestroYaml(appId, '2. Login & Masuk Dashboard', [
           ...loginCmds,
           { assertVisible: { text: 'Beranda' } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'dashboard-beranda' }
         ])
       },
 
-      // ── Flow 3: Navigasi Semua Tab (login dulu, lalu cek semua tab) ───────
+      // ── Flow 3: Navigasi Semua Tab Utama ─────────────────────────────────
       {
         id: 'android-tabs-all',
         name: '3. Navigasi Semua Tab Dashboard',
         platform: 'android',
         status: 'READY',
         source: buildRawMaestroYaml(appId, '3. Navigasi Semua Tab Dashboard', [
-          // Login
-          ...loginCmds,
-          // Beranda
+          { tapOn: { text: 'Beranda' } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
           { assertVisible: { text: 'Beranda' } },
           { takeScreenshot: 'tab-beranda' },
-          // Absensi
           { tapOn: { text: 'Absensi' } },
-          { waitForAnimationToEnd: { timeout: 4000 } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { assertVisible: { text: 'Ajukan Izin' } },
           { takeScreenshot: 'tab-absensi' },
-          // Keuangan
           { tapOn: { text: 'Keuangan' } },
-          { waitForAnimationToEnd: { timeout: 4000 } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { assertVisible: { text: 'Belum Dibayar' } },
           { takeScreenshot: 'tab-keuangan' },
-          // Informasi
           { tapOn: { text: 'Informasi' } },
-          { waitForAnimationToEnd: { timeout: 4000 } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { assertVisible: { text: 'Kedisiplinan' } },
           { takeScreenshot: 'tab-informasi' },
-          // T2Q
           { tapOn: { text: 'T2Q' } },
-          { waitForAnimationToEnd: { timeout: 4000 } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { assertVisible: { text: 'Tahfidz' } },
           { takeScreenshot: 'tab-t2q' },
-          // Kembali ke Beranda
-          { tapOn: { text: 'Beranda' } }
+          { tapOn: { text: 'Beranda' } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
+          { takeScreenshot: 'dashboard-restored' }
         ])
       },
 
-      // ── Flow 4: Eksplorasi Fitur Beranda (scroll) ─────────────────────────
+      // ── Flow 4: Eksplorasi Konten Beranda & Aksi Cepat ───────────────────
       {
         id: 'android-home-explore',
-        name: '4. Eksplorasi Konten Beranda',
+        name: '4. Eksplorasi Konten Beranda & Aksi Cepat',
         platform: 'android',
         status: 'READY',
-        source: buildRawMaestroYaml(appId, '4. Eksplorasi Konten Beranda', [
-          ...loginCmds,
-          { assertVisible: { text: 'Beranda' } },
+        source: buildRawMaestroYaml(appId, '4. Eksplorasi Konten Beranda & Aksi Cepat', [
+          { tapOn: { text: 'Beranda' } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'home-top' },
           { swipe: { direction: 'UP' } },
           { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'home-middle' },
           { swipe: { direction: 'UP' } },
           { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'home-bottom' }
+          { takeScreenshot: 'home-bottom' },
+          { swipe: { direction: 'DOWN' } },
+          { waitForAnimationToEnd: { timeout: 1000 } },
+          { swipe: { direction: 'DOWN' } },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { takeScreenshot: 'home-restored-top' }
         ])
       },
 
-      // ── Flow 5: Tab Absensi (detail) ──────────────────────────────────────
+      // ── Flow 5: CRUD Mutasi Amal Siswa Harian (Create & Double Entry Guard)
       {
-        id: 'android-tab-absensi',
-        name: '5. Eksplorasi Tab Absensi',
+        id: 'android-crud-amal',
+        name: '5. CRUD Mutasi Amal Siswa Harian',
         platform: 'android',
         status: 'READY',
-        source: buildRawMaestroYaml(appId, '5. Eksplorasi Tab Absensi', [
-          ...loginCmds,
-          { tapOn: { text: 'Absensi' } },
-          { waitForAnimationToEnd: { timeout: 5000 } },
-          { takeScreenshot: 'absensi-loaded' },
-          { swipe: { direction: 'UP' } },
+        source: buildRawMaestroYaml(appId, '5. CRUD Mutasi Amal Siswa Harian', [
+          { tapOn: { text: 'Beranda' } },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { tapOn: { text: 'Isi Sekarang', optional: true } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { takeScreenshot: 'amal-form-opened' },
+          { tapOn: { text: 'Iya', optional: true } },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { takeScreenshot: 'amal-form-filled' },
+          { pressKey: 'BACK' },
           { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'absensi-scrolled' }
+          { takeScreenshot: 'amal-completed-return' }
         ])
       },
 
-      // ── Flow 6: Tab Keuangan (detail) ────────────────────────────────────
+      // ── Flow 6: CRUD Tab Absensi & Formulir Pengajuan Izin ────────────────
+      {
+        id: 'android-crud-izin',
+        name: '6. CRUD Tab Absensi & Formulir Pengajuan Izin',
+        platform: 'android',
+        status: 'READY',
+        source: buildRawMaestroYaml(appId, '6. CRUD Tab Absensi & Formulir Pengajuan Izin', [
+          { tapOn: { text: 'Absensi' } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { assertVisible: { text: 'Ajukan Izin' } },
+          { takeScreenshot: 'absensi-loaded' },
+          { tapOn: { text: 'Ajukan Izin' } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { assertVisible: { text: 'Pengajuan Izin' } },
+          { takeScreenshot: 'izin-form-opened' },
+          { tapOn: { text: 'Tulis keterangan izin', optional: true } },
+          { inputText: 'Izin Sakit Demam dan Kontrol Dokter' },
+          { pressKey: 'BACK' },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { takeScreenshot: 'izin-form-filled' },
+          { pressKey: 'BACK' },
+          { waitForAnimationToEnd: { timeout: 2000 } },
+          { assertVisible: { text: 'Ajukan Izin' } },
+          { tapOn: { text: 'Riwayat Pengajuan', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { takeScreenshot: 'absensi-riwayat-pengajuan' },
+          { tapOn: { text: 'Riwayat Kehadiran', optional: true } },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { takeScreenshot: 'absensi-riwayat-kehadiran' }
+        ])
+      },
+
+      // ── Flow 7: Eksplorasi Tab Keuangan, Invoice & Pembayaran ─────────────
       {
         id: 'android-tab-keuangan',
-        name: '6. Eksplorasi Tab Keuangan',
+        name: '7. Eksplorasi Tab Keuangan & Invoice Pembayaran',
         platform: 'android',
         status: 'READY',
-        source: buildRawMaestroYaml(appId, '6. Eksplorasi Tab Keuangan', [
-          ...loginCmds,
+        source: buildRawMaestroYaml(appId, '7. Eksplorasi Tab Keuangan & Invoice Pembayaran', [
           { tapOn: { text: 'Keuangan' } },
-          { waitForAnimationToEnd: { timeout: 5000 } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { assertVisible: { text: 'Belum Dibayar' } },
           { takeScreenshot: 'keuangan-loaded' },
-          { swipe: { direction: 'UP' } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'keuangan-scrolled' }
+          { tapOn: { text: 'Belum Dibayar', optional: true } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { takeScreenshot: 'keuangan-tagihan-unpaid' },
+          { tapOn: { text: 'Bayar Sekarang', optional: true } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { takeScreenshot: 'keuangan-struk-pembayaran' },
+          { pressKey: 'BACK' },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { pressKey: 'BACK' },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { takeScreenshot: 'keuangan-restored' }
         ])
       },
 
-      // ── Flow 7: Tab Informasi (detail) ───────────────────────────────────
+      // ── Flow 8: Eksplorasi Tab Informasi, Kedisiplinan & Berita Sekolah ───
       {
         id: 'android-tab-informasi',
-        name: '7. Eksplorasi Tab Informasi',
+        name: '8. Eksplorasi Tab Informasi & Kedisiplinan',
         platform: 'android',
         status: 'READY',
-        source: buildRawMaestroYaml(appId, '7. Eksplorasi Tab Informasi', [
-          ...loginCmds,
+        source: buildRawMaestroYaml(appId, '8. Eksplorasi Tab Informasi & Kedisiplinan', [
           { tapOn: { text: 'Informasi' } },
-          { waitForAnimationToEnd: { timeout: 5000 } },
-          { takeScreenshot: 'informasi-loaded' },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { assertVisible: { text: 'Kedisiplinan' } },
+          { takeScreenshot: 'informasi-kedisiplinan' },
+          { tapOn: { text: 'Berita Sekolah', optional: true } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { takeScreenshot: 'informasi-berita-sekolah' },
           { swipe: { direction: 'UP' } },
           { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'informasi-scrolled' }
+          { takeScreenshot: 'informasi-berita-scrolled' },
+          { tapOn: { text: 'Kedisiplinan', optional: true } },
+          { waitForAnimationToEnd: { timeout: 1500 } }
         ])
       },
 
-      // ── Flow 8: Tab T2Q / Hafalan (detail) ───────────────────────────────
+      // ── Flow 9: Eksplorasi Tab T2Q (Tahfidz, Tahsin, Tilawah) ─────────────
       {
         id: 'android-tab-t2q',
-        name: '8. Eksplorasi Tab T2Q (Hafalan)',
+        name: '9. Eksplorasi Tab T2Q (Hafalan & Tilawah)',
         platform: 'android',
         status: 'READY',
-        source: buildRawMaestroYaml(appId, '8. Eksplorasi Tab T2Q (Hafalan)', [
-          ...loginCmds,
+        source: buildRawMaestroYaml(appId, '9. Eksplorasi Tab T2Q (Hafalan & Tilawah)', [
           { tapOn: { text: 'T2Q' } },
-          { waitForAnimationToEnd: { timeout: 5000 } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { assertVisible: { text: 'Tahfidz' } },
           { takeScreenshot: 't2q-loaded' },
-          { swipe: { direction: 'UP' } },
+          { tapOn: { text: 'Tahsin', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { takeScreenshot: 't2q-tahsin' },
+          { tapOn: { text: 'Tilawah', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { takeScreenshot: 't2q-tilawah' },
+          { tapOn: { text: 'Tahfidz', optional: true } },
           { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 't2q-scrolled' }
+        ])
+      },
+
+      // ── Flow 10: Switch Role & Akses Dashboard Dewan Guru ─────────────────
+      {
+        id: 'android-role-guru',
+        name: '10. Switch Role & Akses Dashboard Dewan Guru',
+        platform: 'android',
+        status: 'READY',
+        source: buildRawMaestroYaml(appId, '10. Switch Role & Akses Dashboard Dewan Guru', [
+          { tapOn: { text: 'Dewan Guru', optional: true } },
+          { tapOn: { text: 'Masuk', optional: true } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { assertVisible: { text: 'Ustadzah Khadijah', optional: true } },
+          { takeScreenshot: 'role-guru-dashboard' }
+        ])
+      },
+
+      // ── Flow 11: Switch Role & Akses Dashboard Manager Sarpras ───────────
+      {
+        id: 'android-role-manager',
+        name: '11. Switch Role & Akses Dashboard Manager Sarpras',
+        platform: 'android',
+        status: 'READY',
+        source: buildRawMaestroYaml(appId, '11. Switch Role & Akses Dashboard Manager Sarpras', [
+          { tapOn: { text: 'Manager Sarpras', optional: true } },
+          { tapOn: { text: 'Masuk', optional: true } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { assertVisible: { text: 'Syarifuddin', optional: true } },
+          { takeScreenshot: 'role-manager-dashboard' }
+        ])
+      },
+
+      // ── Flow 12: Switch Role & Akses Dashboard Staff Teknisi ─────────────
+      {
+        id: 'android-role-teknisi',
+        name: '12. Switch Role & Akses Dashboard Staff Teknisi',
+        platform: 'android',
+        status: 'READY',
+        source: buildRawMaestroYaml(appId, '12. Switch Role & Akses Dashboard Staff Teknisi', [
+          { tapOn: { text: 'Staff Teknisi', optional: true } },
+          { tapOn: { text: 'Masuk', optional: true } },
+          { waitForAnimationToEnd: { timeout: 3000 } },
+          { assertVisible: { text: 'Ahmad Rian', optional: true } },
+          { takeScreenshot: 'role-teknisi-dashboard' }
         ])
       }
     ];

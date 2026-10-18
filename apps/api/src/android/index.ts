@@ -7,7 +7,7 @@ import type { NormalizedFlow } from '@qc/flow-schema';
 import type { RunStepResult, WebRunResult } from '../playwright-adapter.ts';
 import { compileMaestroFlow } from '../maestro-adapter.ts';
 
-import { existsSync, readdirSync, unlinkSync, statSync } from 'node:fs';
+import fs, { existsSync, readdirSync, unlinkSync, statSync } from 'node:fs';
 import { listAvds, startHeadlessAvd, stopEmulator, resolveEmulatorBin, waitForBoot } from './emulator-runner.ts';
 import { listAdbDevices, captureScreenBuffer, isBootCompleted, isPackageManagerReady } from './adb.ts';
 import type { AndroidStatus } from './types.ts';
@@ -155,10 +155,16 @@ export function resolveAdbBin(): string {
 /** Normalize a dashboard-entered Wi-Fi IP to the serial reported by ADB. */
 export function normalizeDeviceId(deviceId: string | undefined, devices: string[] = []): string | undefined {
   const raw = deviceId?.trim();
-  if (!raw) return undefined;
+  if (!raw) return devices[0] || undefined;
   if (devices.includes(raw)) return raw;
   if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(raw)) {
-    return devices.find((device) => device === `${raw}:5555` || device.startsWith(`${raw}:`)) ?? `${raw}:5555`;
+    const found = devices.find((device) => device === `${raw}:5555` || device.startsWith(`${raw}:`));
+    if (found) return found;
+  }
+  const matchSub = devices.find((device) => device.includes(raw) || raw.includes(device));
+  if (matchSub) return matchSub;
+  if (devices.length > 0) {
+    return devices[0];
   }
   return raw;
 }
@@ -228,7 +234,17 @@ function runCli(commandName: string, args: string[], timeoutMs = 8000): Promise<
   });
 }
 
-type UiNode = { text?: string; contentDesc?: string; className?: string; left: number; top: number; right: number; bottom: number };
+type UiNode = {
+  text?: string;
+  contentDesc?: string;
+  hint?: string;
+  className?: string;
+  clickable?: boolean;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
 
 function decodeUiText(value: string): string {
   return value.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&').replace(/&#10;/g, '\n');
@@ -247,7 +263,9 @@ function parseUiNodes(xml: string): UiNode[] {
     nodes.push({
       text: attr('text'),
       contentDesc: attr('content-desc'),
+      hint: attr('hint'),
       className: attr('class'),
+      clickable: raw.includes('clickable="true"'),
       left: Number(bounds[1]),
       top: Number(bounds[2]),
       right: Number(bounds[3]),
@@ -279,7 +297,12 @@ async function readUiNodes(deviceId: string, retries = 3): Promise<UiNode[]> {
 
 function uiNodeMatches(node: UiNode, expected: string): boolean {
   const needle = expected.trim().toLocaleLowerCase();
-  return [node.text, node.contentDesc].some((value) => value?.trim().toLocaleLowerCase().includes(needle));
+  const textVal = (node.text || '').trim().toLocaleLowerCase();
+  const descVal = (node.contentDesc || '').trim().toLocaleLowerCase();
+  const hintVal = (node.hint || '').trim().toLocaleLowerCase();
+  if (textVal === needle || descVal === needle || hintVal === needle) return true;
+  if (textVal.startsWith(needle) || descVal.startsWith(needle) || hintVal.startsWith(needle)) return true;
+  return textVal.includes(needle) || descVal.includes(needle) || hintVal.includes(needle);
 }
 
 let cachedMaestro: { available: boolean; message: string; version?: string } | null = null;
@@ -819,31 +842,44 @@ export async function executeAndroidRawFlow(
   const stopAndCollectVideo = async () => {
     if (!targetDevice || !recordProc) return;
     try {
-      appendLog('Menghentikan perekaman video Android...');
+      appendLog('Menghentikan perekaman video Android via SIGINT (Ctrl+C) agar moov atom MP4 terbit...');
       const pidRes = await runCli('adb', ['-s', targetDevice, 'shell', 'pidof', 'screenrecord'], 3000);
       const rawPid = pidRes.stdout.trim();
       const pids = rawPid.split(/\s+/).filter(Boolean);
       if (pids.length > 0) {
         for (const pid of pids) {
-          await runCli('adb', ['-s', targetDevice, 'shell', 'kill', '-SIGTERM', pid], 3000);
-          appendLog(`screenrecord PID ${pid} dihentikan via SIGTERM`);
+          // screenrecord HANYA mem-flush moov atom jika menerima SIGINT (signal 2 / Ctrl+C)
+          await runCli('adb', ['-s', targetDevice, 'shell', 'kill', '-2', pid], 3000);
+          appendLog(`screenrecord PID ${pid} dihentikan via SIGINT (signal 2)`);
         }
       } else {
-        // Fallback: pkill jika pidof tidak tersedia
-        await runCli('adb', ['-s', targetDevice, 'shell', 'pkill', '-SIGTERM', 'screenrecord'], 3000);
+        // Fallback: pkill SIGINT jika pidof tidak mengembalikan PID
+        await runCli('adb', ['-s', targetDevice, 'shell', 'pkill', '-SIGINT', 'screenrecord'], 3000);
       }
-      // Beri waktu agar proses selesai menulis buffer ke file
-      await new Promise((r) => setTimeout(r, 2000));
+      // Beri waktu 3 detik agar proses screenrecord di Android selesai menulis moov atom ke file
+      await new Promise((r) => setTimeout(r, 3000));
       if (!recordProc.killed) {
-        try { recordProc.kill(); } catch { /* ignore */ }
+        try { recordProc.kill('SIGINT'); } catch { /* ignore */ }
       }
       const localVideoPath = path.join(runDir, 'flow-recording.mp4');
       const pullRes = await runCli('adb', ['-s', targetDevice, 'pull', remoteVideoPath, localVideoPath], 25000);
       if (existsSync(localVideoPath)) {
+        try {
+          const ffmpegStatic = await import('ffmpeg-static').then((m: any) => m.default || m).catch(() => null);
+          if (ffmpegStatic && existsSync(ffmpegStatic)) {
+            const faststartPath = localVideoPath + '.faststart.mp4';
+            await runCli(ffmpegStatic, ['-y', '-i', localVideoPath, '-c', 'copy', '-movflags', '+faststart', faststartPath], 10000);
+            if (existsSync(faststartPath) && statSync(faststartPath).size > 1000) {
+              fs.renameSync(faststartPath, localVideoPath);
+              appendLog(`Video berhasil dioptimasi faststart (moov atom di awal file) untuk pemutaran web.`);
+            }
+          }
+        } catch { /* non-fatal faststart error */ }
         const vstat = statSync(localVideoPath);
         if (vstat.size > 8192) {
-          artifacts.push({ type: 'video' as any, path: localVideoPath, name: 'flow-recording.mp4' });
-          appendLog(`Video eksekusi flow berhasil disimpan: ${localVideoPath} (${vstat.size} bytes)`);
+          const namedVideo = `${flowName.replace(/[^a-zA-Z0-9_-]/g, '_')}.mp4`;
+          artifacts.push({ type: 'video' as any, path: localVideoPath, name: namedVideo });
+          appendLog(`Video eksekusi flow berhasil disimpan: ${localVideoPath} (${vstat.size} bytes) sebagai ${namedVideo}`);
         } else {
           appendLog(`Ukuran rekaman video terlalu kecil (${vstat.size} bytes), kemungkinan recording tidak berjalan.`);
         }
@@ -877,12 +913,13 @@ export async function executeAndroidRawFlow(
           actionName = `takeScreenshot: ${snapName}`;
           appendLog(`Mengambil screenshot: ${snapName}...`);
           if (targetDevice) {
+            // Beri jeda 1000ms agar rendering frame dan transisi UI benar-benar selesai
+            await new Promise((r) => setTimeout(r, 1000));
             let snap = await captureDeviceScreen(targetDevice);
             if (snap.success && snap.buffer) {
               let snapHash = createHash('sha256').update(snap.buffer).digest('hex');
-              // Jika buffer identik dengan capture sebelumnya, beri waktu jeda 1.5s agar transisi layar selesai lalu coba sekali lagi
               if (snapHash === lastCapturedHash) {
-                appendLog(`Layar belum berubah dari capture sebelumnya. Menunggu transisi 1500ms...`);
+                appendLog(`Layar masih sama dengan aksi sebelumnya. Menunggu transisi 1500ms...`);
                 await new Promise((r) => setTimeout(r, 1500));
                 const retrySnap = await captureDeviceScreen(targetDevice);
                 if (retrySnap.success && retrySnap.buffer) {
@@ -891,15 +928,11 @@ export async function executeAndroidRawFlow(
                 }
               }
 
-              if (snapHash === lastCapturedHash) {
-                appendLog(`Peringatan: Layar tidak berubah setelah aksi (${snapName} identik dengan capture sebelumnya). Screenshot duplikat tidak disimpan ulang.`);
-              } else {
-                lastCapturedHash = snapHash;
-                const snapPath = path.join(runDir, `${snapName}.png`);
-                await writeFile(snapPath, snap.buffer);
-                artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
-                appendLog(`Screenshot tersimpan: ${snapPath} (${snap.buffer.length} bytes)`);
-              }
+              lastCapturedHash = snapHash;
+              const snapPath = path.join(runDir, `${snapName}.png`);
+              await writeFile(snapPath, snap.buffer);
+              artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
+              appendLog(`Screenshot tersimpan: ${snapPath} (${snap.buffer.length} bytes)`);
             } else {
               appendLog(`Peringatan: Screencap gagal: ${snap.error}`);
             }
@@ -909,12 +942,33 @@ export async function executeAndroidRawFlow(
           const text = String(tapSpec.text || '').trim();
           const isOptional = Boolean(tapSpec.optional);
           actionName = `tapOn: "${text || tapSpec.point || 'element'}"`;
-          // Cek apakah langkah navigasi tab dashboard dijalankan saat aplikasi masih tertahan di layar Login
+          // Cek apakah langkah navigasi tab dashboard dijalankan saat aplikasi masih tertahan di layar Login atau sub-halaman
           if (targetDevice && /beranda|home|absensi|keuangan|informasi|t2q/i.test(text)) {
-            const currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
-            const hasLoginField = currentNodes.some((n) => /nis|password|sandi|masuk/i.test(n.text || n.contentDesc || ''));
-            const hasDashboard = currentNodes.some((n) => /beranda|absensi|keuangan|informasi|t2q/i.test(n.text || n.contentDesc || ''));
-            if (hasLoginField && !hasDashboard) {
+            let currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
+            let hasDashboard = currentNodes.some((n) => /^(beranda|absensi|keuangan|informasi|t2q)$/i.test((n.text || n.contentDesc || '').trim()));
+
+            // Jika sedang di sub-halaman / modal (bar navigasi bawah tidak ada dan bukan form login)
+            let backAttempts = 0;
+            while (!hasDashboard && backAttempts < 4) {
+              const isLoginForm = currentNodes.some((n) =>
+                /edittext/i.test(n.className || '') ||
+                /masuk ke akun|silakan masuk/i.test(n.text || n.contentDesc || '')
+              );
+              if (isLoginForm) break;
+              appendLog(`[Navigation Guard] Bar navigasi utama belum aktif (sedang di sub-halaman/modal). Menekan Back (keyevent 4)...`);
+              await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'keyevent', '4'], 2000).catch(() => {});
+              await new Promise((r) => setTimeout(r, 1000));
+              currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
+              hasDashboard = currentNodes.some((n) => n.top >= screenHeight * 0.75 && /^(beranda|absensi|keuangan|informasi|t2q)$/i.test((n.text || n.contentDesc || '').trim()));
+              backAttempts++;
+            }
+
+            // Validasi apakah benar-benar masih di layar Login (ada input field EditText username/password)
+            const hasRealLoginForm = currentNodes.some((n) =>
+              /edittext/i.test(n.className || '') ||
+              /masuk ke akun|silakan masuk/i.test(n.text || n.contentDesc || '')
+            );
+            if (hasRealLoginForm && !hasDashboard) {
               appendLog(`[Navigation Guard] Tidak dapat membuka tab "${text}" karena aplikasi masih tertahan di layar Login.`);
               if (isOptional) continue;
               throw new Error(`Navigasi ke "${text}" dibatalkan: aplikasi belum berhasil login.`);
@@ -923,72 +977,136 @@ export async function executeAndroidRawFlow(
 
           // Cek apakah langkah login perlu dilewati jika aplikasi sudah berada di Beranda/Dashboard
           if (targetDevice && /nis|nisn|password|sandi|masuk/i.test(text) && isOptional) {
-            const currentNodes = await readUiNodes(targetDevice).catch(() => []);
-            const hasDashboard = currentNodes.some((n) => /beranda|absensi|keuangan|informasi|t2q/i.test(n.text || n.contentDesc || ''));
-            const hasLoginField = currentNodes.some((n) => /nis|masuk/i.test(n.text || n.contentDesc || ''));
-            if (hasDashboard && !hasLoginField) {
-              appendLog(`Aplikasi sudah logged in (Beranda aktif), langkah "${text}" dilewati.`);
+            const currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
+            const hasRealLoginForm = currentNodes.some((n) => /edittext/i.test(n.className || ''));
+            if (!hasRealLoginForm) {
+              appendLog(`Aplikasi sudah logged in (layar bukan formulir login), langkah login "${text}" dilewati.`);
               continue;
             }
           }
 
-          // Tutup keyboard sebelum aksi tap tombol dengan tap neutral space
+          // Tutup keyboard secara aman jika aktif tanpa melakukan klik sembarangan di layar
           if (targetDevice && /masuk|login|beranda|home|absensi|keuangan|informasi|t2q/i.test(text)) {
-            await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'tap', String(Math.round(screenWidth * 0.5)), String(Math.round(screenHeight * 0.12))], 2000).catch(() => {});
-            await new Promise((r) => setTimeout(r, 400));
+            await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'keyevent', '111'], 1500).catch(() => {});
+            await new Promise((r) => setTimeout(r, 200));
           }
 
           let tapX = Math.round(screenWidth * 0.5);
           let tapY = Math.round(screenHeight * 0.5);
           let matchedUiNode = false;
+          let allNodes: UiNode[] = [];
 
           if (targetDevice && text) {
             try {
-              const allNodes = await readUiNodes(targetDevice);
-              const node = allNodes.find((candidate) => uiNodeMatches(candidate, text));
-              if (node) {
-                if (/nis|nisn|username|email|password|sandi/i.test(text) && !/edittext/i.test(node.className || '')) {
-                  const nextInput = allNodes.find((n) => /edittext/i.test(n.className || '') && n.top >= node.top && n.top <= node.bottom + 160);
-                  if (nextInput) {
-                    tapX = Math.round((nextInput.left + nextInput.right) / 2);
-                    tapY = Math.round((nextInput.top + nextInput.bottom) / 2);
-                  } else {
-                    tapX = Math.round(screenWidth * 0.5);
-                    tapY = Math.round(node.bottom + 70);
-                  }
-                } else {
-                  tapX = Math.round((node.left + node.right) / 2);
-                  tapY = Math.round((node.top + node.bottom) / 2);
+              allNodes = await readUiNodes(targetDevice);
+              const needle = text.trim().toLowerCase();
+              const isTab = /^(beranda|home|absensi|keuangan|informasi|t2q)$/i.test(needle);
+
+              // 1. Bottom tab bar fast-path: cari elemen di bar navigasi bawah (top >= 75% layar)
+              if (isTab) {
+                const tabNode = allNodes.find((n) =>
+                  n.top >= screenHeight * 0.75 &&
+                  [n.text, n.contentDesc].some((v) => (v || '').trim().toLowerCase() === needle)
+                );
+                if (tabNode) {
+                  tapX = Math.round((tabNode.left + tabNode.right) / 2);
+                  tapY = Math.round((tabNode.top + tabNode.bottom) / 2);
+                  matchedUiNode = true;
+                  appendLog(`[Bottom Tab] Ditemukan tab "${text}" di (${tapX}, ${tapY})`);
                 }
-                matchedUiNode = true;
+              }
+
+              // 2. Exact match clickable
+              if (!matchedUiNode) {
+                let node = allNodes.find((candidate) =>
+                  candidate.clickable &&
+                  [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase() === needle)
+                );
+                // 3. Exact match any
+                if (!node) {
+                  node = allNodes.find((candidate) =>
+                    [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase() === needle)
+                  );
+                }
+                // 4. StartsWith clickable
+                if (!node) {
+                  node = allNodes.find((candidate) =>
+                    candidate.clickable &&
+                    [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase().startsWith(needle))
+                  );
+                }
+                // 5. Contains clickable
+                if (!node) {
+                  node = allNodes.find((candidate) =>
+                    candidate.clickable &&
+                    [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase().includes(needle))
+                  );
+                }
+                // 6. Contains any
+                if (!node) {
+                  node = allNodes.find((candidate) => uiNodeMatches(candidate, text));
+                }
+
+                if (node) {
+                  if (/nis|nisn|username|email|password|sandi/i.test(text) && !/edittext/i.test(node.className || '')) {
+                    const nextInput = allNodes.find((n) => /edittext/i.test(n.className || '') && n.top >= node.top && n.top <= node.bottom + 160);
+                    if (nextInput) {
+                      tapX = Math.round((nextInput.left + nextInput.right) / 2);
+                      tapY = Math.round((nextInput.top + nextInput.bottom) / 2);
+                    } else {
+                      tapX = Math.round(screenWidth * 0.5);
+                      tapY = Math.round(node.bottom + 70);
+                    }
+                  } else {
+                    tapX = Math.round((node.left + node.right) / 2);
+                    tapY = Math.round((node.top + node.bottom) / 2);
+                  }
+                  matchedUiNode = true;
+                }
               }
             } catch { /* ignore dump error */ }
           }
 
+          const hasLoginInput = (allNodes || []).some((n) => /edittext/i.test(n.className || '') || /nis|password|sandi|masuk/i.test(n.text || n.contentDesc || n.hint || ''));
           if (!matchedUiNode && /nis|nisn|username|email/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.5);
-            tapY = Math.round(screenHeight * 0.52);
+            if (hasLoginInput) {
+              tapX = Math.round(screenWidth * 0.5);
+              tapY = Math.round(screenHeight * 0.52);
+            } else if (isOptional) {
+              appendLog(`Langkah login "${text}" dilewati karena layar bukan form login.`);
+              continue;
+            }
           } else if (!matchedUiNode && /password|sandi/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.5);
-            tapY = Math.round(screenHeight * 0.63);
+            if (hasLoginInput) {
+              tapX = Math.round(screenWidth * 0.5);
+              tapY = Math.round(screenHeight * 0.63);
+            } else if (isOptional) {
+              appendLog(`Langkah login "${text}" dilewati karena layar bukan form login.`);
+              continue;
+            }
           } else if (!matchedUiNode && /masuk|login/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.5);
-            tapY = Math.round(screenHeight * 0.74);
+            if (hasLoginInput) {
+              tapX = Math.round(screenWidth * 0.5);
+              tapY = Math.round(screenHeight * 0.74);
+            } else if (isOptional) {
+              appendLog(`Langkah login "${text}" dilewati karena layar bukan form login.`);
+              continue;
+            }
           } else if (!matchedUiNode && /beranda|home/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.10);
-            tapY = tabY;
+            tapX = Math.round(screenWidth * 0.173);
+            tapY = Math.round(screenHeight * 0.931);
           } else if (!matchedUiNode && /absensi|presensi/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.30);
-            tapY = tabY;
+            tapX = Math.round(screenWidth * 0.336);
+            tapY = Math.round(screenHeight * 0.931);
           } else if (!matchedUiNode && /keuangan|tagihan/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.50);
-            tapY = tabY;
+            tapX = Math.round(screenWidth * 0.500);
+            tapY = Math.round(screenHeight * 0.931);
           } else if (!matchedUiNode && /informasi|info/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.70);
-            tapY = tabY;
+            tapX = Math.round(screenWidth * 0.663);
+            tapY = Math.round(screenHeight * 0.931);
           } else if (!matchedUiNode && /t2q|quran|tahfidz/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.90);
-            tapY = tabY;
+            tapX = Math.round(screenWidth * 0.826);
+            tapY = Math.round(screenHeight * 0.931);
           } else if (!matchedUiNode && tapSpec.point) {
             const parts = String(tapSpec.point).split(',');
             if (parts.length === 2) {

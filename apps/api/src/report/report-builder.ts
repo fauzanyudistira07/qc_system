@@ -939,13 +939,85 @@ ${JSON.stringify(structuredData)}
         html += '  </div>';
       }
 
+      function humanizeCaption(name) {
+        const base = (name || '').replace(/\.[^/.]+$/, '').toLowerCase();
+        if (base.includes('launch-screen') || base.includes('splash')) return 'Layar Login & Pemilihan Role Demo';
+        if (base.includes('dashboard-beranda')) return 'Dashboard Beranda Siswa (Ahmad Farhan)';
+        if (base.includes('dashboard-restored')) return 'Beranda Setelah Navigasi Tab';
+        if (base.includes('tab-beranda')) return 'Navigasi Tab: Beranda';
+        if (base.includes('tab-absensi')) return 'Navigasi Tab: Absensi Siswa';
+        if (base.includes('tab-keuangan')) return 'Navigasi Tab: Rincian Keuangan';
+        if (base.includes('tab-informasi')) return 'Navigasi Tab: Informasi & Kedisiplinan';
+        if (base.includes('tab-t2q')) return 'Navigasi Tab: Hafalan & Tilawah T2Q';
+        if (base.includes('home-top')) return 'Beranda: Header & Profil Siswa';
+        if (base.includes('home-middle')) return 'Beranda: Widget Presensi & Poin';
+        if (base.includes('home-bottom')) return 'Beranda: Agenda & Mutasi Amal';
+        if (base.includes('home-restored-top')) return 'Beranda: Kembali ke Posisi Atas';
+        if (base.includes('amal-form-opened')) return 'Formulir Mutasi Amal Siswa Terbuka';
+        if (base.includes('amal-form-filled')) return 'Pengisian Checklist Mutasi Amal (Selesai)';
+        if (base.includes('amal-completed-return')) return 'Beranda Siswa Setelah Simpan Amal';
+        if (base.includes('absensi-loaded')) return 'Absensi: Rekap Presensi & Kalender';
+        if (base.includes('izin-form-opened')) return 'Formulir Pengajuan Izin Siswa Terbuka';
+        if (base.includes('izin-form-filled')) return 'Formulir Pengajuan Izin Diisi Lengkap';
+        if (base.includes('absensi-riwayat-pengajuan')) return 'Tab Absensi: Riwayat Pengajuan Izin';
+        if (base.includes('absensi-riwayat-kehadiran')) return 'Tab Absensi: Riwayat Presensi Siswa';
+        if (base.includes('keuangan-loaded')) return 'Keuangan: Daftar Tagihan SPP Siswa';
+        if (base.includes('keuangan-tagihan-unpaid')) return 'Keuangan: Rincian Tagihan Belum Dibayar';
+        if (base.includes('keuangan-struk-pembayaran')) return 'Keuangan: Struk Bukti Pembayaran';
+        if (base.includes('keuangan-restored')) return 'Keuangan: Kembali ke Tampilan Normal';
+        if (base.includes('informasi-kedisiplinan')) return 'Informasi: Rekap Catatan Kedisiplinan';
+        if (base.includes('informasi-berita-sekolah')) return 'Informasi: Pengumuman & Berita Sekolah';
+        if (base.includes('informasi-berita-scrolled')) return 'Informasi: Feed Berita Lengkap';
+        if (base.includes('t2q-loaded')) return 'T2Q: Riwayat Hafalan Tahfidz';
+        if (base.includes('t2q-tahsin-modul')) return 'T2Q: Modul Pembelajaran Tahsin';
+        if (base.includes('t2q-tahsin-detail')) return 'T2Q: Modal Detail Penilaian Tahsin';
+        if (base.includes('t2q-tahsin')) return 'T2Q: Rekap Pembelajaran Tahsin';
+        if (base.includes('t2q-tilawah-progress')) return 'T2Q: Progres Tilawah Al-Quran';
+        if (base.includes('t2q-tilawah-detail')) return 'T2Q: Modal Detail Setoran Tilawah (An-Nur)';
+        if (base.includes('t2q-tilawah')) return 'T2Q: Catatan & Setoran Tilawah';
+        if (base.includes('t2q-hafalan-setoran')) return 'T2Q: Modal Detail Hafalan Tahfidz (Al-Mulk)';
+        if (base.includes('t2q-scrolled')) return 'T2Q: Riwayat Hafalan Lengkap';
+        if (base.includes('detail-keuangan-tagihan-unpaid')) return 'Keuangan: Detail Tagihan Belum Dibayar';
+        if (base.includes('detail-keuangan-rincian-tagihan')) return 'Keuangan: Rincian Breakdown Komponen Tagihan';
+        if (base.includes('detail-keuangan-instruksi-bank-transfer')) return 'Keuangan: Instruksi Bank Transfer BSI Virtual Account';
+        if (base.includes('detail-keuangan-riwayat-lunas')) return 'Keuangan: Riwayat Transaksi Lunas';
+        if (base.includes('detail-absensi-riwayat-presensi')) return 'Absensi: Detail Pengajuan Izin Siswa';
+        if (base.includes('detail-absensi-formulir-izin')) return 'Absensi: Formulir Pengajuan Izin Siswa';
+        if (base.includes('detail-absensi-kehadiran-siswa')) return 'Absensi: Modal Detail Presensi Harian';
+        if (base.includes('detail-absensi-kehadiran-statistik')) return 'Absensi: Statistik Kehadiran & Ketepatan Waktu';
+        if (base.includes('detail-beranda-pusat-notifikasi')) return 'Beranda: Pusat Notifikasi Sekolah';
+        if (base.includes('detail-beranda-profil-siswa')) return 'Beranda: Profil Akun & Data Siswa';
+        if (base.includes('detail-beranda-ekskul-daftar')) return 'Beranda: Daftar & Status Ekstrakurikuler';
+        if (base.includes('detail-beranda-roadmap-amal-siswa')) return 'Beranda: Roadmap Level & Lencana Amal';
+        if (base.includes('detail-beranda-form-amal-yaumi')) return 'Beranda: Formulir Checklist Amalan Harian';
+        if (base.includes('detail-beranda-artikel-berita')) return 'Beranda: Halaman Penuh Artikel Berita';
+        if (base.includes('detail-informasi-pelanggaran-santri')) return 'Informasi: Detail Penghargaan & Catatan Poin';
+        if (base.includes('detail-informasi-berita-lengkap')) return 'Informasi: Baca Berita & Pengumuman Lengkap';
+        if (base.includes('detail-role-guru-dashboard')) return 'Dewan Guru: Dashboard Ustadzah Khadijah, S.Pd';
+        if (base.includes('detail-role-guru-presensi')) return 'Dewan Guru: Presensi & Riwayat Kehadiran Guru';
+        if (base.includes('detail-role-guru-sarpras-laporan')) return 'Dewan Guru: Detail Tiket Keluhan Sarpras';
+        if (base.includes('detail-role-guru-sarpras')) return 'Dewan Guru: Daftar Pengaduan Sarpras';
+        if (base.includes('detail-role-guru-profil')) return 'Dewan Guru: Profil & Data Kepegawaian Guru';
+        if (base.includes('role-guru-dashboard')) return 'Dashboard Dewan Guru (Ustadzah Khadijah, S.Pd)';
+        if (base.includes('detail-role-manager-dashboard')) return 'Manager Sarpras: Dashboard Ir. H. Syarifuddin, M.T.';
+        if (base.includes('detail-role-manager-tiket-sarpras')) return 'Manager Sarpras: Detail Tiket & Foto Sarpras';
+        if (base.includes('detail-role-manager-tiket-disposisi')) return 'Manager Sarpras: Disposisi Penugasan & Timeline';
+        if (base.includes('role-manager-dashboard')) return 'Dashboard Manager Sarpras (Ir. H. Syarifuddin, M.T.)';
+        if (base.includes('detail-role-teknisi-dashboard')) return 'Staff Teknisi: Dashboard Penugasan Ahmad Rian';
+        if (base.includes('detail-role-teknisi-tiket')) return 'Staff Teknisi: Detail Pekerjaan Tiket Lapangan';
+        if (base.includes('detail-role-teknisi-form-laporan-selesai')) return 'Staff Teknisi: Formulir Laporan Selesai & Upload Foto';
+        if (base.includes('role-teknisi-dashboard')) return 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
+        return (name || '').replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+      }
+
       // Screenshot gallery
       if (flow.screenshots && flow.screenshots.length) {
         html += '  <div class="gallery-grid">';
         flow.screenshots.forEach(sc => {
-          html += '    <div class="gallery-card" onclick="openLightbox(\\'' + encodeURI(sc.url) + '\\', \\'' + escapeHtml(sc.name) + '\\')">';
-          html += '      <img class="gallery-img" src="' + escapeHtml(sc.url) + '" alt="' + escapeHtml(sc.name) + '" loading="lazy">';
-          html += '      <div class="gallery-caption">📸 ' + escapeHtml(sc.name) + '</div>';
+          const caption = humanizeCaption(sc.name);
+          html += '    <div class="gallery-card" onclick="openLightbox(\\'' + encodeURI(sc.url) + '\\', \\'' + escapeHtml(caption + ' (' + sc.name + ')') + '\\')">';
+          html += '      <img class="gallery-img" src="' + escapeHtml(sc.url) + '" alt="' + escapeHtml(caption) + '" loading="lazy">';
+          html += '      <div class="gallery-caption"><strong style="display:block;font-size:12px;color:var(--text);margin-bottom:3px;">' + escapeHtml(caption) + '</strong><span style="font-size:10.5px;color:var(--text-dim);font-family:var(--font-mono);">' + escapeHtml(sc.name) + '</span></div>';
           html += '    </div>';
         });
         html += '  </div>';

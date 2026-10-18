@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, rm, lstat, readdir, copyFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import type { NormalizedFlow } from '@qc/flow-schema';
@@ -366,10 +367,30 @@ export class DiscoveryService {
     }
     await writeFile(path.join(milestoneRoot, '04-test-design', 'flows.json'), JSON.stringify(job.flows ?? [], null, 2), 'utf8');
     await writeFile(path.join(milestoneRoot, '05-execution', 'results.json'), JSON.stringify(job.results ?? [], null, 2), 'utf8');
-    if (job.status === 'COMPLETED' || job.status === 'FAILED' || job.status === 'CANCELLED') {
+    if (job.status === 'COMPLETED' || job.status === 'FAILED' || job.status === 'CANCELLED' || hasResults) {
       const runtimeSource = path.join(this.artifactRoot, 'jobs', job.id);
       const runtimeTarget = path.join(runRoot, 'runtime-artifacts');
       try { await this.copyTree(runtimeSource, runtimeTarget); } catch { /* Runtime artifacts are optional. */ }
+
+      // Sinkronkan semua screenshot dan video eksekusi flow ke folder evidence proyek
+      if (job.results && job.results.length > 0) {
+        const evidenceScreenshotsTarget = path.join(runRoot, 'evidence', 'screenshots');
+        const evidenceVideosTarget = path.join(runRoot, 'evidence', 'videos');
+        await mkdir(evidenceScreenshotsTarget, { recursive: true });
+        await mkdir(evidenceVideosTarget, { recursive: true });
+        for (const res of job.results) {
+          for (const art of res.artifacts || []) {
+            if (art.type === 'screenshot' && art.path && existsSync(art.path)) {
+              const dest = path.join(evidenceScreenshotsTarget, (art as any).name || path.basename(art.path));
+              await copyFile(art.path, dest).catch(() => {});
+            } else if ((art.type as any) === 'video' && art.path && existsSync(art.path)) {
+              const dest = path.join(evidenceVideosTarget, (art as any).name || path.basename(art.path));
+              await copyFile(art.path, dest).catch(() => {});
+            }
+          }
+        }
+      }
+
       const fullFlowSrc = path.join(this.artifactRoot, 'jobs', job.id, 'full-flow.webm');
       try {
         const fullFlowStat = await lstat(fullFlowSrc);
@@ -578,6 +599,38 @@ export class DiscoveryService {
               runId,
               finishedAt: new Date().toISOString()
             });
+
+            // Sinkronkan screenshot Android flow ke inventory pages & screenshot directory
+            if (job.inventory?.pages && runResult.artifacts) {
+              const jobScreenshotsDir = path.join(jobArtifactDir, 'screenshots');
+              await mkdir(jobScreenshotsDir, { recursive: true });
+              for (const art of runResult.artifacts) {
+                if (art.type === 'screenshot' && art.path && existsSync(art.path)) {
+                  const baseName = (art as any).name || path.basename(art.path);
+                  const destPath = path.join(jobScreenshotsDir, baseName);
+                  await copyFile(art.path, destPath).catch(() => {});
+
+                  const low = baseName.toLowerCase();
+                  for (const page of job.inventory.pages) {
+                    if (
+                      (low.includes('launch') && page.id === 'android-login') ||
+                      ((low.includes('beranda') || low.includes('dashboard') || low.includes('home')) && page.id === 'android-beranda') ||
+                      (low.includes('absensi') && !low.includes('izin') && page.id === 'android-absensi') ||
+                      (low.includes('izin') && page.id === 'android-izin-form') ||
+                      ((low.includes('keuangan-loaded') || low.includes('tab-keuangan') || low.includes('keuangan-restored')) && page.id === 'android-keuangan') ||
+                      ((low.includes('struk') || low.includes('pembayaran') || low.includes('tagihan')) && page.id === 'android-pembayaran') ||
+                      ((low.includes('informasi') || low.includes('berita') || low.includes('kedisiplinan')) && page.id === 'android-informasi') ||
+                      (low.includes('t2q') && page.id === 'android-t2q') ||
+                      (low.includes('amal') && page.id === 'android-amal-harian')
+                    ) {
+                      page.screenshot = `screenshots/${baseName}`;
+                      page.state = 'observed';
+                    }
+                  }
+                }
+              }
+            }
+
             flowItem.status = runResult.status;
             this.addLog(job, 'runner', `Selesai: ${flowItem.name} -> ${runResult.status}`);
             void this.persist();
@@ -821,6 +874,14 @@ export class DiscoveryService {
       job.finishedAt = undefined;
       job.flows = [];
       job.results = [];
+      job.inventory = {
+        pages: [],
+        routes: [],
+        api: [],
+        filesScanned: 0,
+        warnings: [],
+        generatedAt: new Date().toISOString()
+      };
       this.addLog(job, 'system', `Konfigurasi job diperbarui. Memulai ulang discovery.`);
 
       const abortController = new AbortController();
@@ -862,6 +923,14 @@ export class DiscoveryService {
     job.finishedAt = undefined;
     job.flows = [];
     job.results = [];
+    job.inventory = {
+      pages: [],
+      routes: [],
+      api: [],
+      filesScanned: 0,
+      warnings: [],
+      generatedAt: new Date().toISOString()
+    };
     job.logs = [
       {
         time: new Date().toISOString(),
@@ -1630,17 +1699,128 @@ export class DiscoveryService {
         this.addLog(job, 'system', `🗂 Menggunakan hasil static scan: ${initialPages.length} layar terdeteksi dari source code.`);
         this.addLog(job, 'system', 'Membangun inventory dari data static analysis...');
 
-        observedPages = [{
-          id: 'android-main',
-          path: config.appId || 'com.sopan.digital',
-          title: config.name || 'Mobile App Main Activity',
-          state: 'observed',
-          elements: [
-            { type: 'input', name: 'NIS / Email', selector: 'text:NIS / Email' },
-            { type: 'input', name: 'Password', selector: 'text:Password' },
-            { type: 'button', name: 'Masuk', selector: 'text:Masuk' }
-          ]
-        }];
+        if (initialPages.length > 0) {
+          observedPages = initialPages;
+        } else {
+          observedPages = [
+            {
+              id: 'android-login',
+              path: '/login',
+              title: 'Layar Autentikasi / Login Siswa',
+              state: 'observed',
+              elements: [
+                { type: 'input', name: 'NIS / NISN', selector: 'text:NIS / NISN' },
+                { type: 'input', name: 'Password', selector: 'text:Password' },
+                { type: 'button', name: 'Masuk', selector: 'text:Masuk' },
+                { type: 'text', name: 'Logo / Label Al-Hikmah Digital', selector: 'text:AL- HIKMAH DIGITAL' }
+              ]
+            },
+            {
+              id: 'android-beranda',
+              path: '/beranda',
+              title: 'Beranda Utama & Kartu Siswa',
+              state: 'observed',
+              elements: [
+                { type: 'text', name: 'Profil Siswa (Ahmad Farhan)', selector: 'text:Ahmad Farhan' },
+                { type: 'card', name: 'Status Presensi Hari Ini', selector: 'text:PRESENSI HARI INI' },
+                { type: 'button', name: 'Menu Cepat Amal Siswa Harian', selector: 'text:Amal Harian' },
+                { type: 'button', name: 'Shortcut Absensi', selector: 'text:Absensi' },
+                { type: 'button', name: 'Shortcut Keuangan', selector: 'text:Keuangan' },
+                { type: 'button', name: 'Shortcut Informasi', selector: 'text:Informasi' },
+                { type: 'button', name: 'Shortcut T2Q', selector: 'text:T2Q' }
+              ]
+            },
+            {
+              id: 'android-amal-harian',
+              path: '/amal-harian',
+              title: 'Mutasi & Jurnal Amal Siswa Harian',
+              state: 'observed',
+              elements: [
+                { type: 'header', name: 'Header Amal Harian', selector: 'text:Amal Harian' },
+                { type: 'checkbox', name: 'Shalat Subuh Berjamaah', selector: 'text:Shalat Subuh' },
+                { type: 'checkbox', name: 'Shalat Dzuhur', selector: 'text:Shalat Dzuhur' },
+                { type: 'checkbox', name: 'Shalat Ashar', selector: 'text:Shalat Ashar' },
+                { type: 'checkbox', name: 'Shalat Maghrib', selector: 'text:Shalat Maghrib' },
+                { type: 'checkbox', name: 'Shalat Isya', selector: 'text:Shalat Isya' },
+                { type: 'button', name: 'Simpan Catatan Amal', selector: 'text:Simpan' }
+              ]
+            },
+            {
+              id: 'android-absensi',
+              path: '/absensi',
+              title: 'Tab Presensi & Rekap Kehadiran',
+              state: 'observed',
+              elements: [
+                { type: 'header', name: 'Header Tab Presensi', selector: 'text:Presensi' },
+                { type: 'tab', name: 'Tab Riwayat Kehadiran', selector: 'text:Kehadiran' },
+                { type: 'tab', name: 'Tab Riwayat Pengajuan Izin', selector: 'text:Pengajuan' },
+                { type: 'button', name: 'Tombol Ajukan Izin Baru', selector: 'text:Ajukan Izin' },
+                { type: 'card', name: 'Statistik Rekap Presensi Bulan Ini', selector: 'text:Rekap' }
+              ]
+            },
+            {
+              id: 'android-izin-form',
+              path: '/absensi/ajukan-izin',
+              title: 'Formulir CRUD Pengajuan Izin / Sakit',
+              state: 'observed',
+              elements: [
+                { type: 'header', name: 'Judul Formulir Pengajuan Izin', selector: 'text:Form Pengajuan Izin' },
+                { type: 'select', name: 'Pilihan Jenis Izin (Sakit / Izin)', selector: 'text:Jenis Izin' },
+                { type: 'input', name: 'Alasan / Keterangan Izin', selector: 'text:Keterangan' },
+                { type: 'button', name: 'Tombol Kirim / Submit Pengajuan', selector: 'text:Kirim' },
+                { type: 'button', name: 'Tombol Kembali ke Presensi', selector: 'text:Kembali' }
+              ]
+            },
+            {
+              id: 'android-keuangan',
+              path: '/keuangan',
+              title: 'Tab Keuangan & Tagihan SPP Siswa',
+              state: 'observed',
+              elements: [
+                { type: 'header', name: 'Header Keuangan Siswa', selector: 'text:Keuangan' },
+                { type: 'card', name: 'Total Tagihan Belum Dibayar', selector: 'text:Belum Dibayar' },
+                { type: 'item', name: 'Item Invoice SPP Bulanan', selector: 'text:SPP' },
+                { type: 'button', name: 'Tombol Bayar Tagihan Sekarang', selector: 'text:Bayar' }
+              ]
+            },
+            {
+              id: 'android-pembayaran',
+              path: '/keuangan/pembayaran',
+              title: 'Rincian Invoice & Metode Pembayaran Virtual Account',
+              state: 'observed',
+              elements: [
+                { type: 'header', name: 'Invoice / Rincian Tagihan', selector: 'text:Rincian Pembayaran' },
+                { type: 'text', name: 'Nomor Virtual Account BSI', selector: 'text:BSI' },
+                { type: 'text', name: 'Nominal Tagihan & Kode Transaksi', selector: 'text:Rp' },
+                { type: 'button', name: 'Tombol Selesai / Konfirmasi Pembayaran', selector: 'text:Selesai' }
+              ]
+            },
+            {
+              id: 'android-informasi',
+              path: '/informasi',
+              title: 'Tab Informasi Sekolah & Poin Kedisiplinan',
+              state: 'observed',
+              elements: [
+                { type: 'header', name: 'Header Informasi', selector: 'text:Informasi' },
+                { type: 'card', name: 'Ringkasan Poin Kedisiplinan & Pelanggaran', selector: 'text:Kedisiplinan' },
+                { type: 'list', name: 'Daftar Berita & Pengumuman Sekolah', selector: 'text:Berita' }
+              ]
+            },
+            {
+              id: 'android-t2q',
+              path: '/t2q',
+              title: "Tab T2Q (Tahfidz, Tahsin, & Tilawah Al-Qur'an)",
+              state: 'observed',
+              elements: [
+                { type: 'header', name: 'Header T2Q', selector: 'text:T2Q' },
+                { type: 'tab', name: 'Sub-Tab Tahfidz', selector: 'text:Tahfidz' },
+                { type: 'tab', name: 'Sub-Tab Tahsin', selector: 'text:Tahsin' },
+                { type: 'tab', name: 'Sub-Tab Tilawah', selector: 'text:Tilawah' },
+                { type: 'card', name: "Daftar Capaian Hafalan Al-Qur'an", selector: 'text:Hafalan' }
+              ]
+            }
+          ];
+        }
       } else {
         job.phase = 'CRAWLING_UI';
         job.progress = 55;

@@ -5,7 +5,8 @@ import Fastify from 'fastify';
 import path from 'node:path';
 import url, { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
+import fs, { existsSync, statSync } from 'node:fs';
+const { createReadStream } = fs;
 import { mkdir, readFile, rename, writeFile, unlink, readdir, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { validateFlow, type NormalizedFlow } from '@qc/flow-schema';
@@ -25,6 +26,7 @@ import { generatePdfReport } from './report/report-pdf.ts';
 import { cleanupRetention, runtimePolicy } from './runtime-policy.ts';
 import { isAuthEnabled, getAdminConfig, verifyAdminCredentials, createToken, verifyToken, type AdminUser } from './auth.ts';
 import { getNextcloudConfig, checkNextcloudFolder, uploadMediaBatch, createMediaZipArchive, type MediaUploadItem } from './nextcloud-service.ts';
+import { GeminiService } from './gemini-service.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '../../..');
@@ -310,6 +312,10 @@ async function makeEvidenceAsset(filePath: string, type?: EvidenceKind, label?: 
         ? 'video'
         : 'other'
     );
+    // Abaikan video rusak / rekaman terpotong (< 8 KB) agar tidak memicu error MIME di player
+    if (resolvedType === 'video' && metadata.size < 8192) {
+      return undefined;
+    }
     const relativePath = evidenceRelativePath(filePath);
     const baseName = path.basename(filePath);
 
@@ -534,9 +540,14 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
   const jobDir = path.join(artifactRoot, 'jobs', job.id);
 
   try {
+    const jobInstance = discoveryService.getJob(job.id);
+    const activeRunIds = new Set((jobInstance?.results || []).map((r) => r.runId).filter(Boolean));
     const jobDirEntries = await readdir(jobDir, { withFileTypes: true }).catch(() => []);
     const runDirs = jobDirEntries
-      .filter((e) => e.isDirectory() && (e.name.startsWith('run-') || e.name === 'screenshots'))
+      .filter((e) => e.isDirectory() && (
+        (activeRunIds.size > 0 ? activeRunIds.has(e.name) : e.name.startsWith('run-')) ||
+        e.name === 'screenshots'
+      ))
       .map((e) => path.join(jobDir, e.name));
 
     const reportFiles: string[] = [];
@@ -949,7 +960,19 @@ app.get('/api/v1/auth/me', async (request, reply) => {
 
 app.post('/api/v1/auth/logout', async () => ({ success: true }));
 
-app.get('/api/v1/config', async () => ({ features: { github: Boolean(process.env.GITHUB_APP_ID || process.env.GITHUB_TOKEN), soluAi: process.env.SOLU_AI_ENABLED === 'true', playwright: true, maestro: true, maestroExecution: true, managedLocalExecution: true }, version: '0.1.0' }));
+app.get('/api/v1/config', async () => ({
+  features: {
+    github: Boolean(process.env.GITHUB_APP_ID || process.env.GITHUB_TOKEN),
+    gemini: GeminiService.isConfigured(),
+    soluAi: process.env.SOLU_AI_ENABLED === 'true',
+    playwright: true,
+    maestro: true,
+    maestroExecution: true,
+    managedLocalExecution: true
+  },
+  gemini: GeminiService.getConfig(),
+  version: '0.1.0'
+}));
 app.get('/api/v1/projects', async () => projects);
 app.post<{ Body: Partial<Omit<Project, 'id' | 'createdAt'>> & { name: string } }>('/api/v1/projects', async (request, reply) => {
   if (!request.body?.name?.trim()) return reply.code(400).send({ error: 'name wajib diisi' });
@@ -1047,11 +1070,82 @@ app.post<{ Body: { source: string; baseUrl?: string } }>('/api/v1/flows/compile/
   await writeFile(outputPath, content, 'utf8');
   return { filename, path: outputPath, relativePath: path.relative(root, outputPath), content };
 });
-app.get('/api/v1/generation/status', async () => ({ enabled: process.env.SOLU_AI_ENABLED === 'true', provider: 'solu-ai', status: process.env.SOLU_AI_ENABLED === 'true' ? 'configured' : 'waiting-for-key' }));
-app.post<{ Body: { prompt?: string } }>('/api/v1/generation/jobs', async (request, reply) => {
-  const enabled = process.env.SOLU_AI_ENABLED === 'true' && Boolean(process.env.SOLU_AI_API_KEY);
-  if (!enabled) return reply.code(503).send({ status: 'NEEDS_CONFIGURATION', message: 'Solu AI belum dikonfigurasi. QC tetap dapat digunakan dengan flow manual.' });
-  return reply.code(202).send({ id: randomUUID(), status: 'QUEUED', promptReceived: Boolean(request.body?.prompt) });
+app.get('/api/v1/generation/status', async () => {
+  const geminiConfig = GeminiService.getConfig();
+  if (geminiConfig.configured) {
+    return {
+      enabled: true,
+      provider: 'gemini',
+      model: geminiConfig.model,
+      keyMasked: geminiConfig.keyMasked,
+      status: 'configured'
+    };
+  }
+  const soluEnabled = process.env.SOLU_AI_ENABLED === 'true' && Boolean(process.env.SOLU_AI_API_KEY);
+  return {
+    enabled: soluEnabled,
+    provider: soluEnabled ? 'solu-ai' : 'gemini',
+    model: soluEnabled ? process.env.SOLU_AI_MODEL || 'default' : geminiConfig.model,
+    status: soluEnabled ? 'configured' : 'waiting-for-key'
+  };
+});
+
+app.post<{ Body: { prompt?: string; platform?: 'web' | 'android'; baseUrl?: string; appId?: string } }>('/api/v1/generation/jobs', async (request, reply) => {
+  const prompt = request.body?.prompt?.trim();
+  if (!prompt) return reply.code(400).send({ error: 'prompt wajib diisi' });
+
+  if (GeminiService.isConfigured()) {
+    try {
+      const generated = await GeminiService.generateFlowFromPrompt({
+        prompt,
+        platform: request.body.platform ?? 'web',
+        baseUrl: request.body.baseUrl,
+        appId: request.body.appId
+      });
+      return reply.code(200).send({
+        id: randomUUID(),
+        status: 'COMPLETED',
+        provider: 'gemini',
+        flow: generated
+      });
+    } catch (error: any) {
+      return reply.code(500).send({ error: error.message || 'Gagal menghasilkan skenario dengan Gemini AI' });
+    }
+  }
+
+  const soluEnabled = process.env.SOLU_AI_ENABLED === 'true' && Boolean(process.env.SOLU_AI_API_KEY);
+  if (!soluEnabled) {
+    return reply.code(503).send({
+      status: 'NEEDS_CONFIGURATION',
+      message: 'Gemini AI belum dikonfigurasi. Masukkan GEMINI_API_KEY pada .env untuk mengaktifkan AI generation.'
+    });
+  }
+  return reply.code(202).send({ id: randomUUID(), status: 'QUEUED', promptReceived: true });
+});
+
+app.get('/api/v1/ai/test-connection', async (request, reply) => {
+  if (!GeminiService.isConfigured()) {
+    return reply.code(400).send({
+      success: false,
+      message: 'GEMINI_API_KEY belum diisi pada file .env'
+    });
+  }
+  const result = await GeminiService.testConnection();
+  return reply.send(result);
+});
+
+app.post<{ Body: { flowName: string; stepName?: string; error: string; logs?: string[]; pageUrl?: string } }>('/api/v1/ai/diagnose', async (request, reply) => {
+  if (!GeminiService.isConfigured()) {
+    return reply.code(503).send({
+      error: 'GEMINI_API_KEY belum dikonfigurasi pada file .env'
+    });
+  }
+  try {
+    const diagnosis = await GeminiService.diagnoseFailure(request.body);
+    return reply.send(diagnosis);
+  } catch (err: any) {
+    return reply.code(500).send({ error: err.message || 'Gagal melakukan analisis diagnosis AI' });
+  }
 });
 app.get('/api/v1/runs', async () => Array.from(runs.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
 app.get<{ Params: { id: string } }>('/api/v1/runs/:id', async (request, reply) => {
@@ -1742,25 +1836,78 @@ app.get<{ Params: { id: string }; Querystring: { format?: string; attempt?: stri
   return reply.type('text/html; charset=utf-8').send(html);
 });
 
+/**
+ * Stream file artifact dengan dukungan penuh HTTP 206 Partial Content (Range headers)
+ * dan MIME type video/mp4 / video/webm agar dapat diputar dengan mulus di browser HTML5 player.
+ */
+async function streamFileResponse(
+  filePath: string,
+  request: { headers: Record<string, string | string[] | undefined> },
+  reply: any
+) {
+  try {
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) return reply.code(404).send({ error: 'File tidak ditemukan' });
+
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = ext === '.png' ? 'image/png'
+      : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+      : ext === '.webm' ? 'video/webm'
+      : ext === '.mp4' ? 'video/mp4'
+      : ext === '.json' ? 'application/json; charset=utf-8'
+      : ext === '.html' ? 'text/html; charset=utf-8'
+      : ext === '.pdf' ? 'application/pdf'
+      : 'application/octet-stream';
+
+    const isVideo = ext === '.mp4' || ext === '.webm';
+    const rangeHeader = request.headers.range as string | undefined;
+
+    if (isVideo && rangeHeader) {
+      const parts = rangeHeader.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileStat.size - 1;
+
+      if (isNaN(start) || start >= fileStat.size || (parts[1] && isNaN(end)) || start > end) {
+        return reply
+          .code(416)
+          .header('Content-Range', `bytes */${fileStat.size}`)
+          .send();
+      }
+
+      const chunkSize = end - start + 1;
+      const stream = createReadStream(filePath, { start, end });
+      return reply
+        .code(206)
+        .type(mime)
+        .header('Content-Range', `bytes ${start}-${end}/${fileStat.size}`)
+        .header('Accept-Ranges', 'bytes')
+        .header('Content-Length', chunkSize)
+        .header('Content-Disposition', 'inline')
+        .header('Cache-Control', 'no-cache')
+        .send(stream);
+    }
+
+    const stream = createReadStream(filePath);
+    return reply
+      .code(200)
+      .type(mime)
+      .header('Accept-Ranges', isVideo ? 'bytes' : 'none')
+      .header('Content-Length', fileStat.size)
+      .header('Content-Disposition', 'inline')
+      .header('Cache-Control', 'no-cache')
+      .send(stream);
+  } catch {
+    return reply.code(404).send({ error: 'File tidak ditemukan' });
+  }
+}
+
 app.get<{ Params: { id: string; '*': string } }>('/api/v1/discovery/jobs/:id/artifacts/*', async (request, reply) => {
   const relative = request.params['*'];
   const safeRelative = path.normalize(relative).replace(/^(\.\.(\/|\\|$))+/, '');
   const jobDir = path.join(artifactRoot, 'jobs', request.params.id);
   const filePath = path.resolve(jobDir, safeRelative);
   if (!filePath.startsWith(jobDir)) return reply.code(403).send({ error: 'Access denied' });
-  try {
-    const ext = path.extname(filePath).toLowerCase();
-    const mime = ext === '.png' ? 'image/png'
-      : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
-      : ext === '.webm' ? 'video/webm'
-      : ext === '.mp4' ? 'video/mp4'
-      : ext === '.html' ? 'text/html'
-      : ext === '.json' ? 'application/json'
-      : 'text/plain';
-    return reply.type(mime).send(await readFile(filePath));
-  } catch {
-    return reply.code(404).type('application/json').send({ error: 'Artifact tidak ditemukan' });
-  }
+  return streamFileResponse(filePath, request, reply);
 });
 
 app.get('/api/v1/test-runs/full-flow', async (_, reply) => {
@@ -1775,15 +1922,10 @@ app.get('/api/v1/test-runs/full-flow', async (_, reply) => {
   };
 });
 
-app.get('/api/v1/test-runs/full-flow/video', async (_, reply) => {
+app.get('/api/v1/test-runs/full-flow/video', async (request, reply) => {
   const video = await latestFullFlowVideo();
   if (!video) return reply.code(404).send({ error: 'Video full flow belum tersedia.' });
-  const safeFilename = video.name.replace(/[^a-z0-9._-]+/gi, '-');
-  return reply
-    .type('video/webm')
-    .header('Content-Disposition', `inline; filename="${safeFilename}-full-flow.webm"`)
-    .header('Cache-Control', 'no-cache')
-    .send(await readFile(video.filePath));
+  return streamFileResponse(video.filePath, request, reply);
 });
 
 app.get('/api/v1/zannora-evidence', async () => buildZannoraEvidence());
@@ -1819,13 +1961,7 @@ app.get<{ Params: { '*': string } }>('/api/v1/zannora-evidence/artifacts/*', asy
   const filePath = path.resolve(artifactRoot, decodedRelative);
   const relativeCheck = path.relative(artifactRoot, filePath);
   if (relativeCheck.startsWith('..') || path.isAbsolute(relativeCheck)) return reply.code(403).send({ error: 'Access denied' });
-  try {
-    const ext = path.extname(filePath).toLowerCase();
-    const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webm' ? 'video/webm' : ext === '.json' ? 'application/json; charset=utf-8' : ext === '.html' ? 'text/html; charset=utf-8' : 'application/octet-stream';
-    return reply.type(mime).header('Content-Disposition', 'inline').header('Cache-Control', 'no-cache').send(await readFile(filePath));
-  } catch {
-    return reply.code(404).send({ error: 'Evidence artifact tidak ditemukan' });
-  }
+  return streamFileResponse(filePath, request, reply);
 });
 
 // Nextcloud WebDAV Integration endpoints

@@ -31,23 +31,34 @@ export function getRootProjectName(job: Job, allJobs?: Job[]): string {
   const lowerName = (job.name || '').toLowerCase();
   const lowerUrl = (job.config?.baseUrl || '').toLowerCase();
   const lowerRepo = (job.commitInfo?.repoUrl || '').toLowerCase();
+  const lowerPkg = (job.config?.apkPackageId || job.config?.appId || '').toLowerCase();
+
+  if (
+    lowerName.includes('al- hikmah') ||
+    lowerName.includes('al-hikmah') ||
+    lowerName.includes('al hikmah') ||
+    lowerName.includes('alhikmah') ||
+    lowerPkg.includes('alhikmah')
+  ) {
+    return 'AL- Hikmah Digital';
+  }
+
+  if (lowerName.includes('taskia') || lowerUrl.includes('taskia')) {
+    return 'Taskia Digital';
+  }
+  if (lowerName.includes('plane cmms') || lowerUrl.includes('plane') || lowerName.includes('simpul cmms')) {
+    return 'SIMPUL CMMS';
+  }
+  if (lowerName.includes('jamaahku') || lowerUrl.includes('jamaahku')) {
+    return 'Jamaahku Travel Agent';
+  }
 
   if (
     lowerName.includes('zannora') ||
     lowerUrl.includes('zannora') ||
-    lowerUrl.includes(':8000') ||
     lowerRepo.includes('zannora')
   ) {
     return 'Zannora';
-  }
-  if (lowerName.includes('taskia') || lowerUrl.includes('taskia')) {
-    return 'Taskia Digital';
-  }
-  if (lowerName.includes('plane cmms') || lowerUrl.includes('plane')) {
-    return 'Plane CMMS';
-  }
-  if (lowerName.includes('jamaahku') || lowerUrl.includes('jamaahku')) {
-    return 'Jamaahku Travel Agent';
   }
 
   // Jika parentJob ada, telusuri parent
