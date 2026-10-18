@@ -1447,6 +1447,11 @@ app.post('/api/v1/fixtures/seed/jamaahku', async (_request, reply) => {
 
 
 // Discovery Jobs Endpoints
+app.post('/api/v1/discovery/reload', async () => {
+  await discoveryService.init();
+  return { success: true, count: discoveryService.listJobs().length };
+});
+
 app.get('/api/v1/discovery/jobs', async () => {
   return discoveryService.listJobs();
 });
