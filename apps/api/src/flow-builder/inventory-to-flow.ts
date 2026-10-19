@@ -51,7 +51,10 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
         source: buildRawMaestroYaml(appId, '1. Launch & Smoke Check', [
           { tapOn: { text: "Don't allow", optional: true } },
           { tapOn: { text: "Don\u2019t allow", optional: true } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { tapOn: { text: 'Beranda', optional: true } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
+          { waitForAnimationToEnd: { timeout: 1500 } },
           { takeScreenshot: 'launch-screen' }
         ])
       },
@@ -64,7 +67,8 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
         status: 'READY',
         source: buildRawMaestroYaml(appId, '2. Login & Masuk Dashboard', [
           ...loginCmds,
-          { assertVisible: { text: 'Beranda' } },
+          { tapOn: { text: 'Beranda', optional: true } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
           { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'dashboard-beranda' }
         ])
@@ -78,6 +82,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
         status: 'READY',
         source: buildRawMaestroYaml(appId, '3. Navigasi Semua Tab Dashboard', [
           { tapOn: { text: 'Beranda' } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
           { waitForAnimationToEnd: { timeout: 2000 } },
           { assertVisible: { text: 'Beranda' } },
           { takeScreenshot: 'tab-beranda' },
@@ -98,6 +103,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
           { assertVisible: { text: 'Tahfidz' } },
           { takeScreenshot: 'tab-t2q' },
           { tapOn: { text: 'Beranda' } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
           { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'dashboard-restored' }
         ])
@@ -111,17 +117,18 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
         status: 'READY',
         source: buildRawMaestroYaml(appId, '4. Eksplorasi Konten Beranda & Aksi Cepat', [
           { tapOn: { text: 'Beranda' } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
           { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'home-top' },
-          { swipe: { direction: 'UP' } },
+          { swipe: { start: "50%,75%", end: "50%,25%", duration: 400 } },
           { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'home-middle' },
-          { swipe: { direction: 'UP' } },
+          { swipe: { start: "50%,75%", end: "50%,25%", duration: 400 } },
           { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'home-bottom' },
-          { swipe: { direction: 'DOWN' } },
+          { swipe: { start: "50%,25%", end: "50%,75%", duration: 400 } },
           { waitForAnimationToEnd: { timeout: 1000 } },
-          { swipe: { direction: 'DOWN' } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 } },
           { waitForAnimationToEnd: { timeout: 1500 } },
           { takeScreenshot: 'home-restored-top' }
         ])
@@ -135,8 +142,11 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
         status: 'READY',
         source: buildRawMaestroYaml(appId, '5. CRUD Mutasi Amal Siswa Harian', [
           { tapOn: { text: 'Beranda' } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
           { waitForAnimationToEnd: { timeout: 1500 } },
+          { tapOn: { text: 'Amal Siswa Harian', optional: true } },
           { tapOn: { text: 'Isi Sekarang', optional: true } },
+          { tapOn: { text: 'Sudah Diisi', optional: true } },
           { waitForAnimationToEnd: { timeout: 3000 } },
           { takeScreenshot: 'amal-form-opened' },
           { tapOn: { text: 'Iya', optional: true } },
@@ -219,7 +229,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
           { tapOn: { text: 'Berita Sekolah', optional: true } },
           { waitForAnimationToEnd: { timeout: 3000 } },
           { takeScreenshot: 'informasi-berita-sekolah' },
-          { swipe: { direction: 'UP' } },
+          { swipe: { start: "50%,75%", end: "50%,25%", duration: 400 } },
           { waitForAnimationToEnd: { timeout: 2000 } },
           { takeScreenshot: 'informasi-berita-scrolled' },
           { tapOn: { text: 'Kedisiplinan', optional: true } },
@@ -250,13 +260,88 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
         ])
       },
 
-      // ── Flow 10: Switch Role & Akses Dashboard Dewan Guru ─────────────────
+      // ── Flow 10: Menu Samping (Drawer): Profil Siswa & Ekskul ─────────────
       {
-        id: 'android-role-guru',
-        name: '10. Switch Role & Akses Dashboard Dewan Guru',
+        id: 'android-drawer-profile',
+        name: '10. Menu Samping (Drawer): Profil Siswa & Ekskul',
         platform: 'android',
         status: 'READY',
-        source: buildRawMaestroYaml(appId, '10. Switch Role & Akses Dashboard Dewan Guru', [
+        source: buildRawMaestroYaml(appId, '10. Menu Samping (Drawer): Profil Siswa & Ekskul', [
+          { tapOn: { text: 'Beranda' } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
+          { takeScreenshot: 'drawer-menu-opened' },
+          { tapOn: { text: 'Profil Siswa', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { takeScreenshot: 'profil-siswa-screen' },
+          { pressKey: 'BACK' },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
+          { tapOn: { text: 'Ekstrakurikuler', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { takeScreenshot: 'ekskul-screen' },
+          { pressKey: 'BACK' },
+          { waitForAnimationToEnd: { timeout: 1500 } }
+        ])
+      },
+
+      // ── Flow 11: Quick Actions Beranda: Kalender & Detail Berita ──────────
+      {
+        id: 'android-beranda-actions',
+        name: '11. Quick Actions Beranda: Kalender & Detail Berita',
+        platform: 'android',
+        status: 'READY',
+        source: buildRawMaestroYaml(appId, '11. Quick Actions Beranda: Kalender & Detail Berita', [
+          { tapOn: { text: 'Beranda' } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { tapOn: { text: 'Kegiatan Mendatang', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { takeScreenshot: 'kalender-kegiatan-screen' },
+          { pressKey: 'BACK' },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { swipe: { start: "50%,75%", end: "50%,25%", duration: 400 } },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { tapOn: { text: 'Baca Selengkapnya', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { takeScreenshot: 'berita-detail-screen' },
+          { pressKey: 'BACK' },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true }
+        ])
+      },
+
+      // ── Flow 12: Pusat Notifikasi Aplikasi ────────────────────────────────
+      {
+        id: 'android-notifications',
+        name: '12. Pusat Notifikasi Aplikasi',
+        platform: 'android',
+        status: 'READY',
+        source: buildRawMaestroYaml(appId, '12. Pusat Notifikasi Aplikasi', [
+          { tapOn: { text: 'Beranda' } },
+          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
+          { waitForAnimationToEnd: { timeout: 1500 } },
+          { tapOn: { point: "92%,7%", optional: true } },
+          { waitForAnimationToEnd: { timeout: 2500 } },
+          { takeScreenshot: 'notifikasi-screen' },
+          { pressKey: 'BACK' },
+          { waitForAnimationToEnd: { timeout: 1500 } }
+        ])
+      },
+
+      // ── Flow 13: Switch Role & Akses Dashboard Dewan Guru ─────────────────
+      {
+        id: 'android-role-guru',
+        name: '13. Switch Role & Akses Dashboard Dewan Guru',
+        platform: 'android',
+        status: 'READY',
+        source: buildRawMaestroYaml(appId, '13. Switch Role & Akses Dashboard Dewan Guru', [
+          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 }, optional: true },
+          { tapOn: { text: 'Logout', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
           { tapOn: { text: 'Dewan Guru', optional: true } },
           { tapOn: { text: 'Masuk', optional: true } },
           { waitForAnimationToEnd: { timeout: 3000 } },
@@ -265,13 +350,16 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
         ])
       },
 
-      // ── Flow 11: Switch Role & Akses Dashboard Manager Sarpras ───────────
+      // ── Flow 14: Switch Role & Akses Dashboard Manager Sarpras ───────────
       {
         id: 'android-role-manager',
-        name: '11. Switch Role & Akses Dashboard Manager Sarpras',
+        name: '14. Switch Role & Akses Dashboard Manager Sarpras',
         platform: 'android',
         status: 'READY',
-        source: buildRawMaestroYaml(appId, '11. Switch Role & Akses Dashboard Manager Sarpras', [
+        source: buildRawMaestroYaml(appId, '14. Switch Role & Akses Dashboard Manager Sarpras', [
+          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 }, optional: true },
+          { tapOn: { text: 'Logout', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
           { tapOn: { text: 'Manager Sarpras', optional: true } },
           { tapOn: { text: 'Masuk', optional: true } },
           { waitForAnimationToEnd: { timeout: 3000 } },
@@ -280,13 +368,16 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
         ])
       },
 
-      // ── Flow 12: Switch Role & Akses Dashboard Staff Teknisi ─────────────
+      // ── Flow 15: Switch Role & Akses Dashboard Staff Teknisi ─────────────
       {
         id: 'android-role-teknisi',
-        name: '12. Switch Role & Akses Dashboard Staff Teknisi',
+        name: '15. Switch Role & Akses Dashboard Staff Teknisi',
         platform: 'android',
         status: 'READY',
-        source: buildRawMaestroYaml(appId, '12. Switch Role & Akses Dashboard Staff Teknisi', [
+        source: buildRawMaestroYaml(appId, '15. Switch Role & Akses Dashboard Staff Teknisi', [
+          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 }, optional: true },
+          { tapOn: { text: 'Logout', optional: true } },
+          { waitForAnimationToEnd: { timeout: 2000 } },
           { tapOn: { text: 'Staff Teknisi', optional: true } },
           { tapOn: { text: 'Masuk', optional: true } },
           { waitForAnimationToEnd: { timeout: 3000 } },

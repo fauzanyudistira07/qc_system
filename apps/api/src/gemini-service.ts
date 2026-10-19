@@ -35,7 +35,7 @@ export class GeminiService {
   }
 
   public static getModel(): string {
-    return process.env.GEMINI_MODEL?.trim() || 'gemini-1.5-flash';
+    return process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
   }
 
   public static isConfigured(): boolean {
@@ -111,7 +111,9 @@ export class GeminiService {
         throw new Error(errorMsg);
       }
 
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const candidateParts = data?.candidates?.[0]?.content?.parts || [];
+      const textPart = candidateParts.find((p: any) => typeof p.text === 'string' && p.text.trim().length > 0);
+      const text = textPart?.text || candidateParts[0]?.text;
       if (!text) {
         throw new Error('Gemini API mengembalikan respons kosong (tidak ada kandidat teks).');
       }
@@ -135,7 +137,7 @@ export class GeminiService {
     try {
       const reply = await this.callGemini('Kirim balasan tepat satu kata: "PONG"', {
         temperature: 0.1,
-        maxTokens: 10,
+        maxTokens: 1000,
         timeoutMs: 15000
       });
       return {

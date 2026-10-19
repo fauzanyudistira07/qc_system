@@ -36,34 +36,56 @@ interface LiveViewportProps {
   hideHeader?: boolean;
 }
 
-function readableFlowName(flowId?: string): { name: string } {
+function readableFlowName(flowId?: string, knownFlows?: Array<{ id: string; name: string }>): { name: string } {
   if (!flowId) return { name: 'Skenario Flow' };
-  if (flowId.includes('launch') || flowId.includes('smoke')) {
-    return { name: '1. Launch & Smoke Check' };
+  if (knownFlows?.length) {
+    const directMatch = knownFlows.find(f => f.id === flowId || f.name.toLowerCase().includes(flowId.toLowerCase()));
+    if (directMatch) return { name: directMatch.name };
   }
-  if (flowId.includes('login') || flowId.includes('auth')) {
-    return { name: '2. Login & Masuk Dashboard' };
+  if (flowId.includes('launch') || flowId.includes('smoke') || flowId.includes('01')) {
+    return { name: '1. Clean Install & Launch' };
   }
-  if (flowId.includes('tabs-all') || flowId.includes('semua-tab')) {
-    return { name: '3. Navigasi Semua Tab Dashboard' };
+  if (flowId.includes('login') || flowId.includes('auth') || flowId.includes('02')) {
+    return { name: '2. Login Siswa (SISWA001) & Masuk Dashboard' };
   }
-  if (flowId.includes('home-explore') || flowId.includes('beranda')) {
-    return { name: '4. Eksplorasi Konten Beranda' };
+  if (flowId.includes('tabs-all') || flowId.includes('semua-tab') || flowId.includes('03')) {
+    return { name: '3. Navigasi Semua Tab Dashboard Utama' };
   }
-  if (flowId.includes('tab-absensi') || flowId.includes('absensi')) {
-    return { name: '5. Eksplorasi Tab Absensi' };
+  if (flowId.includes('home-explore') || flowId.includes('beranda') || flowId.includes('04')) {
+    return { name: '4. Eksplorasi Widget Beranda & Telemetri Siswa' };
   }
-  if (flowId.includes('tab-keuangan') || flowId.includes('keuangan')) {
-    return { name: '6. Eksplorasi Tab Keuangan' };
+  if (flowId.includes('crud-amal') || flowId.includes('amal') || flowId.includes('05')) {
+    return { name: '5. CRUD Mutasi Ibadah Amal Siswa Harian' };
   }
-  if (flowId.includes('tab-informasi') || flowId.includes('informasi')) {
-    return { name: '7. Eksplorasi Tab Informasi' };
+  if (flowId.includes('crud-izin') || flowId.includes('absensi') || flowId.includes('06')) {
+    return { name: '6. CRUD Pengajuan Izin & Riwayat Absensi' };
   }
-  if (flowId.includes('tab-t2q') || flowId.includes('t2q')) {
-    return { name: '8. Eksplorasi Tab T2Q (Hafalan)' };
+  if (flowId.includes('keuangan') || flowId.includes('invoice') || flowId.includes('07')) {
+    return { name: '7. Eksplorasi Tagihan Keuangan & Rincian Pembayaran' };
   }
-  if (flowId.includes('mutabaah')) {
-    return { name: '9. Eksplorasi Mutaba\'ah Ibadah' };
+  if (flowId.includes('informasi') || flowId.includes('disiplin') || flowId.includes('08')) {
+    return { name: '8. Tab Informasi Sekolah, Kedisiplinan & Pengumuman' };
+  }
+  if (flowId.includes('t2q') || flowId.includes('tahfidz') || flowId.includes('09')) {
+    return { name: '9. Eksplorasi Tab T2Q (Tahfidz, Tahsin, Tilawah)' };
+  }
+  if (flowId.includes('drawer') || flowId.includes('profil') || flowId.includes('10')) {
+    return { name: '10. Navigasi Menu Samping (Drawer): Profil & Ekskul' };
+  }
+  if (flowId.includes('kalender') || flowId.includes('berita') || flowId.includes('11')) {
+    return { name: '11. Quick Actions: Kalender Kegiatan & Detail Berita' };
+  }
+  if (flowId.includes('notifikasi') || flowId.includes('broadcast') || flowId.includes('12')) {
+    return { name: '12. Pusat Notifikasi & Broadcast Pesan Sekolah' };
+  }
+  if (flowId.includes('role-guru') || flowId.includes('13')) {
+    return { name: '13. Switch Role & Akses Dashboard Dewan Guru' };
+  }
+  if (flowId.includes('role-manager') || flowId.includes('14')) {
+    return { name: '14. Switch Role & Akses Dashboard Manager Sarpras' };
+  }
+  if (flowId.includes('role-teknisi') || flowId.includes('15')) {
+    return { name: '15. Switch Role & Akses Dashboard Staff Teknisi' };
   }
   const clean = flowId
     .replace(/^(android|web|app)-/i, '')
@@ -72,10 +94,10 @@ function readableFlowName(flowId?: string): { name: string } {
   return { name: clean };
 }
 
-function humanizeMediaTitle(raw: string, isVid: boolean, flowId?: string): string {
+function humanizeMediaTitle(raw: string, isVid: boolean, flowId?: string, knownFlows?: Array<{ id: string; name: string }>): string {
   if (raw.startsWith('Rekaman:')) return raw;
   if (flowId && isVid) {
-    const f = readableFlowName(flowId);
+    const f = readableFlowName(flowId, knownFlows);
     return `Rekaman: ${f.name}`;
   }
 
@@ -86,44 +108,70 @@ function humanizeMediaTitle(raw: string, isVid: boolean, flowId?: string): strin
     if (name.includes('rekaman flow') || name === 'flow-recording') {
       return 'Rekaman Video QC';
     }
-    return `Rekaman: ${name}`;
+    const cleanVidName = name
+      .replace(/^video-\d+-/i, '')
+      .replace(/^flow_\d+_/i, '')
+      .replace(/^flow-/i, '')
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    return `Rekaman: ${cleanVidName}`;
   }
 
   // Friendly name replacements
-  if (name.includes('launch-screen') || name.includes('splash')) return 'Layar Login & Pemilihan Role Demo';
-  if (name.includes('dashboard-beranda')) return 'Dashboard Beranda Siswa (Ahmad Farhan)';
+  if (name.includes('01_01_install') || name.includes('permission') || name.includes('install-launch')) return 'Izin Sistem & Instalasi APK Berhasil';
+  if (name.includes('00_splash_screen') || name.includes('splash')) return 'Splash Screen Logo Al-Hikmah Digital';
+  if (name.includes('launch-screen') || name.includes('01_login_screen') || name.includes('login_ready')) return 'Layar Login & Pemilihan Role Demo';
+  if (name.includes('step-02-02-input-nis') || name.includes('role_siswa')) return 'Otentikasi Akun Siswa (SISWA001)';
+  if (name.includes('dashboard-beranda') || name.includes('02_dashboard')) return 'Dashboard Beranda Siswa (Ahmad Farhan)';
   if (name.includes('dashboard-restored')) return 'Beranda Setelah Navigasi Tab';
-  if (name.includes('tab-beranda')) return 'Navigasi Tab: Beranda';
-  if (name.includes('tab-absensi')) return 'Navigasi Tab: Absensi Siswa';
-  if (name.includes('tab-keuangan')) return 'Navigasi Tab: Rincian Keuangan';
-  if (name.includes('tab-informasi')) return 'Navigasi Tab: Informasi & Kedisiplinan';
-  if (name.includes('tab-t2q')) return 'Navigasi Tab: Hafalan & Tilawah T2Q';
-  if (name.includes('home-top')) return 'Beranda: Header & Profil Siswa';
-  if (name.includes('home-middle')) return 'Beranda: Widget Presensi & Poin';
+  if (name.includes('tab-beranda') || name.includes('live_tab_beranda')) return 'Navigasi Tab: Beranda';
+  if (name.includes('tab-absensi') || name.includes('live_tab_absensi')) return 'Navigasi Tab: Absensi Siswa';
+  if (name.includes('tab-keuangan') || name.includes('live_tab_keuangan')) return 'Navigasi Tab: Rincian Keuangan';
+  if (name.includes('tab-informasi') || name.includes('live_tab_informasi')) return 'Navigasi Tab: Informasi & Kedisiplinan';
+  if (name.includes('tab-t2q') || name.includes('live_tab_t2q')) return 'Navigasi Tab: Hafalan & Tilawah T2Q';
+  if (name.includes('home-top') || name.includes('step-12-01-beranda-top')) return 'Beranda: Header & Status Presensi Siswa';
+  if (name.includes('home-middle') || name.includes('step-11-01-beranda-actions')) return 'Beranda: Widget Presensi & Aksi Cepat';
   if (name.includes('home-bottom')) return 'Beranda: Agenda & Mutasi Amal';
   if (name.includes('home-restored-top')) return 'Beranda: Kembali ke Posisi Atas';
   if (name.includes('amal-form-opened')) return 'Formulir Mutasi Amal Siswa Terbuka';
   if (name.includes('amal-form-filled')) return 'Pengisian Checklist Mutasi Amal (Selesai)';
   if (name.includes('amal-completed-return')) return 'Beranda Siswa Setelah Simpan Amal';
-  if (name.includes('absensi-loaded')) return 'Absensi: Rekap Presensi & Kalender';
+  if (name.includes('absensi-loaded') || name.includes('live_absensi_form')) return 'Absensi: Rekap Presensi & Formulir Izin';
   if (name.includes('izin-form-opened')) return 'Formulir Pengajuan Izin Siswa Terbuka';
   if (name.includes('izin-form-filled')) return 'Formulir Pengajuan Izin Diisi Lengkap';
   if (name.includes('absensi-riwayat-pengajuan')) return 'Tab Absensi: Riwayat Pengajuan Izin';
   if (name.includes('absensi-riwayat-kehadiran')) return 'Tab Absensi: Riwayat Presensi Siswa';
-  if (name.includes('keuangan-loaded')) return 'Keuangan: Daftar Tagihan SPP Siswa';
+  if (name.includes('keuangan-loaded') || name.includes('live_keuangan_detail')) return 'Keuangan: Rincian Tagihan SPP Siswa';
   if (name.includes('keuangan-tagihan-unpaid')) return 'Keuangan: Rincian Tagihan Belum Dibayar';
   if (name.includes('keuangan-struk-pembayaran')) return 'Keuangan: Struk Bukti Pembayaran';
   if (name.includes('keuangan-restored')) return 'Keuangan: Kembali ke Tampilan Normal';
   if (name.includes('informasi-kedisiplinan')) return 'Informasi: Rekap Catatan Kedisiplinan';
-  if (name.includes('informasi-berita-sekolah')) return 'Informasi: Pengumuman & Berita Sekolah';
+  if (name.includes('informasi-berita-sekolah') || name.includes('step-11-03-berita-sekolah') || name.includes('detail-beranda-artikel-berita')) return 'Informasi: Pengumuman & Berita Sekolah';
   if (name.includes('informasi-berita-scrolled')) return 'Informasi: Feed Berita Lengkap';
   if (name.includes('t2q-loaded')) return 'T2Q: Riwayat Hafalan Tahfidz';
-  if (name.includes('t2q-tahsin')) return 'T2Q: Rekap Pembelajaran Tahsin';
-  if (name.includes('t2q-tilawah')) return 'T2Q: Catatan & Setoran Tilawah';
+  if (name.includes('t2q-tahsin') || name.includes('live_t2q_tahsin')) return 'T2Q: Rekap Pembelajaran Tahsin';
+  if (name.includes('t2q-tilawah') || name.includes('live_t2q_tilawah')) return 'T2Q: Catatan & Setoran Tilawah';
   if (name.includes('t2q-scrolled')) return 'T2Q: Riwayat Hafalan Lengkap';
-  if (name.includes('role-guru-dashboard')) return 'Dashboard Dewan Guru (Ustadzah Khadijah, S.Pd)';
-  if (name.includes('role-manager-dashboard')) return 'Dashboard Manager Sarpras (Ir. H. Syarifuddin, M.T.)';
-  if (name.includes('role-teknisi-dashboard')) return 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
+  if (name.includes('step-10-01-dashboard')) return 'Dashboard Beranda Sebelum Buka Menu';
+  if (name.includes('step-10-02-drawer-menu') || name.includes('drawer-menu-opened')) return 'Menu Samping (Drawer): Profil, Ekskul & Versi';
+  if (name.includes('step-10-03-profil-siswa') || name.includes('profil-siswa-screen') || name.includes('detail-beranda-profil-siswa')) return 'Profil Siswa & Akun (Ahmad Farhan)';
+  if (name.includes('ekskul-screen')) return 'Daftar Kegiatan Ekstrakurikuler';
+  if (name.includes('step-11-02-kalender-kegiatan') || name.includes('kalender-kegiatan-screen')) return 'Kalender Akademik & Agenda Kegiatan';
+  if (name.includes('berita-detail-screen')) return 'Detail Berita & Pengumuman Sekolah';
+  if (name.includes('step-12-02-notifikasi-list') || name.includes('notifikasi-screen') || name.includes('detail-beranda-pusat-notifikasi')) return 'Pusat Notifikasi: PTS, SPP & Setoran';
+  if (name.includes('step-12-03-notifikasi-pengumuman')) return 'Detail Broadcast Pesan & Pengumuman';
+  if (name.includes('step-13-01-login-screen') || name.includes('step-14-01-login-screen') || name.includes('step-15-01-login-screen')) return 'Layar Login: Pemilihan Peran Demo';
+  if (name.includes('step-13-02-role-guru-selected')) return 'Pilih Peran: Dewan Guru (GURU001)';
+  if (name.includes('step-13-03-guru-dashboard') || name.includes('role-guru-dashboard') || name.includes('detail-role-guru-dashboard')) return 'Dashboard Dewan Guru (Ustadzah Khadijah, S.Pd)';
+  if (name.includes('step-13-04-guru-absensi') || name.includes('detail-role-guru-presensi')) return 'Presensi Dewan Guru & Pelaporan Sarpras';
+  if (name.includes('step-14-02-role-manager-selected')) return 'Pilih Peran: Manager Sarpras (MGR001)';
+  if (name.includes('step-14-03-manager-dashboard') || name.includes('role-manager-dashboard') || name.includes('detail-role-manager-dashboard')) return 'Dashboard Manager Sarpras (Ir. H. Syarifuddin, M.T.)';
+  if (name.includes('step-14-04-manager-tiket') || name.includes('detail-role-manager-tiket-sarpras')) return 'Monitoring Antrean Keluhan & Tiket Sarpras';
+  if (name.includes('step-15-02-role-teknisi-selected')) return 'Pilih Peran: Staff Teknisi (STF001)';
+  if (name.includes('step-15-03-teknisi-dashboard') || name.includes('role-teknisi-dashboard') || name.includes('detail-role-teknisi-dashboard')) return 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
+  if (name.includes('step-15-04-teknisi-form-laporan') || name.includes('detail-role-teknisi-form-laporan-selesai')) return 'Laporan Selesai & Kirim Bukti Foto Sarpras';
+  if (name.includes('step-13-scroll')) return 'Dashboard Beranda: Aksi Cepat & Agenda';
+  if (name.includes('step-16-scroll')) return 'Detail Berita: Hari Santri Nasional';
 
   // Step formatting: step-04-tap-NIS---NISN -> Langkah 04: Tekan NIS / NISN
   const stepMatch = name.match(/^step-(\d+)-(tap|input|scroll|assert)-(.*)$/i);
@@ -160,7 +208,7 @@ function extractFlowFromItem(item: {
   isVid: boolean;
   knownFlows?: Array<{ id: string; name: string }>;
 }): { flowName: string; cleanTitle: string } {
-  const cleanTitle = humanizeMediaTitle(item.rawName, item.isVid, item.flowId);
+  const cleanTitle = humanizeMediaTitle(item.rawName, item.isVid, item.flowId, item.knownFlows);
 
   // 1. If label contains explicit flow name
   if (item.label) {

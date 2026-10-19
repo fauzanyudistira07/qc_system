@@ -1007,6 +1007,14 @@ ${JSON.stringify(structuredData)}
         if (base.includes('detail-role-teknisi-tiket')) return 'Staff Teknisi: Detail Pekerjaan Tiket Lapangan';
         if (base.includes('detail-role-teknisi-form-laporan-selesai')) return 'Staff Teknisi: Formulir Laporan Selesai & Upload Foto';
         if (base.includes('role-teknisi-dashboard')) return 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
+        if (base.includes('drawer-menu-opened')) return 'Menu Samping (Drawer): Profil, Ekskul & Versi';
+        if (base.includes('profil-siswa-screen')) return 'Profil Siswa & Akun Keluarga (Saudara)';
+        if (base.includes('ekskul-screen')) return 'Daftar Kegiatan Ekstrakurikuler';
+        if (base.includes('kalender-kegiatan-screen')) return 'Kalender Akademik & Agenda Kegiatan';
+        if (base.includes('berita-detail-screen')) return 'Detail Berita & Pengumuman Sekolah';
+        if (base.includes('notifikasi-screen')) return 'Pusat Notifikasi Aplikasi';
+        if (base.includes('step-13-scroll')) return 'Dashboard Beranda: Aksi Cepat & Agenda';
+        if (base.includes('step-16-scroll')) return 'Detail Berita: Hari Santri Nasional';
         return (name || '').replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
       }
 

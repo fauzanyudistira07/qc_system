@@ -1123,6 +1123,17 @@
   gap: 4px;
 }
 
+.detail-status-pill.status-running {
+  color: #0369A1;
+  background: #E0F2FE;
+  border: 1px solid #7DD3FC;
+}
+
+.detail-status-pill.status-running .status-dot {
+  color: #0284C7;
+  animation: pulse-dot 1s infinite alternate ease-in-out;
+}
+
 .detail-description {
   font-size: 11px;
   color: #6B5D52;
@@ -1349,6 +1360,17 @@
   background: #FEE2E2;
   color: #991B1B;
   border: 1px solid #FCA5A5;
+}
+
+.tag-status-indicator.status-running {
+  background: #E0F2FE;
+  color: #0369A1;
+  border: 1px solid #7DD3FC;
+}
+
+.tag-status-indicator.status-running .status-dot {
+  color: #0284C7;
+  animation: pulse-dot 1s infinite alternate ease-in-out;
 }
 
 .tag-status-indicator.status-other {

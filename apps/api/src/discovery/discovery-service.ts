@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, rm, lstat, readdir, copyFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import type { NormalizedFlow } from '@qc/flow-schema';
@@ -48,13 +48,26 @@ export class DiscoveryService {
       const data = await readFile(jobsFile, 'utf8');
       const loadedJobs = JSON.parse(data) as DiscoveryJob[];
       let capabilityBackfill = false;
+      let activeJobIdFromDisk: string | null = null;
+      try {
+        const activeFile = path.join(this.projectRoot, '.active-qc-job.json');
+        if (existsSync(activeFile)) {
+          const parsed = JSON.parse(readFileSync(activeFile, 'utf8'));
+          activeJobIdFromDisk = parsed.jobId || null;
+        }
+      } catch {}
+
       for (const j of loadedJobs) {
         if (['QUEUED', 'RUNNING'].includes(j.status)) {
-          j.status = 'INTERRUPTED';
-          j.phase = 'INTERRUPTED';
-          j.finishedAt = new Date().toISOString();
-          j.message = 'Job terhenti karena QC API restart; jalankan ulang untuk melanjutkan.';
-          capabilityBackfill = true;
+          if (activeJobIdFromDisk === j.id) {
+            // Biarkan status RUNNING tetap hidup jika aktif di background runner
+          } else {
+            j.status = 'INTERRUPTED';
+            j.phase = 'INTERRUPTED';
+            j.finishedAt = new Date().toISOString();
+            j.message = 'Job terhenti karena QC API restart; jalankan ulang untuk melanjutkan.';
+            capabilityBackfill = true;
+          }
         }
         // Auto-restore inventory from disk artifact if missing from main job file
         if (!j.inventory) {
@@ -116,10 +129,30 @@ export class DiscoveryService {
   }
 
   public listJobs(): DiscoveryJob[] {
+    try {
+      const jobsFile = path.join(this.artifactRoot, 'discovery-jobs.json');
+      if (existsSync(jobsFile)) {
+        const diskJobs = JSON.parse(readFileSync(jobsFile, 'utf8')) as DiscoveryJob[];
+        for (const d of diskJobs) {
+          this.jobs.set(d.id, d);
+        }
+      }
+    } catch {}
     return Array.from(this.jobs.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   public getJob(id: string): DiscoveryJob | undefined {
+    try {
+      const jobsFile = path.join(this.artifactRoot, 'discovery-jobs.json');
+      if (existsSync(jobsFile)) {
+        const diskJobs = JSON.parse(readFileSync(jobsFile, 'utf8')) as DiscoveryJob[];
+        const found = diskJobs.find((d) => d.id === id);
+        if (found) {
+          this.jobs.set(id, found);
+          return found;
+        }
+      }
+    } catch {}
     return this.jobs.get(id);
   }
 

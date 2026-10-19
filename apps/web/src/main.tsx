@@ -1685,7 +1685,7 @@ export function App() {
                       <h1 className="hero-title">{activeJob?.name || 'Project Summary'}</h1>
                       <span className={`hero-status-pill status-${(activeJob?.status || 'ready').toLowerCase()}`}>
                         <span className="led-dot" />
-                        <span>{(activeJob?.status || 'READY').replace(/_/g, ' ')}</span>
+                        <span>{activeJob?.status === 'RUNNING' ? `RUNNING (${activeJob.progress || 0}%)` : (activeJob?.status || 'READY').replace(/_/g, ' ')}</span>
                       </span>
                     </div>
                     <div className="hero-meta-row">
@@ -2115,6 +2115,19 @@ export function App() {
                       </div>
                     </div>
                     {(() => {
+                      if (activeJob?.status === 'RUNNING') {
+                        return (
+                          <>
+                            <span className="kpi-val tabular-nums" style={{ color: '#0284C7' }}>
+                              RUNNING
+                            </span>
+                            <div className="kpi-sub-row">
+                              <span className="kpi-sub" style={{ color: '#0369A1' }}>Sedang berjalan ({activeJob.progress || 0}%)</span>
+                              <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
+                            </div>
+                          </>
+                        );
+                      }
                       const ev = activeEvidence?.totals;
                       const evTotal = ev ? ev.passed + ev.failed : 0;
                       const total = stats.totalRuns || evTotal;
@@ -2204,9 +2217,15 @@ export function App() {
                           num: '04',
                           icon: 'runs',
                           title: 'Execution Runs',
-                          badge: stats.totalRuns > 0 ? `${stats.passedCount} PASS / ${stats.failedCount} FAIL` : '0 RUNS',
-                          status: stats.totalRuns > 0 ? (stats.failedCount === 0 ? 'PASSED' : 'ATTENTION') : 'QUEUED',
-                          statusTone: stats.totalRuns > 0 ? (stats.failedCount === 0 ? 'passed' : 'attention') : 'ready',
+                          badge: activeJob?.status === 'RUNNING'
+                            ? `${stats.passedCount} PASS · SEDANG JALAN (${activeJob.progress || 0}%)`
+                            : stats.totalRuns > 0 ? `${stats.passedCount} PASS / ${stats.failedCount} FAIL` : '0 RUNS',
+                          status: activeJob?.status === 'RUNNING'
+                            ? 'RUNNING'
+                            : stats.totalRuns > 0 ? (stats.failedCount === 0 ? 'PASSED' : 'ATTENTION') : 'QUEUED',
+                          statusTone: activeJob?.status === 'RUNNING'
+                            ? 'running'
+                            : stats.totalRuns > 0 ? (stats.failedCount === 0 ? 'passed' : 'attention') : 'ready',
                           desc: 'Riwayat assertion eksekusi pengujian, duration benchmark & laporan kelulusan',
                           onClick: () => setCurrentView('runs'),
                         },
@@ -4280,6 +4299,14 @@ export function App() {
                         else if (base.includes('role-guru-dashboard')) label = 'Dashboard Dewan Guru (Ustadzah Khadijah, S.Pd)';
                         else if (base.includes('role-manager-dashboard')) label = 'Dashboard Manager Sarpras (Ir. H. Syarifuddin, M.T.)';
                         else if (base.includes('role-teknisi-dashboard')) label = 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
+                        else if (base.includes('drawer-menu-opened')) label = 'Menu Samping (Drawer): Profil, Ekskul & Versi';
+                        else if (base.includes('profil-siswa-screen')) label = 'Profil Siswa & Akun Keluarga (Saudara)';
+                        else if (base.includes('ekskul-screen')) label = 'Daftar Kegiatan Ekstrakurikuler';
+                        else if (base.includes('kalender-kegiatan-screen')) label = 'Kalender Akademik & Agenda Kegiatan';
+                        else if (base.includes('berita-detail-screen')) label = 'Detail Berita & Pengumuman Sekolah';
+                        else if (base.includes('notifikasi-screen')) label = 'Pusat Notifikasi Aplikasi';
+                        else if (base.includes('step-13-scroll')) label = 'Dashboard Beranda: Aksi Cepat & Agenda';
+                        else if (base.includes('step-16-scroll')) label = 'Detail Berita: Hari Santri Nasional';
                         else {
                           const stepMatch = base.match(/^step-(\d+)-(.*)$/i);
                           if (stepMatch) {

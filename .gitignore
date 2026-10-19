@@ -16,6 +16,7 @@ dist/
 .qc-artifacts/
 .qc-workspaces/
 .qc-*
+.active-qc-job.json
 .playwright-cache/
 .temp-recovery/
 _deps-archive/

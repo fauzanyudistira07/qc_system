@@ -119,6 +119,10 @@ export function ProjectSwitcher({
         (r) => r.kind !== 'incremental-room' && !(r.name && r.name.startsWith('[Update #'))
       );
 
+      const isAnyRunning =
+        sorted.some((r) => r.status === 'RUNNING') ||
+        Boolean(activeJob && runs.some((r) => r.id === activeJob.id) && activeJob.status === 'RUNNING');
+
       return {
         id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
         name,
@@ -127,10 +131,10 @@ export function ProjectSwitcher({
         updateRooms,
         baselineRuns,
         latestJob: latest,
-        status: latest?.status || 'READY',
+        status: isAnyRunning ? 'RUNNING' : (latest?.status || 'READY'),
       };
     });
-  }, [jobs]);
+  }, [jobs, activeJob]);
 
   // Projek aktif saat ini
   const currentRootProjectName = useMemo(() => {
@@ -171,10 +175,11 @@ export function ProjectSwitcher({
 
   // Helper ringkasan metrik run
   const getRunSummary = (job: Job) => {
-    const statusUpper = (job.status || '').toUpperCase();
-    const isFailed = statusUpper === 'FAILED' || statusUpper === 'ERROR';
-    const isPassed = statusUpper === 'PASSED' || statusUpper === 'COMPLETED';
+    const effectiveStatus = (job.id === activeJob?.id && activeJob?.status ? activeJob.status : job.status) || '';
+    const statusUpper = effectiveStatus.toUpperCase();
     const isRunning = statusUpper === 'RUNNING';
+    const isFailed = statusUpper === 'FAILED' || statusUpper === 'ERROR';
+    const isPassed = !isRunning && (statusUpper === 'PASSED' || statusUpper === 'COMPLETED');
 
     let detail = '';
     if (job.kind === 'incremental-room' && job.impactReport) {
@@ -276,6 +281,12 @@ export function ProjectSwitcher({
                 <span className="trigger-baseline-pill">
                   <span className="pill-icon">✨</span>
                   <span className="pill-text">Klik + New QC Run</span>
+                </span>
+              ) : activeJob?.status === 'RUNNING' ? (
+                <span className="trigger-room-pill trigger-running-pill">
+                  <span className="pill-bolt">⚡</span>
+                  <span className="pill-status-dot pulse-blue" style={{ color: '#0284C7' }}>●</span>
+                  <span className="pill-text" style={{ color: '#0369A1', fontWeight: 700 }}>RUNNING ({activeJob.progress || 0}%)</span>
                 </span>
               ) : isCurrentActiveIncremental ? (
                 <span className="trigger-room-pill" title={activeJob?.commitInfo?.message || ''}>
@@ -436,9 +447,15 @@ export function ProjectSwitcher({
                         <div className="detail-title-group">
                           <div className="detail-name-row">
                             <h3>{selectedProject.name}</h3>
-                            <span className="detail-status-pill">
+                            <span className={`detail-status-pill ${selectedProject.status === 'RUNNING' ? 'status-running' : ''}`}>
                               <span className="status-dot">●</span>
-                              <span>{selectedProject.status === 'COMPLETED' || selectedProject.status === 'PASSED' ? 'PASSED (100% HEALTH)' : selectedProject.status}</span>
+                              <span>
+                                {selectedProject.status === 'RUNNING'
+                                  ? 'RUNNING (SEDANG DIUJI)'
+                                  : selectedProject.status === 'COMPLETED' || selectedProject.status === 'PASSED'
+                                  ? 'PASSED (100% HEALTH)'
+                                  : selectedProject.status}
+                              </span>
                             </span>
                           </div>
                           <p className="detail-description">
@@ -559,11 +576,19 @@ export function ProjectSwitcher({
 
                                   <span
                                     className={`tag-status-indicator ${
-                                      summary.isPassed ? 'status-passed' : summary.isFailed ? 'status-failed' : 'status-other'
+                                      summary.isRunning ? 'status-running' : summary.isPassed ? 'status-passed' : summary.isFailed ? 'status-failed' : 'status-other'
                                     }`}
                                   >
                                     <span className="status-dot">●</span>
-                                    <span>{summary.isPassed ? 'PASSED' : summary.isFailed ? 'FAILED' : run.status}</span>
+                                    <span>
+                                      {summary.isRunning
+                                        ? `RUNNING (${(run.id === activeJob?.id ? activeJob?.progress : run.progress) || 0}%)`
+                                        : summary.isPassed
+                                        ? 'PASSED'
+                                        : summary.isFailed
+                                        ? 'FAILED'
+                                        : run.status}
+                                    </span>
                                   </span>
                                 </div>
 
@@ -596,7 +621,15 @@ export function ProjectSwitcher({
                                     <strong className="metric-count">{summary.detail}</strong>
                                     <span className="metric-date">· {summary.dateStr}</span>
                                   </div>
-                                  <button type="button" className="run-card-open-btn">
+                                  <button
+                                    type="button"
+                                    className="run-card-open-btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onSelectJob(run.id);
+                                      setIsModalOpen(false);
+                                    }}
+                                  >
                                     <span>Buka Room</span>
                                     <Icon name="arrow" size={11} />
                                   </button>

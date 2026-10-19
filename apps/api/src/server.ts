@@ -584,6 +584,7 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
     const sortedRuns = runEntries.filter((e) => e.isDirectory()).sort((a, b) => b.name.localeCompare(a.name));
     
     const featuredRunNames = [
+      sortedRuns.find(r => r.name.includes('ai-suite'))?.name,
       sortedRuns.find(r => r.name.includes('autonomous-e2e'))?.name,
       sortedRuns.find(r => r.name.includes('search-export'))?.name,
       sortedRuns.find(r => r.name.includes('crud-full'))?.name,
@@ -595,12 +596,15 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
       const runJson = await readJsonIfExists(path.join(runDir, 'run.json'));
       const reportJson = await readJsonIfExists(path.join(runDir, 'quality', 'report.json'));
       
+      const isAiSuite = runName.includes('ai-suite');
       const isAutonomous = runName.includes('autonomous-e2e');
       const isSearchExport = runName.includes('search-export');
       const isCrud = runName.includes('crud');
       const isNegative = runName.includes('negative');
 
-      const title = isAutonomous
+      const title = isAiSuite
+        ? 'AI-Assisted Suite · Comprehensive Verification & Telemetry'
+        : isAutonomous
         ? 'Autonomous E2E Engine · 3-Phase Comprehensive Testing'
         : isSearchExport
         ? 'Tahap 3 · Search, Filter Tabel & Download Excel E2E'
@@ -610,7 +614,9 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
         ? 'Tahap 1 · Form Validations & Negative Edge Cases E2E'
         : `Run E2E · ${runName}`;
 
-      const category = isAutonomous
+      const category = isAiSuite
+        ? 'AI-Assisted Suite'
+        : isAutonomous
         ? 'Autonomous E2E'
         : isSearchExport ? 'Search & Export' : isCrud ? 'CRUD Lifecycle' : 'Form Validation';
       const summary = String(runJson?.testType || (runJson?.metrics ? `Lolos ${runJson.metrics.suitesPassed}/${runJson.metrics.suitesTotal} (${runJson.metrics.passRate})` : reportJson?.summary || 'Pengujian E2E Selesai 100%'));
