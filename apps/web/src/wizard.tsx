@@ -610,18 +610,36 @@ export function Wizard({
     <div className="wizard">
       {/* 3-STEP PROGRESS HEADER */}
       <ol className="wizard-steps" aria-label="Tahap konfigurasi pengujian">
-        {steps.map((name, i) => (
-          <li key={name} className={step === i ? 'current' : step > i ? 'done' : ''}>
-            <button
-              onClick={() => go(i)}
-              disabled={busy || !!uploading || transitioning || i > step + 1}
-              aria-current={step === i ? 'step' : undefined}
-            >
-              <span>{step > i ? <Icon name="check" size={14} /> : `0${i + 1}`}</span>
-              {name}
-            </button>
-          </li>
-        ))}
+        {steps.map((name, i) => {
+          const isCurrent = step === i;
+          const isDone = step > i;
+          const statusText = isCurrent
+            ? 'Sedang diisi'
+            : isDone
+            ? 'Selesai'
+            : 'Terkunci sampai langkah sebelumnya valid';
+
+          return (
+            <li key={name} className={isCurrent ? 'current' : isDone ? 'done' : 'locked'}>
+              <button
+                type="button"
+                onClick={() => go(i)}
+                disabled={busy || !!uploading || transitioning || i > step + 1}
+                aria-current={isCurrent ? 'step' : undefined}
+                className={`step-btn ${isCurrent ? 'active' : ''} ${isDone ? 'done' : ''}`}
+              >
+                <span className="step-badge">
+                  {isDone ? <Icon name="check" size={14} /> : i + 1}
+                </span>
+                <div className="step-content">
+                  <div className="step-kicker">Step {i + 1}</div>
+                  <div className="step-title">{name}</div>
+                  <div className="step-status">{statusText}</div>
+                </div>
+              </button>
+            </li>
+          );
+        })}
       </ol>
 
       <div className="wizard-layout">
