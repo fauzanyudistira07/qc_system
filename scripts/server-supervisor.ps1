@@ -46,17 +46,17 @@ if (-not $port4180Listening) {
     Write-Host "      Dev Server sudah aktif di port 4180." -ForegroundColor Green
 }
 
-# 3. Jalankan Cloudflare Remote Tunnel & WhatsApp Notifier
-Write-Host "`n[3/4] Memeriksa Cloudflare Remote Tunnel & WhatsApp Notifier..." -ForegroundColor Cyan
-$tunnelProc = Get-WmiObject Win32_Process | Where-Object { 
-    $_.CommandLine -like "*tunnel-notifier.mjs*" -or $_.CommandLine -like "*cloudflared*tunnel*" 
+# 3. Jalankan WhatsApp Notifier
+Write-Host "`n[3/4] Memeriksa WhatsApp Notifier..." -ForegroundColor Cyan
+$notifierProc = Get-CimInstance Win32_Process | Where-Object { 
+    $_.CommandLine -like "*tunnel-notifier.mjs*"
 }
 
-if (-not $tunnelProc) {
-    Write-Host "      Menyalakan Tunnel & Bot WhatsApp di background..." -ForegroundColor Yellow
+if (-not $notifierProc) {
+    Write-Host "      Menyalakan WhatsApp Notifier di background..." -ForegroundColor Yellow
     Start-Process -FilePath "node.exe" -ArgumentList "scripts\tunnel-notifier.mjs" -WorkingDirectory $RepoRoot -WindowStyle Hidden
 } else {
-    Write-Host "      Tunnel & Bot WhatsApp sudah aktif." -ForegroundColor Green
+    Write-Host "      WhatsApp Notifier sudah aktif." -ForegroundColor Green
 }
 
 # 4. Jalankan Auto-Update GitHub Watcher
