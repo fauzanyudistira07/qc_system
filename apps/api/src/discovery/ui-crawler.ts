@@ -452,6 +452,48 @@ export async function crawlUI(
               await page.screenshot({ path: path.join(screenshots, `${stem}.png`), fullPage: false, animations: 'disabled', timeout: 5_000 }).catch(() => {});
             });
             observed.screenshot = `screenshots/${stem}.png`;
+
+            // Auto-detect scroll overflow for any web application layout and capture scrolled view
+            try {
+              const scrollTarget = await page.evaluate(() => {
+                const mainContainer = document.querySelector('main, .main-area, .layout-content, .page-content, [role="main"], .overflow-y-auto');
+                if (mainContainer && (mainContainer.scrollHeight - mainContainer.clientHeight) > 120) {
+                  return { type: 'container', maxScroll: mainContainer.scrollHeight - mainContainer.clientHeight };
+                }
+                const docScroll = Math.max(document.documentElement?.scrollHeight || 0, document.body?.scrollHeight || 0);
+                if ((docScroll - window.innerHeight) > 120) {
+                  return { type: 'window', maxScroll: docScroll - window.innerHeight };
+                }
+                return { type: 'none', maxScroll: 0 };
+              }).catch(() => ({ type: 'none', maxScroll: 0 }));
+
+              if (scrollTarget.type !== 'none' && scrollTarget.maxScroll > 120) {
+                await page.evaluate((target, maxScroll) => {
+                  if (target === 'container') {
+                    const el = document.querySelector('main, .main-area, .layout-content, .page-content, [role="main"], .overflow-y-auto');
+                    if (el) el.scrollTo({ top: maxScroll, behavior: 'smooth' });
+                  } else {
+                    window.scrollTo({ top: maxScroll, behavior: 'smooth' });
+                  }
+                }, scrollTarget.type, scrollTarget.maxScroll);
+
+                await new Promise(r => setTimeout(r, 600));
+                const scrolledStem = `${stem}-scrolled`;
+                await page.screenshot({ path: path.join(screenshots, `${scrolledStem}.png`), fullPage: false, animations: 'disabled', timeout: 8_000 }).catch(() => {});
+
+                // Restore to top
+                await page.evaluate((target) => {
+                  if (target === 'container') {
+                    const el = document.querySelector('main, .main-area, .layout-content, .page-content, [role="main"], .overflow-y-auto');
+                    if (el) el.scrollTo({ top: 0, behavior: 'smooth' });
+                  } else {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }
+                }, scrollTarget.type);
+                await new Promise(r => setTimeout(r, 300));
+              }
+            } catch {}
+
             // Optional accessibility evidence without clearing form values
             const body = page.locator('body');
             if (typeof body.ariaSnapshot === 'function') {

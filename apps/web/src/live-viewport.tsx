@@ -154,22 +154,39 @@ function humanizeMediaTitle(raw: string, isVid: boolean, flowId?: string, knownF
   if (name.includes('t2q-scrolled')) return 'T2Q: Riwayat Hafalan Lengkap';
   if (name.includes('step-10-01-dashboard')) return 'Dashboard Beranda Sebelum Buka Menu';
   if (name.includes('step-10-02-drawer-menu') || name.includes('drawer-menu-opened')) return 'Menu Samping (Drawer): Profil, Ekskul & Versi';
-  if (name.includes('step-10-03-profil-siswa') || name.includes('profil-siswa-screen') || name.includes('detail-beranda-profil-siswa')) return 'Profil Siswa & Akun (Ahmad Farhan)';
-  if (name.includes('ekskul-screen')) return 'Daftar Kegiatan Ekstrakurikuler';
+  if (name.includes('step-10-03-ekskul-list') || name.includes('ekskul-screen')) return 'Daftar Kegiatan Ekstrakurikuler (Kehadiran & Ajuan)';
+  if (name.includes('step-10-04-profil-siswa') || name.includes('detail-beranda-profil-siswa') || name.includes('profil-siswa-screen')) return 'Profil Siswa & Pengaturan Akun (Ahmad Farhan)';
+  if (name.includes('step-10-05-data-lengkap-siswa')) return 'Data Lengkap Siswa, Rombel & Wali Santri';
+  if (name.includes('step-10-06-ubah-kata-sandi')) return 'Modal Form Ubah Kata Sandi Akun Siswa';
+  if (name.includes('step-10-07-manual-book')) return 'Buku Panduan Aplikasi Resmi (PDF SOPAN)';
+  if (name.includes('step-10-08-feedback-form')) return 'Formulir Kirim Masukan & Saran Sekolah';
+  if (name.includes('step-10-09-dashboard-kembali')) return 'Beranda Siswa Setelah Eksplorasi Menu';
   if (name.includes('step-11-02-kalender-kegiatan') || name.includes('kalender-kegiatan-screen')) return 'Kalender Akademik & Agenda Kegiatan';
-  if (name.includes('berita-detail-screen')) return 'Detail Berita & Pengumuman Sekolah';
+  if (name.includes('step-11-03-kalender-detail-event')) return 'Detail Rincian Event Kalender Akademik';
+  if (name.includes('step-11-05-berita-sekolah') || name.includes('informasi-berita-sekolah') || name.includes('detail-beranda-artikel-berita')) return 'Informasi: Pengumuman & Berita Sekolah';
   if (name.includes('step-12-02-notifikasi-list') || name.includes('notifikasi-screen') || name.includes('detail-beranda-pusat-notifikasi')) return 'Pusat Notifikasi: PTS, SPP & Setoran';
-  if (name.includes('step-12-03-notifikasi-pengumuman')) return 'Detail Broadcast Pesan & Pengumuman';
+  if (name.includes('step-12-03-notifikasi-pengumuman')) return 'Filter Notifikasi: Kategori Pengumuman';
+  if (name.includes('step-12-04-notifikasi-agenda')) return 'Filter Notifikasi: Kategori Agenda';
   if (name.includes('step-13-01-login-screen') || name.includes('step-14-01-login-screen') || name.includes('step-15-01-login-screen')) return 'Layar Login: Pemilihan Peran Demo';
   if (name.includes('step-13-02-role-guru-selected')) return 'Pilih Peran: Dewan Guru (GURU001)';
   if (name.includes('step-13-03-guru-dashboard') || name.includes('role-guru-dashboard') || name.includes('detail-role-guru-dashboard')) return 'Dashboard Dewan Guru (Ustadzah Khadijah, S.Pd)';
-  if (name.includes('step-13-04-guru-absensi') || name.includes('detail-role-guru-presensi')) return 'Presensi Dewan Guru & Pelaporan Sarpras';
+  if (name.includes('step-13-04-guru-absensi') || name.includes('detail-role-guru-presensi')) return 'Tab Absensi: Rekap Bulanan & Riwayat Guru';
+  if (name.includes('step-13-05-guru-sarpras-riwayat')) return 'Tab Sarpras: Monitoring Riwayat Laporan Guru';
+  if (name.includes('step-13-06-guru-sarpras-form')) return 'Formulir Input Pelaporan Kerusakan Sarpras';
+  if (name.includes('step-13-07-guru-akun')) return 'Profil & Pengaturan Akun Dewan Guru';
+  if (name.includes('step-13-08-guru-data-lengkap')) return 'Data Lengkap Kepegawaian & NIP Guru';
+  if (name.includes('step-13-09-guru-ubah-password')) return 'Modal Form Ubah Kata Sandi Akun Guru';
   if (name.includes('step-14-02-role-manager-selected')) return 'Pilih Peran: Manager Sarpras (MGR001)';
   if (name.includes('step-14-03-manager-dashboard') || name.includes('role-manager-dashboard') || name.includes('detail-role-manager-dashboard')) return 'Dashboard Manager Sarpras (Ir. H. Syarifuddin, M.T.)';
-  if (name.includes('step-14-04-manager-tiket') || name.includes('detail-role-manager-tiket-sarpras')) return 'Monitoring Antrean Keluhan & Tiket Sarpras';
+  if (name.includes('step-14-04-manager-filter-kategori')) return 'Statistik Sarpras: Distribusi Kategori Kerusakan';
+  if (name.includes('step-14-05-manager-antrean') || name.includes('step-14-04-manager-tiket')) return 'Monitoring Antrean Tiket & Status Keluhan';
+  if (name.includes('step-14-06-manager-detail-tiket')) return 'Detail Tiket Sarpras: Timeline & Foto Before/After';
+  if (name.includes('step-14-07-manager-approval-card')) return 'Approval Workflow Sarpras: Tombol ACC & Recheck';
   if (name.includes('step-15-02-role-teknisi-selected')) return 'Pilih Peran: Staff Teknisi (STF001)';
   if (name.includes('step-15-03-teknisi-dashboard') || name.includes('role-teknisi-dashboard') || name.includes('detail-role-teknisi-dashboard')) return 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
-  if (name.includes('step-15-04-teknisi-form-laporan') || name.includes('detail-role-teknisi-form-laporan-selesai')) return 'Laporan Selesai & Kirim Bukti Foto Sarpras';
+  if (name.includes('step-15-04-teknisi-detail-tiket')) return 'Detail Work Order Lapangan Teknisi';
+  if (name.includes('step-15-05-teknisi-laporan-selesai') || name.includes('step-15-04-teknisi-form-laporan')) return 'Formulir Laporan Selesai & Upload Bukti Foto';
+  if (name.includes('step-15-06-teknisi-dashboard-selesai')) return 'Dashboard Teknisi Pasca Penanganan Tiket';
   if (name.includes('step-13-scroll')) return 'Dashboard Beranda: Aksi Cepat & Agenda';
   if (name.includes('step-16-scroll')) return 'Detail Berita: Hari Santri Nasional';
 
@@ -255,17 +272,65 @@ function extractFlowFromItem(item: {
 
   // 4. File name prefix patterns
   if (item.rawName) {
-    if (item.rawName.startsWith('01_auth')) {
+    const raw = item.rawName.toLowerCase();
+    if (raw.includes('01_auth')) {
       return { flowName: 'Flow 1 · Autentikasi & Login', cleanTitle };
     }
-    if (item.rawName.startsWith('02_negative') || item.rawName.includes('negative')) {
+    if (raw.includes('02_negative') || raw.includes('negative')) {
       return { flowName: 'Flow 2 · Validasi Form & Negative Cases', cleanTitle };
     }
-    if (item.rawName.startsWith('03_crud_create') || item.rawName.includes('crud_create')) {
+    if (raw.includes('03_crud_create') || raw.includes('crud_create')) {
       return { flowName: 'Flow 3 · CRUD Create Resource', cleanTitle };
     }
-    if (item.rawName.startsWith('04_crud_read') || item.rawName.includes('crud_read')) {
+    if (raw.includes('04_crud_read') || raw.includes('crud_read')) {
       return { flowName: 'Flow 4 · CRUD Read & Table Verification', cleanTitle };
+    }
+
+    // Numbered Android E2E flows (1 to 15)
+    if (raw.startsWith('step-15') || raw.includes('video-15') || raw.includes('role-teknisi') || raw.includes('teknisi-')) {
+      return { flowName: '15. Switch Role & Akses Dashboard Staff Teknisi', cleanTitle };
+    }
+    if (raw.startsWith('step-14') || raw.includes('video-14') || raw.includes('role-manager') || raw.includes('manager-')) {
+      return { flowName: '14. Switch Role & Akses Dashboard Manager Sarpras', cleanTitle };
+    }
+    if (raw.startsWith('step-13') || raw.includes('video-13') || raw.includes('role-guru') || raw.includes('guru-')) {
+      return { flowName: '13. Switch Role & Akses Dashboard Dewan Guru', cleanTitle };
+    }
+    if (raw.startsWith('step-12') || raw.includes('video-12') || raw.includes('notifikasi')) {
+      return { flowName: '12. Pusat Notifikasi & Broadcast Pesan Sekolah', cleanTitle };
+    }
+    if (raw.startsWith('step-11') || raw.includes('video-11') || raw.includes('kalender')) {
+      return { flowName: '11. Quick Actions: Kalender Kegiatan & Detail Berita', cleanTitle };
+    }
+    if (raw.startsWith('step-10') || raw.includes('video-10') || raw.includes('drawer') || raw.includes('profil-siswa') || raw.includes('ekskul')) {
+      return { flowName: '10. Navigasi Menu Samping (Drawer): Profil & Ekskul', cleanTitle };
+    }
+    if (raw.startsWith('step-09') || raw.includes('flow_09') || raw.includes('t2q')) {
+      return { flowName: '9. Eksplorasi Tab T2Q (Tahfidz, Tahsin, Tilawah)', cleanTitle };
+    }
+    if (raw.startsWith('step-08') || raw.includes('flow_08') || raw.includes('kedisiplinan') || (raw.includes('informasi') && !raw.includes('live_tab'))) {
+      return { flowName: '8. Tab Informasi Sekolah, Kedisiplinan & Pengumuman', cleanTitle };
+    }
+    if (raw.startsWith('step-07') || raw.includes('flow_07') || (raw.includes('keuangan') && !raw.includes('live_tab'))) {
+      return { flowName: '7. Eksplorasi Tagihan Keuangan & Rincian Pembayaran', cleanTitle };
+    }
+    if (raw.startsWith('step-06') || raw.includes('flow_06') || raw.includes('izin') || (raw.includes('absensi') && !raw.includes('live_tab'))) {
+      return { flowName: '6. CRUD Pengajuan Izin & Riwayat Absensi', cleanTitle };
+    }
+    if (raw.startsWith('step-05') || raw.includes('flow_05') || raw.includes('amal')) {
+      return { flowName: '5. CRUD Mutasi Ibadah Amal Siswa Harian', cleanTitle };
+    }
+    if (raw.startsWith('step-04') || raw.includes('flow_04') || raw.startsWith('home-')) {
+      return { flowName: '4. Eksplorasi Widget Beranda & Telemetri Siswa', cleanTitle };
+    }
+    if (raw.startsWith('step-03') || raw.includes('flow_03') || raw.startsWith('tab-') || raw.startsWith('live_tab_')) {
+      return { flowName: '3. Navigasi Semua Tab Dashboard Utama', cleanTitle };
+    }
+    if (raw.startsWith('step-02') || raw.includes('flow_02') || raw.includes('login') || raw.includes('dashboard-beranda')) {
+      return { flowName: '2. Login Siswa (SISWA001) & Masuk Dashboard', cleanTitle };
+    }
+    if (raw.startsWith('step-01') || raw.includes('flow_01') || raw.includes('launch') || raw.includes('permission')) {
+      return { flowName: '1. Clean Install & Launch', cleanTitle };
     }
   }
 
@@ -318,12 +383,16 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
   });
 
   const projectName = useMemo(() => {
-    return (
+    const raw = (
       job?.config?.name ||
       job?.name ||
       evidence?.project ||
       'Project QC'
-    ).replace(/[\\/:*?"<>|]+/g, ' ').trim();
+    );
+    return raw
+      .replace(/\s*\([^)]*(?:suite|test|run|retest|e2e|assisted)[^)]*\)/gi, '')
+      .replace(/[\\/:*?"<>|]+/g, ' ')
+      .trim();
   }, [job?.config?.name, job?.name, evidence?.project]);
 
   const handleDownloadItem = async (item: MediaItem, e?: React.MouseEvent) => {
@@ -435,12 +504,20 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
           }
         }));
 
+        const itemVp = (() => {
+          const t = `${item.title || ''} ${item.url || ''}`.toLowerCase();
+          if (t.includes('mobile') || t.includes('_mobile')) return 'mobile';
+          if (t.includes('tablet') || t.includes('_tablet')) return 'tablet';
+          return 'desktop';
+        })();
+
         const uploadItem = {
           url: item.url,
           featureName: item.flowName || 'General',
           type: item.type,
           title: item.title,
-          fileName
+          fileName,
+          viewport: itemVp
         };
 
         const res = await uploadToNextcloud({
@@ -505,10 +582,24 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
   const allMediaItems = useMemo<MediaItem[]>(() => {
     const items: MediaItem[] = [];
     const seenUrls = new Set<string>();
+    const seenBaseFiles = new Set<string>();
+    const seenTitles = new Set<string>();
 
     const pushItem = (item: MediaItem) => {
       if (!item.url || seenUrls.has(item.url)) return;
       if (item.type === 'video' && item.size && item.size < 8192) return;
+
+      const baseFile = item.url.split('?')[0].split('#')[0].split('/').pop()?.toLowerCase();
+      if (baseFile && seenBaseFiles.has(baseFile)) return;
+      if (baseFile) seenBaseFiles.add(baseFile);
+
+      // Deduplicate identical checkpoint titles within the same flow & media type
+      if (item.title) {
+        const titleKey = `${item.flowName || ''}:::${item.type}:::${item.title.toLowerCase().trim()}`;
+        if (seenTitles.has(titleKey)) return;
+        seenTitles.add(titleKey);
+      }
+
       seenUrls.add(item.url);
       items.push(item);
     };
@@ -624,23 +715,58 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
       validPages.forEach((page) => {
         const resolved = artifactUrl(job.id, page.screenshot!);
         if (resolved) {
+          const sName = (page.screenshot || '').toLowerCase();
+          let pageFlow = 'Discovery & Inventori Halaman';
+          if (sName.includes('login')) pageFlow = '01. Autentikasi & Login';
+          else if (sName.includes('dashboard') || sName.includes('notifikasi') || sName.includes('notifications') || sName.includes('ringkasan') || sName.includes('overview')) pageFlow = '02. Dashboard & Ringkasan';
+          else if (sName.includes('academic_years') || sName.includes('classes') || sName.includes('grade_levels') || sName.includes('students_') || sName.includes('guardians') || sName.includes('warehouses') || sName.includes('master_') || sName.includes('pengelola') || sName.includes('guru_list') || sName.includes('siswa_list') || sName.includes('mapel') || sName.includes('jadwal') || sName.includes('ekskul') || sName.includes('kelas') || sName.includes('tahun_ajaran')) pageFlow = '03. Master Data';
+          else if (sName.includes('payment_reports') || sName.includes('financial_reports') || sName.includes('journal') || sName.includes('coa') || sName.includes('chart_of_accounts') || sName.includes('accounting')) pageFlow = '04. Akuntansi & Buku Besar';
+          else if (sName.includes('absensi') || sName.includes('presensi')) pageFlow = '04. Absensi & Presensi';
+          else if (sName.includes('fee_components') || sName.includes('billing') || sName.includes('invoices') || sName.includes('discount') || sName.includes('bank_transfer') || sName.includes('payment_method')) pageFlow = '05. Tagihan & Invoicing';
+          else if (sName.includes('penilaian') || sName.includes('rapor') || sName.includes('report_generator')) pageFlow = '05. Penilaian & Rapor';
+          else if (sName.includes('cashier') || sName.includes('pos_')) pageFlow = '06. Meja Kasir POS';
+          else if (sName.includes('kurikulum') || sName.includes('rpp') || sName.includes('modul_ajar')) pageFlow = '06. Kurikulum Merdeka';
+          else if (sName.includes('deposits') || sName.includes('tabungan') || sName.includes('savings')) pageFlow = '07. Setoran & Tabungan Siswa';
+          else if (sName.includes('sarpras') || sName.includes('agenda_sekolah') || sName.includes('pengumuman')) pageFlow = '07. Sarpras & Agenda';
+          else if (sName.includes('hafalan') || sName.includes('agenda_kelas') || sName.includes('jurnal_guru')) pageFlow = '08. Detail Akademik Khusus';
+          else if (sName.includes('rbac')) pageFlow = '08. Keamanan & Hak Akses RBAC';
+
           pushItem({
             id: resolved,
             type: 'photo',
             title: page.title || page.path || 'Screenshot Halaman',
             url: resolved,
             route: page.path,
-            flowName: 'Discovery & Inventori Halaman',
-            groupTitle: 'Discovery & Inventori Halaman'
+            flowName: pageFlow,
+            groupTitle: pageFlow
           });
         }
       });
     }
 
-    // 4. Sort: Videos first, then photos, then by title
+    const getFlowOrder = (flowName?: string, title?: string) => {
+      const target = `${flowName || ''} ${title || ''}`;
+      const m = target.match(/^(\d+)\./) || 
+                target.match(/Rekaman:\s*(\d+)\./i) || 
+                target.match(/\bTahap\s*(\d+)/i) || 
+                target.match(/\bFlow\s*(\d+)/i) ||
+                target.match(/ai-flow-(\d+)/i) ||
+                target.match(/flow_?(\d+)/i) ||
+                target.match(/video-?(\d+)/i) ||
+                target.match(/step-?(\d+)/i);
+      if (m) return parseInt(m[1], 10);
+      if (target.includes('Autonomous')) return 50;
+      if (target.includes('Discovery')) return 100;
+      return 999;
+    };
+
+    // 4. Sort: Flow number 1..15 first, then within each flow Video first, then photos by natural title
     return items.sort((a, b) => {
+      const orderA = getFlowOrder(a.flowName, a.title);
+      const orderB = getFlowOrder(b.flowName, b.title);
+      if (orderA !== orderB) return orderA - orderB;
       if (a.type !== b.type) return a.type === 'video' ? -1 : 1;
-      return (a.title || '').localeCompare(b.title || '');
+      return (a.title || '').localeCompare(b.title || '', undefined, { numeric: true, sensitivity: 'base' });
     });
   }, [evidence, fetchedEvidence, job]);
 
@@ -653,7 +779,11 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
 
       if (!map.has(flow)) {
         let order = 999;
-        const numMatch = flow.match(/^(\d+)\./) || flow.match(/Tahap\s*(\d+)/i) || flow.match(/Flow\s*(\d+)/i);
+        const numMatch = flow.match(/^(\d+)\./) || 
+                         flow.match(/Rekaman:\s*(\d+)\./i) || 
+                         flow.match(/\bTahap\s*(\d+)/i) || 
+                         flow.match(/\bFlow\s*(\d+)/i) ||
+                         flow.match(/ai-flow-(\d+)/i);
         if (numMatch) {
           order = parseInt(numMatch[1], 10);
         } else if (flow.includes('Autonomous')) {
@@ -671,7 +801,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
       map.get(flow)!.count += 1;
     }
 
-    return Array.from(map.values()).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+    return Array.from(map.values()).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   }, [allMediaItems]);
 
   // Counts
@@ -757,13 +887,20 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
     if (allMediaItems.length === 0 || isZipping) return;
     setIsZipping(true);
     try {
-      const items = allMediaItems.map(item => ({
-        url: item.url,
-        featureName: item.flowName || 'General',
-        type: item.type,
-        title: item.title,
-        fileName: `${(item.title || 'media').replace(/[\\/:*?"<>|]+/g, '_').trim()}.${item.type === 'video' ? 'mp4' : 'png'}`
-      }));
+      const items = allMediaItems.map(item => {
+        const t = `${item.title || ''} ${item.url || ''}`.toLowerCase();
+        let vp = 'desktop';
+        if (t.includes('mobile') || t.includes('_mobile')) vp = 'mobile';
+        else if (t.includes('tablet') || t.includes('_tablet')) vp = 'tablet';
+        return {
+          url: item.url,
+          featureName: item.flowName || 'General',
+          type: item.type,
+          title: item.title,
+          fileName: `${(item.title || 'media').replace(/[\\/:*?"<>|]+/g, '_').trim()}.${item.type === 'video' ? 'mp4' : 'png'}`,
+          viewport: vp
+        };
+      });
       await downloadMediaZip({
         projectName,
         items,
@@ -917,7 +1054,11 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
                   </span>
                 )}
                 <strong title={activeItem?.title}>{activeItem?.title || 'Pilih Media'}</strong>
-                {activeItem?.route && <span className="tag" style={{ color: 'var(--cyan)' }}>{activeItem.route}</span>}
+                {activeItem?.route && (
+                  <span className="tag" style={{ color: 'var(--cyan)' }} data-tooltip={activeItem.route} title={activeItem.route}>
+                    {activeItem.route}
+                  </span>
+                )}
               </div>
 
               {activeItem && (
@@ -1230,7 +1371,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
                                 {item.route ? (
                                   <>
                                     <span style={{ color: 'var(--text-dim)' }}>·</span>
-                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>{item.route}</span>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }} data-tooltip={item.route} title={item.route}>{item.route}</span>
                                   </>
                                 ) : item.size ? (
                                   <>
@@ -1371,6 +1512,35 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
                             Simpan ke dalam folder yang sudah ada: <code>{ncModal.checkResult?.targetFolder}</code>.
                             Subfolder fitur foto &amp; video akan digabungkan atau diperbarui secara otomatis.
                           </p>
+                          {ncModal.checkResult?.existingFolders && ncModal.checkResult.existingFolders.length > 1 && (
+                            <div style={{ marginTop: 6 }}>
+                              <select
+                                value={ncModal.checkResult.targetFolder}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setNcModal(prev => ({
+                                    ...prev,
+                                    checkResult: prev.checkResult ? { ...prev.checkResult, targetFolder: val } : null
+                                  }));
+                                }}
+                                style={{
+                                  display: 'block',
+                                  width: '100%',
+                                  marginTop: 4,
+                                  padding: '5px 8px',
+                                  fontSize: 12,
+                                  borderRadius: 6,
+                                  background: 'var(--bg-panel-sub)',
+                                  color: 'var(--text-main)',
+                                  border: '1px solid var(--border)'
+                                }}
+                              >
+                                {ncModal.checkResult.existingFolders.map((f) => (
+                                  <option key={f} value={f}>{f}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
                       </label>
 

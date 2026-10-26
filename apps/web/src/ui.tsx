@@ -33,6 +33,9 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
     zap: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>,
     cloud: <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>,
     sparkles: <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3z"/>,
+    scale: <><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM2 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM7 21h10M12 3v18M3 7h18"/></>,
+    bug: <><path d="m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1M12 20c-4.42 0-8-3.58-8-8a8.013 8.013 0 0 1 3-6.32V12a5 5 0 0 0 10 0V5.68A8.013 8.013 0 0 1 20 12c0 4.42-3.58 8-8 8Z"/><path d="M4 13H2M22 13h-2M5 18l-2 2M21 20l-2-2M20 7l2-2M4 7 2 5"/></>,
+    findings: <><circle cx="12" cy="12" r="6"/><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] || paths.overview}</svg>;
 }

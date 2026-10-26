@@ -8,7 +8,7 @@ import type { RunStepResult, WebRunResult } from '../playwright-adapter.ts';
 import { compileMaestroFlow } from '../maestro-adapter.ts';
 
 import fs, { existsSync, readdirSync, unlinkSync, statSync } from 'node:fs';
-import { listAvds, startHeadlessAvd, stopEmulator, resolveEmulatorBin, waitForBoot } from './emulator-runner.ts';
+import { listAvds, startHeadlessAvd, stopEmulator, resolveEmulatorBin, waitForBoot, ensureDeviceReady, stopAllManagedEmulators, notifyAndroidJobStarted, notifyAndroidJobFinished } from './emulator-runner.ts';
 import { listAdbDevices, captureScreenBuffer, isBootCompleted, isPackageManagerReady } from './adb.ts';
 import type { AndroidStatus } from './types.ts';
 
@@ -17,8 +17,9 @@ export * from './emulator-runner.ts';
 export * from './adb.ts';
 
 export function resolveAaptBin(): string | null {
+  const home = process.env.USERPROFILE || process.env.HOME || '';
   const localAppData = process.env.LOCALAPPDATA || '';
-  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || path.join(localAppData, 'Android', 'Sdk');
+  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || (existsSync(path.join(home, 'Android', 'Sdk')) ? path.join(home, 'Android', 'Sdk') : path.join(localAppData, 'Android', 'Sdk'));
   const buildToolsDir = path.join(androidHome, 'build-tools');
   if (existsSync(buildToolsDir)) {
     try {
@@ -400,31 +401,14 @@ async function resolveOrStartDevice(deviceId?: string, devices: string[] = []): 
   autoStartedEmulatorSerial?: string;
   error?: string;
 }> {
-  const target = normalizeDeviceId(deviceId, devices) || devices[0];
-  if (target) {
-    const ready = await isPackageManagerReady(target);
-    if (ready) {
-      return { targetDevice: target };
-    }
-    const booted = await waitForBoot(target, 40000);
-    if (booted) {
-      return { targetDevice: target };
-    }
+  const result = await ensureDeviceReady(deviceId);
+  if (result.error || !result.serial) {
+    return { error: result.error || 'Tidak ada perangkat Android yang siap digunakan.' };
   }
-
-  const avdList = await listAvds();
-  if (avdList.length > 0) {
-    const emuResult = await startHeadlessAvd(avdList[0]);
-    if (emuResult.success && emuResult.serial) {
-      return {
-        targetDevice: emuResult.serial,
-        autoStartedEmulatorSerial: emuResult.serial
-      };
-    }
-    return { error: emuResult.error || `Gagal menyalakan headless AVD "${avdList[0]}".` };
-  }
-
-  return { error: 'Tidak ada perangkat Android yang terhubung via ADB dan tidak ada AVD emulator di sistem.' };
+  return {
+    targetDevice: result.serial,
+    autoStartedEmulatorSerial: result.managed ? result.serial : undefined
+  };
 }
 
 export async function executeAndroidFlow(

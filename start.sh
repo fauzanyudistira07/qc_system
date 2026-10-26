@@ -20,7 +20,6 @@ cleanup() {
     kill $(jobs -p) 2>/dev/null || true
     pkill -f "tunnel-notifier.mjs" 2>/dev/null || true
     pkill -f "watch-and-deploy.sh" 2>/dev/null || true
-    pkill -f "cloudflared tunnel" 2>/dev/null || true
     fuser -k 4100/tcp 4180/tcp 2>/dev/null || true
     echo "✅ Semua layanan berhasil dihentikan."
 }
@@ -50,7 +49,6 @@ echo ""
 echo "🧹 [2/4] Membersihkan port dan proses lama..."
 pkill -f "tunnel-notifier.mjs" 2>/dev/null || true
 pkill -f "watch-and-deploy.sh" 2>/dev/null || true
-pkill -f "cloudflared tunnel" 2>/dev/null || true
 fuser -k 4100/tcp 4180/tcp 2>/dev/null || true
 echo "   ✅ Port 4100 & 4180 siap digunakan."
 

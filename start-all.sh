@@ -29,7 +29,6 @@ echo "🧹 [2/4] Membersihkan port dan proses lama..."
 fuser -k 4100/tcp 4180/tcp 2>/dev/null || true
 pkill -f "tunnel-notifier.mjs" 2>/dev/null || true
 pkill -f "watch-and-deploy.sh" 2>/dev/null || true
-pkill -f "cloudflared tunnel" 2>/dev/null || true
 
 # 3. Jalankan Dev Server di background
 echo ""
@@ -41,12 +40,12 @@ echo "   ✅ Server berjalan di background (PID: $SERVER_PID)."
 # 4. Tunggu server siap sebentar
 sleep 3
 
-# 5. Jalankan Tunnel & WhatsApp Notifier di background
+# 5. Jalankan WhatsApp Notifier di background
 echo ""
-echo "🌐 [4/4] Menyalakan Cloudflare Remote Tunnel & WhatsApp Notifier..."
+echo "📱 [4/4] Mengirim Notifikasi Link Domain ke WhatsApp..."
 nohup node scripts/tunnel-notifier.mjs > .qc-artifacts/tunnel.log 2>&1 &
-TUNNEL_PID=$!
-echo "   ✅ Tunnel & WhatsApp Notifier aktif (PID: $TUNNEL_PID)."
+NOTIFIER_PID=$!
+echo "   ✅ WhatsApp Notifier aktif (PID: $NOTIFIER_PID)."
 
 # 6. Jalankan GitHub Auto-Update Watcher di background
 echo "🔄 Menyalakan GitHub Auto-Update Watcher..."
@@ -58,11 +57,11 @@ echo ""
 echo "================================================================"
 echo " 🎉 SEMUA LAYANAN QC MAESTRO BERJALAN LENGKAP DI BACKGROUND!"
 echo "================================================================"
-echo " 🌍 Web Dashboard      : http://localhost:4180"
-echo " 🔌 Backend API        : http://localhost:4100"
-echo " 🔑 Login Admin        : admin@qcmaestro.com / admin12345"
-echo " 📱 Notifikasi WA      : Dikirim via Fonnte saat Tunnel siap"
-echo " 🔄 Auto Pull GitHub   : Aktif memantau branch 'main'"
-echo " 📄 Log File           : .qc-artifacts/*.log"
-echo " 🛑 Cara Berhenti      : Jalankan ./stop.sh"
+echo " 🌍 Web Dashboard (Publik) : https://timbang.tiraa.my.id"
+echo " 🔌 Backend API            : http://localhost:4100"
+echo " 🔑 Login Admin            : admin@qcmaestro.com / admin12345"
+echo " 📱 Notifikasi WA          : Otomatis dikirim ke WhatsApp via Fonnte"
+echo " 🔄 Auto Pull GitHub       : Aktif memantau branch 'main'"
+echo " 📄 Log File               : .qc-artifacts/*.log"
+echo " 🛑 Cara Berhenti          : Jalankan ./stop.sh"
 echo "================================================================"

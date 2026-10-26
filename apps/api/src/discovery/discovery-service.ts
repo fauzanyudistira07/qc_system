@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, readFile, rm, lstat, readdir, copyFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rm, lstat, readdir, copyFile, rename } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
@@ -15,7 +15,7 @@ import { generatePdfReport } from '../report/report-pdf.ts';
 import { executeWebFlow, createWebRecordingSession, finishWebRecordingSession, type WebRunResult, type WebRecordingSession } from '../playwright-adapter.ts';
 import { runManagedProject, type ManagedProject } from '../project-runner.ts';
 import { compilePlaywrightFlow } from '../playwright-generator.ts';
-import { checkAndroid, executeAndroidFlow, executeAndroidRawFlow } from '../android/index.ts';
+import { checkAndroid, executeAndroidFlow, executeAndroidRawFlow, stopAllManagedEmulators, notifyAndroidJobStarted, notifyAndroidJobFinished } from '../android/index.ts';
 import { detectCapabilities } from './capability-model.ts';
 import { buildCrudPlan } from './crud-planner.ts';
 import { buildRoleActionPlan } from './role-planner.ts';
@@ -122,9 +122,14 @@ export class DiscoveryService {
     try {
       await mkdir(this.artifactRoot, { recursive: true });
       const jobsFile = path.join(this.artifactRoot, 'discovery-jobs.json');
-      await writeFile(jobsFile, JSON.stringify(Array.from(this.jobs.values()), null, 2), 'utf8');
+      const jobsTmp = `${jobsFile}.tmp.${Date.now()}`;
+      await writeFile(jobsTmp, JSON.stringify(Array.from(this.jobs.values()), null, 2), 'utf8');
+      await rename(jobsTmp, jobsFile);
+
       const uploadsFile = path.join(this.artifactRoot, 'discovery-uploads.json');
-      await writeFile(uploadsFile, JSON.stringify(Array.from(this.uploads.values()), null, 2), 'utf8');
+      const uploadsTmp = `${uploadsFile}.tmp.${Date.now()}`;
+      await writeFile(uploadsTmp, JSON.stringify(Array.from(this.uploads.values()), null, 2), 'utf8');
+      await rename(uploadsTmp, uploadsFile);
     } catch { /* ignore */ }
   }
 
@@ -142,6 +147,8 @@ export class DiscoveryService {
   }
 
   public getJob(id: string): DiscoveryJob | undefined {
+    const mem = this.jobs.get(id);
+    if (mem) return mem;
     try {
       const jobsFile = path.join(this.artifactRoot, 'discovery-jobs.json');
       if (existsSync(jobsFile)) {
@@ -153,7 +160,7 @@ export class DiscoveryService {
         }
       }
     } catch {}
-    return this.jobs.get(id);
+    return undefined;
   }
 
   public updateFindingStatus(id: string, findingKey: string, status: FindingWorkflowStatus): DiscoveryJob {
@@ -484,6 +491,15 @@ export class DiscoveryService {
       job.message = 'Discovery job dibatalkan oleh pengguna.';
       this.addLog(job, 'system', 'Job dibatalkan oleh user');
     }
+    if (job.config.platform === 'android') {
+      notifyAndroidJobFinished();
+      const hasOther = Array.from(this.jobs.values()).some(
+        (j) => j.id !== id && ['RUNNING', 'QUEUED'].includes(j.status) && j.config.platform === 'android'
+      );
+      if (!hasOther) {
+        stopAllManagedEmulators().catch(() => {});
+      }
+    }
     return true;
   }
 
@@ -582,6 +598,10 @@ export class DiscoveryService {
 
     const installedApks = new Set<string>();
 
+    const hasAndroidFlows = job.config.platform === 'android' || targetFlows.some(f => f.platform === 'android');
+    if (hasAndroidFlows) {
+      notifyAndroidJobStarted();
+    }
     const hasWebFlows = targetFlows.some(f => f.platform === 'web' || !f.platform);
     const rawVideoDir = path.join(jobArtifactDir, '.raw-videos');
     let webRecordingSession: WebRecordingSession | undefined;
@@ -772,6 +792,20 @@ export class DiscoveryService {
           await rm(rawVideoDir, { recursive: true, force: true }).catch(() => {});
         }
       }
+      if (hasAndroidFlows) {
+        notifyAndroidJobFinished();
+        const otherActiveAndroidJobs = Array.from(this.jobs.values()).some(
+          (j) => j.id !== job.id && ['RUNNING', 'QUEUED'].includes(j.status) && (j.config.platform === 'android' || j.phase === 'EXECUTING_TESTS')
+        );
+        if (!otherActiveAndroidJobs) {
+          try {
+            await stopAllManagedEmulators();
+            this.addLog(job, 'runner', '🛑 Headless Android Emulator dimatikan otomatis. Sumber daya sistem dibebaskan.');
+          } catch (emuShutdownErr) {
+            /* ignore */
+          }
+        }
+      }
     }
 
     // Update and save application-report.html & application-report.pdf
@@ -807,12 +841,12 @@ export class DiscoveryService {
     const abortController = new AbortController();
     this.abortControllers.set(id, abortController);
 
-    const safeAccounts = config.accounts.map(a => ({
+    const safeAccounts = (config.accounts ?? []).map(a => ({
       name: a.name,
       email: a.email,
       role: a.role
     }));
-    const auditPassword = config.accounts.find((account) => account.password?.trim())?.password;
+    const auditPassword = (config.accounts ?? []).find((account) => account.password?.trim())?.password;
 
     const job: DiscoveryJob = {
       id,
@@ -1044,7 +1078,7 @@ export class DiscoveryService {
     return job;
   }
 
-  private addLog(job: DiscoveryJob, category: string, message: string) {
+  public addLog(job: DiscoveryJob, category: string, message: string) {
     const entry = {
       time: new Date().toISOString(),
       category,
@@ -1053,6 +1087,7 @@ export class DiscoveryService {
     job.logs.push(entry);
     if (job.logs.length > 2000) job.logs.shift();
     this.scheduleWorkspaceSnapshot(job);
+    void this.persist();
   }
 
   private async ensureDemoServer(): Promise<string> {

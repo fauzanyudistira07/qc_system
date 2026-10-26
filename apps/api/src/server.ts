@@ -15,7 +15,7 @@ import { compileMaestroFlow } from './maestro-adapter.ts';
 import { compilePlaywrightFlow } from './playwright-generator.ts';
 import { runManagedProject, type ManagedProject, type ServiceRuntime } from './project-runner.ts';
 import { DiscoveryService } from './discovery/discovery-service.ts';
-import { checkAndroid, executeAndroidFlow, inspectApk, installApkToDevice, captureDeviceScreen } from './android/index.ts';
+import { checkAndroid, executeAndroidFlow, inspectApk, installApkToDevice, captureDeviceScreen, getManagedEmulators, stopAllManagedEmulators, ensureDeviceReady } from './android/index.ts';
 import { boundedProcess } from './database/process.ts';
 import { validateDatabase, validateSql } from './database/sql-validation.ts';
 import type { DatabaseConfig, TestAccount } from './database/types.ts';
@@ -385,9 +385,20 @@ function normaliseProjectSlug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+function getJobProjectSlug(job: { id: string; name: string }) {
+  const jobInstance = discoveryService.getJob(job.id);
+  if (jobInstance?.workspace?.projectSlug) {
+    return jobInstance.workspace.projectSlug;
+  }
+  const fromPath = jobInstance?.workspace?.projectPath?.split('/').filter(Boolean).pop();
+  if (fromPath) return fromPath;
+  const cleanName = job.name.replace(/\s*\([^)]*\)/g, '').trim();
+  return normaliseProjectSlug(cleanName || job.name);
+}
+
 async function collectTargetQualityReports(job: { id: string; name: string }) {
   const reports: Array<{ reportPath: string; directory: string; report: any }> = [];
-  const expectedSlug = normaliseProjectSlug(job.name);
+  const expectedSlug = getJobProjectSlug(job);
   const targetDirs = [
     path.join(artifactRoot, 'projects', expectedSlug, 'runs'),
     path.join(artifactRoot, 'jobs', job.id),
@@ -479,7 +490,7 @@ async function collectDiscoveryRunHistory(job: { id: string; name: string; works
 }
 
 async function buildTargetQualityEvidence(job: { id: string; name: string }) {
-  const expectedSlug = normaliseProjectSlug(job.name);
+  const expectedSlug = getJobProjectSlug(job);
   const reports = await collectTargetQualityReports(job);
   const findings: Array<Record<string, unknown>> = [];
   let passed = 0;
@@ -546,7 +557,8 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
     const runDirs = jobDirEntries
       .filter((e) => e.isDirectory() && (
         (activeRunIds.size > 0 ? activeRunIds.has(e.name) : e.name.startsWith('run-')) ||
-        e.name === 'screenshots'
+        e.name === 'screenshots' ||
+        e.name === 'videos'
       ))
       .map((e) => path.join(jobDir, e.name));
 
@@ -624,6 +636,7 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
       const dirsToScan: string[] = [];
       for (const d of [
         path.join(runDir, 'evidence', 'screenshots'),
+        path.join(runDir, 'evidence', 'videos'),
         path.join(runDir, 'quality', 'screenshots'),
         path.join(runDir, 'evidence', 'downloads')
       ]) {
@@ -1231,7 +1244,9 @@ app.get<{ Querystring: { force?: string } }>('/api/v1/system/status', async (req
     docker: { available: dockerAvailable, message: dockerMessage },
     playwright: { available: true, message: 'Playwright headless chromium runtime siap.' },
     maestro: android.maestro,
-    adb: android.adb
+    adb: android.adb,
+    emulator: android.emulator,
+    managedEmulators: getManagedEmulators()
   };
 });
 
@@ -1401,6 +1416,42 @@ app.get<{ Querystring: { deviceId?: string } }>('/api/v1/android/screen', async 
     .send(res.buffer);
 });
 
+// On-Demand Android Emulator Controls
+app.post<{ Body: { deviceId?: string } }>('/api/v1/android/emulator/start', async (request, reply) => {
+  try {
+    const ready = await ensureDeviceReady(request.body?.deviceId);
+    return reply.send({
+      success: true,
+      serial: ready.serial,
+      managed: ready.managed,
+      model: ready.model,
+      message: ready.managed
+        ? `Headless Emulator (${ready.serial}) berhasil dinyalakan on-demand.`
+        : `Perangkat aktif (${ready.serial}) siap digunakan.`
+    });
+  } catch (err) {
+    return reply.code(500).send({
+      success: false,
+      error: err instanceof Error ? err.message : String(err)
+    });
+  }
+});
+
+app.post('/api/v1/android/emulator/stop', async (request, reply) => {
+  try {
+    await stopAllManagedEmulators();
+    return reply.send({
+      success: true,
+      message: 'Seluruh Headless Emulator yang dikelola sistem berhasil dimatikan. Sumber daya bebas.'
+    });
+  } catch (err) {
+    return reply.code(500).send({
+      success: false,
+      error: err instanceof Error ? err.message : String(err)
+    });
+  }
+});
+
 // Database & Account Validation Endpoints
 app.post<{ Body: { config: DatabaseConfig; sqlContent?: string } }>('/api/v1/database/validate', async (request) => {
   const config = request.body?.config;
@@ -1529,6 +1580,29 @@ app.get<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id', async (request
   const job = discoveryService.getJob(request.params.id);
   if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
   return job;
+});
+
+app.post<{ Params: { id: string }; Body: { category?: string; message: string } }>('/api/v1/discovery/jobs/:id/logs', async (request, reply) => {
+  const job = discoveryService.getJob(request.params.id);
+  if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
+  const category = request.body?.category || 'system';
+  const message = request.body?.message || '';
+  if (message) {
+    discoveryService.addLog(job, category, message);
+  }
+  return reply.send({ success: true });
+});
+
+app.post<{ Params: { id: string }; Body: { status?: any; progress?: number; phase?: string; inventory?: any; results?: any } }>('/api/v1/discovery/jobs/:id/status', async (request, reply) => {
+  const job = discoveryService.getJob(request.params.id);
+  if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
+  if (request.body?.status) job.status = request.body.status;
+  if (typeof request.body?.progress === 'number') job.progress = request.body.progress;
+  if (request.body?.phase) job.phase = request.body.phase;
+  if (request.body?.inventory) job.inventory = request.body.inventory;
+  if (request.body?.results) job.results = request.body.results;
+  await discoveryService.persist();
+  return reply.send({ success: true, status: job.status, progress: job.progress, phase: job.phase });
 });
 
 app.put<{ Params: { id: string }; Body: DiscoveryConfig & { restart?: boolean } }>('/api/v1/discovery/jobs/:id', async (request, reply) => {
@@ -1813,6 +1887,13 @@ app.post<{ Params: { id: string }; Body: { flowIds?: string[]; password?: string
 app.get<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/inventory', async (request, reply) => {
   const job = discoveryService.getJob(request.params.id);
   if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
+  const diskInventoryPath = path.join(artifactRoot, 'jobs', job.id, 'application-inventory.json');
+  if (fs.existsSync(diskInventoryPath)) {
+    try {
+      const diskInventory = JSON.parse(fs.readFileSync(diskInventoryPath, 'utf8'));
+      job.inventory = diskInventory;
+    } catch {}
+  }
   if (!job.inventory) return reply.code(404).send({ error: 'Inventory belum tersedia' });
   return job.inventory;
 });
@@ -1916,8 +1997,18 @@ app.get<{ Params: { id: string; '*': string } }>('/api/v1/discovery/jobs/:id/art
   const relative = request.params['*'];
   const safeRelative = path.normalize(relative).replace(/^(\.\.(\/|\\|$))+/, '');
   const jobDir = path.join(artifactRoot, 'jobs', request.params.id);
-  const filePath = path.resolve(jobDir, safeRelative);
-  if (!filePath.startsWith(jobDir)) return reply.code(403).send({ error: 'Access denied' });
+  let filePath = path.resolve(jobDir, safeRelative);
+
+  if (!fs.existsSync(filePath) && (safeRelative.startsWith('projects/') || safeRelative.startsWith('test-runs/'))) {
+    const rootCandidate = path.resolve(artifactRoot, safeRelative);
+    if (rootCandidate.startsWith(artifactRoot) && fs.existsSync(rootCandidate)) {
+      filePath = rootCandidate;
+    }
+  }
+
+  if (!filePath.startsWith(jobDir) && !filePath.startsWith(artifactRoot)) {
+    return reply.code(403).send({ error: 'Access denied' });
+  }
   return streamFileResponse(filePath, request, reply);
 });
 

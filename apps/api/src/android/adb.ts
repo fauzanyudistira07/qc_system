@@ -9,10 +9,12 @@ export function resolveAdbBin(): string {
   const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || '';
 
   const candidates = [
-    process.platform === 'win32' ? 'C:\\ProgramData\\chocolatey\\bin\\adb.exe' : '',
     androidHome ? path.join(androidHome, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb') : '',
+    path.join(home, 'Android', 'Sdk', 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb'),
     localAppData ? path.join(localAppData, 'Android', 'Sdk', 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb') : '',
-    path.join(home, 'AppData', 'Local', 'Android', 'Sdk', 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb')
+    path.join(home, 'AppData', 'Local', 'Android', 'Sdk', 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb'),
+    process.platform === 'win32' ? 'C:\\ProgramData\\chocolatey\\bin\\adb.exe' : '',
+    '/usr/bin/adb'
   ].filter(Boolean);
 
   for (const c of candidates) {
@@ -24,15 +26,18 @@ export function resolveAdbBin(): string {
 function getExtendedEnv(): NodeJS.ProcessEnv {
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const localAppData = process.env.LOCALAPPDATA || '';
-  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || path.join(localAppData, 'Android', 'Sdk');
+  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || (existsSync(path.join(home, 'Android', 'Sdk')) ? path.join(home, 'Android', 'Sdk') : path.join(localAppData, 'Android', 'Sdk'));
   const platformTools = path.join(androidHome, 'platform-tools');
+  const emulatorDir = path.join(androidHome, 'emulator');
   const chocoBin = 'C:\\ProgramData\\chocolatey\\bin';
   const currentPath = process.env.PATH || '';
   const sep = process.platform === 'win32' ? ';' : ':';
 
   return {
     ...process.env,
-    PATH: `${platformTools}${sep}${chocoBin}${sep}${currentPath}`
+    ANDROID_HOME: androidHome,
+    ANDROID_SDK_ROOT: androidHome,
+    PATH: `${platformTools}${sep}${emulatorDir}${sep}${chocoBin}${sep}${currentPath}`
   };
 }
 

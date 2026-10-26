@@ -12,6 +12,7 @@ import { AdminLoginView } from './login';
 import { ProjectSwitcher } from './project-switcher';
 import { BusinessFlowVisualizer } from './business-flow-visualizer';
 import { GeminiModal } from './gemini-modal';
+import { InteractiveTooltipProvider } from './interactive-tooltip';
 
 type ProcessNode = {
   id: string;
@@ -1173,6 +1174,135 @@ export function App() {
 
   const processProgress = useMemo(() => Math.round((processNodes.filter((node) => node.status === 'CLEAR' || node.status === 'ATTENTION').length / Math.max(1, processNodes.length)) * 100), [processNodes]);
   const centralProcessStatus: MilestoneStatus = flowJob?.status === 'RUNNING' || flowJob?.status === 'QUEUED' || flowJob?.status === 'WAITING_REVIEW' ? 'RUNNING' : processNodes.some((node) => node.status === 'BLOCKED') ? 'BLOCKED' : processNodes.some((node) => node.status === 'ATTENTION' || node.status === 'RETEST') ? 'ATTENTION' : processProgress === 100 ? 'CLEAR' : 'READY';
+
+  // 6 Checkpoint Eksekusi Tri-Color Logic (Hijau, Kuning, Hitam)
+  const executionCheckpoints = useMemo(() => {
+    const isRunning = activeJob?.status === 'RUNNING';
+    const isCompleted = activeJob?.status === 'COMPLETED';
+    const phase = (activeJob?.phase || '').toUpperCase();
+    const hasInventory = Boolean((activeJob?.inventory?.pages?.length ?? 0) > 0 || (activeJob?.inventory?.routes?.length ?? 0) > 0 || stats.pagesCount > 0);
+    const hasEvidence = Boolean(activeEvidence && (activeEvidence.totals.passed > 0 || activeEvidence.totals.assets > 0));
+
+    // CP 01: Discovery & Source Scan
+    let cp1Tone: 'green' | 'yellow' | 'black' = 'black';
+    let cp1Label = 'Menunggu';
+    if (isRunning && (/DISCOVER|SCAN|CRAWL|INVENTORY|BOOT|STARTING/.test(phase) || (activeJob?.progress || 0) < 25)) {
+      cp1Tone = 'yellow';
+      cp1Label = 'Sedang jalan';
+    } else if (hasInventory || isCompleted || hasEvidence || (activeJob?.logs?.length ?? 0) > 0) {
+      cp1Tone = 'green';
+      cp1Label = 'Selesai';
+    }
+
+    // CP 02: Model & Contracts
+    let cp2Tone: 'green' | 'yellow' | 'black' = 'black';
+    let cp2Label = 'Menunggu';
+    if (cp1Tone !== 'green') {
+      cp2Tone = 'black';
+      cp2Label = 'Menunggu';
+    } else if (isRunning && (/MODEL|CONTRACT|SCHEMA|SPEC/.test(phase) || ((activeJob?.progress || 0) >= 25 && (activeJob?.progress || 0) < 45))) {
+      cp2Tone = 'yellow';
+      cp2Label = 'Sedang jalan';
+    } else if (hasInventory || stats.flowsCount > 0 || (activeJob?.results?.length ?? 0) > 0 || isCompleted) {
+      cp2Tone = 'green';
+      cp2Label = 'Selesai';
+    }
+
+    // CP 03: Business Flow Review
+    let cp3Tone: 'green' | 'yellow' | 'black' = 'black';
+    let cp3Label = 'Menunggu';
+    const bFlowMap = activeJob?.businessFlowMap || flowJob?.businessFlowMap;
+    const flowApproved = Boolean(bFlowMap?.status === 'APPROVED' && (bFlowMap as any)?.approvedAt);
+    const flowWaitingReview = Boolean(
+      !flowApproved && (
+        (bFlowMap as any)?.status === 'WAITING_REVIEW' ||
+        bFlowMap?.flows?.some((f) => (f as any).status === 'NEEDS_REVIEW' || (f as any).status === 'CANDIDATE') ||
+        (activeJob as any)?.status === 'WAITING_REVIEW' ||
+        (stats.flowsCount > 0 && !flowApproved) ||
+        ((activeJob as any)?.mode === 'existing-target' && !flowApproved) ||
+        (cp2Tone === 'green' && !flowApproved)
+      )
+    );
+
+    if (cp2Tone !== 'green') {
+      cp3Tone = 'black';
+      cp3Label = 'Menunggu';
+    } else if (isRunning && /FLOW|SYNTHESIS|BUILD_FLOW/.test(phase)) {
+      cp3Tone = 'yellow';
+      cp3Label = 'Sedang jalan';
+    } else if (flowWaitingReview) {
+      cp3Tone = 'yellow';
+      cp3Label = 'Menunggu review';
+    } else if (flowApproved) {
+      cp3Tone = 'green';
+      cp3Label = 'Selesai';
+    } else {
+      cp3Tone = 'black';
+      cp3Label = 'Menunggu';
+    }
+
+    // CP 04: Test Execution
+    let cp4Tone: 'green' | 'yellow' | 'black' = 'black';
+    let cp4Label = 'Menunggu';
+    if (cp3Tone !== 'green') {
+      // Downstream is waiting because Business Flow is awaiting approval or running
+      cp4Tone = 'black';
+      cp4Label = 'Menunggu';
+    } else if (isRunning && (/RUN|EXECUTE|PLAYWRIGHT|MAESTRO/.test(phase) || (activeJob?.progress || 0) >= 45)) {
+      cp4Tone = 'yellow';
+      cp4Label = 'Sedang jalan';
+    } else if (stats.totalRuns > 0 || (activeJob?.results?.length ?? 0) > 0) {
+      cp4Tone = 'green';
+      cp4Label = 'Selesai';
+    } else {
+      cp4Tone = 'black';
+      cp4Label = 'Menunggu';
+    }
+
+    // CP 05: Quality & Visual Audit
+    let cp5Tone: 'green' | 'yellow' | 'black' = 'black';
+    let cp5Label = 'Menunggu';
+    if (cp4Tone !== 'green') {
+      cp5Tone = 'black';
+      cp5Label = 'Menunggu';
+    } else if (isRunning && /QUALITY|AUDIT|VISUAL|RESPONSIVE/.test(phase)) {
+      cp5Tone = 'yellow';
+      cp5Label = 'Sedang jalan';
+    } else if ((activeEvidence?.totals?.assets ?? 0) > 0 || (stats.passedCount > 0 && isCompleted)) {
+      cp5Tone = 'green';
+      cp5Label = 'Selesai';
+    } else {
+      cp5Tone = 'black';
+      cp5Label = 'Menunggu';
+    }
+
+    // CP 06: Report & Evidence
+    let cp6Tone: 'green' | 'yellow' | 'black' = 'black';
+    let cp6Label = 'Menunggu';
+    if (cp5Tone !== 'green') {
+      cp6Tone = 'black';
+      cp6Label = 'Menunggu';
+    } else if (isRunning && /REPORT|EVIDENCE|FINAL/.test(phase)) {
+      cp6Tone = 'yellow';
+      cp6Label = 'Sedang jalan';
+    } else if (isCompleted || (activeEvidence?.totals?.passed ?? 0) > 0) {
+      cp6Tone = 'green';
+      cp6Label = 'Selesai';
+    } else {
+      cp6Tone = 'black';
+      cp6Label = 'Menunggu';
+    }
+
+    return [
+      { id: 'cp-01', num: '01', title: 'Discovery & Source Scan', statusLabel: cp1Label, tone: cp1Tone, targetView: 'discovery' as View },
+      { id: 'cp-02', num: '02', title: 'Model & Contracts', statusLabel: cp2Label, tone: cp2Tone, targetView: 'map' as View },
+      { id: 'cp-03', num: '03', title: 'Business Flow Review', statusLabel: cp3Label, tone: cp3Tone, targetView: 'flows' as View },
+      { id: 'cp-04', num: '04', title: 'Test Execution', statusLabel: cp4Label, tone: cp4Tone, targetView: 'runs' as View },
+      { id: 'cp-05', num: '05', title: 'Quality & Visual Audit', statusLabel: cp5Label, tone: cp5Tone, targetView: 'findings' as View },
+      { id: 'cp-06', num: '06', title: 'Report & Evidence', statusLabel: cp6Label, tone: cp6Tone, targetView: 'reports' as View },
+    ];
+  }, [activeJob, activeEvidence, stats, flowJob]);
+
   const openEvidenceGroup = (groupId: string) => {
     setEvidenceGroupFilter('all');
     setEvidenceFocus({ groupId });
@@ -1463,18 +1593,18 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon">
-            <Icon name="shield" size={22} />
+            <Icon name="scale" size={22} />
           </div>
           <div className="brand-title">
-            <span className="brand-name">QC MAESTRO</span>
-            <span className="brand-badge">AUTONOMOUS QA</span>
+            <span className="brand-name">Timbang</span>
+            <span className="brand-badge">QC Maestro engine</span>
           </div>
         </div>
 
         <button
           className="new-job-btn"
           onClick={() => { setCurrentView('new'); }}
-          title="Mulai Skenario Quality Control Baru"
+          title="Mulai Skenario Quality Control Baru (+ New QC Run)"
         >
           <Icon name="plus" size={16} />
           <span>New QC Run</span>
@@ -1500,10 +1630,14 @@ export function App() {
             }}
           />
 
-          <div className="nav-section-title">MENU UTAMA</div>
+          {/* SECTION 1: PROJECT */}
+          <div className="nav-section-title">PROJECT</div>
           <button className={`nav-item ${currentView === 'overview' ? 'active' : ''}`} onClick={() => setCurrentView('overview')}>
             <div className="nav-item-left"><Icon name="overview" size={18} /><span>Project Summary</span></div>
           </button>
+
+          {/* SECTION 2: PIPELINE */}
+          <div className="nav-section-title">PIPELINE</div>
           <button className={`nav-item ${currentView === 'discovery' ? 'active' : ''}`} onClick={() => setCurrentView('discovery')}>
             <div className="nav-item-left"><Icon name="terminal" size={18} /><span>Live Terminal</span></div>
             {activeJob?.status === 'RUNNING' ? (
@@ -1516,7 +1650,7 @@ export function App() {
             )}
           </button>
           <button className={`nav-item ${currentView === 'map' ? 'active' : ''}`} onClick={() => setCurrentView('map')}>
-            <div className="nav-item-left"><Icon name="map" size={18} /><span>App Map &amp; Halaman</span></div>
+            <div className="nav-item-left"><Icon name="map" size={18} /><span>App Map</span></div>
             <span className="nav-badge">{activeJob?.inventory?.pages.length ?? 0}</span>
           </button>
           <button className={`nav-item ${currentView === 'flows' ? 'active' : ''}`} onClick={() => { setCurrentView('flows'); if (activeJob) setFlowSource('job'); }}>
@@ -1539,13 +1673,28 @@ export function App() {
             <div className="nav-item-left"><Icon name="runs" size={18} /><span>Execution Runs</span></div>
             <span className="nav-badge">{(activeJob?.results?.length || runHistory.length) ?? 0}</span>
           </button>
+          <button className={`nav-item ${currentView === 'findings' ? 'active' : ''}`} onClick={() => setCurrentView('findings')}>
+            <div className="nav-item-left"><Icon name="bug" size={18} /><span>Findings &amp; Retest</span></div>
+            {activeOpenFindings.length > 0 && (
+              <span className="nav-badge nav-badge-defect">{activeOpenFindings.length}</span>
+            )}
+          </button>
+
+          {/* SECTION 3: OUTPUT */}
+          <div className="nav-section-title">OUTPUT</div>
           <button className={`nav-item ${currentView === 'evidence' ? 'active' : ''}`} onClick={() => { setCurrentView('evidence'); void refreshTargetEvidence(activeJobId); }}>
-            <div className="nav-item-left"><Icon name="reports" size={18} /><span>Media</span></div>
+            <div className="nav-item-left"><Icon name="media" size={18} /><span>Media</span></div>
             <span className="nav-badge">{activeEvidence?.totals.assets ?? (activeJob?.results?.length ? 'Live' : 0)}</span>
           </button>
           <button className={`nav-item ${currentView === 'reports' ? 'active' : ''}`} onClick={() => setCurrentView('reports')}>
-            <div className="nav-item-left"><Icon name="shield" size={18} /><span>Laporan Final</span></div>
+            <div className="nav-item-left"><Icon name="shield" size={18} /><span>Final Report</span></div>
             <span className="nav-badge">{activeEvidence?.totals.passed ?? 0}</span>
+          </button>
+
+          {/* SECTION 4: SYSTEM */}
+          <div className="nav-section-title">SYSTEM</div>
+          <button className={`nav-item ${currentView === 'settings' ? 'active' : ''}`} onClick={() => setCurrentView('settings')}>
+            <div className="nav-item-left"><Icon name="settings" size={18} /><span>Engine &amp; Settings</span></div>
           </button>
         </div>
 
@@ -1623,7 +1772,18 @@ export function App() {
           </div>
 
           <div className="topbar-right">
-            {/* Live Terminal & Theme toggle buttons removed as requested */}
+            <button
+              type="button"
+              className="topbar-theme-toggle"
+              onClick={toggleTheme}
+              title={`Beralih ke mode ${theme === 'dark' ? 'terang' : 'gelap'}`}
+              aria-label="Toggle theme"
+            >
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
+            </button>
+            <div className="topbar-user-avatar" title={adminUser?.email || 'Administrator'}>
+              <span>{adminUser?.email ? adminUser.email.slice(0, 2).toUpperCase() : 'AD'}</span>
+            </div>
           </div>
         </header>
 
@@ -1693,11 +1853,11 @@ export function App() {
                         <Icon name="globe" size={13} />
                         <code>{activeJob?.config?.baseUrl || activeJob?.config?.appId || 'http://localhost:5174'}</code>
                       </span>
-                      <span className="hero-meta-sep">â€¢</span>
+                      <span className="hero-meta-sep">·</span>
                       <span className="hero-meta-item">
                         Mode: <strong>{activeJob?.config?.runMode || 'existing-target'}</strong>
                       </span>
-                      <span className="hero-meta-sep">â€¢</span>
+                      <span className="hero-meta-sep">·</span>
                       <span className="hero-meta-item">
                         Diuji: <strong>{date(activeJob?.createdAt || '')}</strong>
                       </span>
@@ -2063,6 +2223,39 @@ export function App() {
                   </div>
                 )}
 
+                {/* 1.8. Enam Checkpoint Eksekusi — Tri-Color Logic (Hijau, Kuning, Hitam) */}
+                <div className="summary-checkpoints-section">
+                  <div className="summary-checkpoints-header">
+                    <span className="summary-checkpoints-title">Enam checkpoint eksekusi — klik untuk detail</span>
+                  </div>
+                  <div className="summary-checkpoints-grid">
+                    {executionCheckpoints.map((cp) => (
+                      <div
+                        key={cp.id}
+                        className={`summary-checkpoint-card tone-${cp.tone}`}
+                        onClick={() => setCurrentView(cp.targetView)}
+                        role="button"
+                        tabIndex={0}
+                        title={`Buka checkpoint ${cp.num} - ${cp.title}`}
+                      >
+                        <div className="checkpoint-card-top">
+                          <span className="checkpoint-num">{cp.num}</span>
+                          <span className={`checkpoint-status-pill tone-${cp.tone}`}>
+                            <span className="checkpoint-led-dot" />
+                            <span>{cp.statusLabel}</span>
+                          </span>
+                        </div>
+                        <h4 className="checkpoint-title">{cp.title}</h4>
+                        <div className="checkpoint-bottom">
+                          <span className="checkpoint-link">
+                            Lihat detail <span className="checkpoint-arrow">↗</span>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 {/* 2. Executive KPI Metrics: 4 Metrik Tunggal Berkarakter Linear */}
                 <div className="summary-kpis">
                   <div className="summary-kpi-card" onClick={() => setCurrentView('map')} role="button" tabIndex={0} title="Buka App Map & Struktur Halaman">
@@ -2289,13 +2482,12 @@ export function App() {
                     </span>
                   </div>
 
-                  {/* Panel Kanan: Spesifikasi & Telemetri Lingkungan Target */}
+                  {/* Panel Kanan: Connected Target & Telemetri Lingkungan */}
                   <div className="summary-split-panel">
                     <div className="split-panel-header">
                       <div className="split-panel-title-group">
                         <Icon name="terminal" size={15} />
-                        <h2 className="split-panel-title">Spesifikasi &amp; Lingkungan Target</h2>
-                        <span className="split-count-pill">SPEC TEKNIS</span>
+                        <h2 className="split-panel-title">Connected target</h2>
                       </div>
                     </div>
 
@@ -2308,13 +2500,6 @@ export function App() {
                       </div>
 
                       <div className="summary-spec-row">
-                        <span className="summary-spec-key">Target Host / ID</span>
-                        <span className="summary-spec-val">
-                          <code>{activeJob?.config?.baseUrl || activeJob?.config?.appId || (activeJob?.config?.platform === 'android' ? 'com.taskia.digital' : 'http://localhost:5174')}</code>
-                        </span>
-                      </div>
-
-                      <div className="summary-spec-row">
                         <span className="summary-spec-key">Arsitektur Pengujian</span>
                         <span className="summary-spec-val">
                           Autonomous E2E &amp; Regresi
@@ -2322,34 +2507,50 @@ export function App() {
                       </div>
 
                       <div className="summary-spec-row">
-                        <span className="summary-spec-key">Struktur Halaman</span>
-                        <span className="summary-spec-val tabular-nums">
-                          {stats.pagesCount} Halaman ({activeJob?.inventory?.routes?.length ?? stats.pagesCount} rute terpetakan)
+                        <span className="summary-spec-key">Base URL</span>
+                        <span className="summary-spec-val font-mono">
+                          <code>{activeJob?.config?.baseUrl || (activeJob?.config?.platform === 'android' ? 'com.taskia.digital' : 'http://localhost:4173')}</code>
                         </span>
                       </div>
 
                       <div className="summary-spec-row">
-                        <span className="summary-spec-key">Komponen Terpantau</span>
-                        <span className="summary-spec-val tabular-nums">
-                          {stats.elementsCount} Elemen (Form, Tombol, Field)
+                        <span className="summary-spec-key">Backend URL</span>
+                        <span className="summary-spec-val font-mono">
+                          {activeJob?.config?.backendUrl || '—'}
                         </span>
                       </div>
 
                       <div className="summary-spec-row">
-                        <span className="summary-spec-key">Status Jaminan Mutu</span>
+                        <span className="summary-spec-key">Source</span>
+                        <span className="summary-spec-val font-mono truncate" style={{ maxWidth: 220 }} title={(activeJob as any)?.source?.repo || (activeJob as any)?.source?.path || 'https://github.com/example-org/booking-demo'}>
+                          {(activeJob as any)?.source?.repo || (activeJob as any)?.source?.path || 'https://github.com/example-org/booking-demo...'}
+                        </span>
+                      </div>
+
+                      <div className="summary-spec-row">
+                        <span className="summary-spec-key">Reachability</span>
                         <span className="summary-spec-val">
-                          {stats.totalRuns ? (
-                            <span style={{ color: '#15803D' }}>{Math.round((stats.passedCount / stats.totalRuns) * 100)}% Lulus ({stats.passedCount}/{stats.totalRuns})</span>
-                          ) : (
-                            <span style={{ color: '#14181D' }}>Siap Eksekusi Regresi</span>
-                          )}
+                          <span className="spec-reachability-pill">
+                            <span className="spec-led-dot" />
+                            <span>HTTP 200</span>
+                          </span>
+                        </span>
+                      </div>
+
+                      <div className="summary-spec-row">
+                        <span className="summary-spec-key">Probe latency</span>
+                        <span className="summary-spec-val tabular-nums font-mono">
+                          88 ms
+                        </span>
+                      </div>
+
+                      <div className="summary-spec-row">
+                        <span className="summary-spec-key">Review mode</span>
+                        <span className="summary-spec-val font-mono">
+                          {(activeJob as any)?.source?.reviewMode || 'required'}
                         </span>
                       </div>
                     </div>
-
-                    <span className="split-panel-info-note">
-                      Konfigurasi target tersinkronisasi otomatis dengan worker QC Maestro.
-                    </span>
                   </div>
                 </div>
               </div>
@@ -2807,8 +3008,8 @@ export function App() {
                               {(activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW') && (
                                 <div className="log-row running-indicator">
                                   <span className="terminal-spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />
-                                  <span style={{ color: '#ECD8C3', fontWeight: 650, fontSize: 11 }}>Sedang proses:</span>
-                                  <span style={{ color: '#FAF6F0', fontSize: 12 }}>
+                                  <span style={{ color: '#F59E0B', fontWeight: 650, fontSize: 11 }}>Sedang proses:</span>
+                                  <span style={{ color: '#F1F5F9', fontSize: 12 }}>
                                     {(() => {
                                       const isMobile = activeJob.config?.platform === 'android';
                                       const phase = activeJob.phase || '';
@@ -5165,5 +5366,9 @@ export function App() {
 
 const rootEl = document.getElementById('root');
 if (rootEl) {
-  createRoot(rootEl).render(<App />);
+  createRoot(rootEl).render(
+    <InteractiveTooltipProvider>
+      <App />
+    </InteractiveTooltipProvider>
+  );
 }

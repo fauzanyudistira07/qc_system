@@ -12,10 +12,9 @@ echo "🛑 Menghentikan kontainer Docker (Postgres, Redis, MinIO)..."
 docker compose -f infrastructure/compose/docker-compose.yml down 2>/dev/null || true
 
 echo ""
-echo "🛑 Menghentikan proses background (Tunnel, Watcher, Server)..."
+echo "🛑 Menghentikan proses background (Notifier, Watcher, Server)..."
 pkill -f "tunnel-notifier.mjs" 2>/dev/null || true
 pkill -f "watch-and-deploy.sh" 2>/dev/null || true
-pkill -f "cloudflared tunnel" 2>/dev/null || true
 fuser -k 4100/tcp 4180/tcp 2>/dev/null || true
 
 echo ""

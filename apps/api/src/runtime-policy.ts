@@ -20,7 +20,7 @@ export function runtimePolicy(): RetentionPolicy {
     cloneDays: integerEnv('QC_CLONE_RETENTION_DAYS', 7, 1, 365),
     artifactDays: integerEnv('QC_ARTIFACT_RETENTION_DAYS', 30, 1, 3650),
     cleanupIntervalHours: integerEnv('QC_RETENTION_CLEANUP_INTERVAL_HOURS', 6, 1, 168),
-    maxActiveProjects: integerEnv('QC_MAX_ACTIVE_PROJECTS', 2, 1, 2),
+    maxActiveProjects: integerEnv('QC_MAX_ACTIVE_PROJECTS', 10, 1, 50),
   };
 }
 

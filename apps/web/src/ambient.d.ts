@@ -41,6 +41,10 @@ declare module 'react-dom/client' {
   };
 }
 
+declare module 'react-dom' {
+  export function createPortal(children: any, container: any): any;
+}
+
 declare module 'react/jsx-runtime' {
   export const jsx: any;
   export const jsxs: any;

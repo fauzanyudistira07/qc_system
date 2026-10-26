@@ -355,7 +355,7 @@ export function BusinessFlowVisualizer({
                                 </span>
                               )}
                             </div>
-                            <div className="fc-process-action">{step.action}</div>
+                            <div className="fc-process-action" data-tooltip={step.action} title={step.action}>{step.action}</div>
                           </div>
 
                           <div className="fc-arrow-down-wrap">
@@ -369,7 +369,7 @@ export function BusinessFlowVisualizer({
                               <div className="fc-diamond-box">
                                 <div className="fc-diamond-text">
                                   <span className="fc-diamond-tag">VALIDASI SISTEM</span>
-                                  <span className="fc-diamond-question">{step.expected}</span>
+                                  <span className="fc-diamond-question" data-tooltip={step.expected} title={step.expected}>{step.expected}</span>
                                 </div>
                               </div>
                             </div>

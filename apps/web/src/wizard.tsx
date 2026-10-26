@@ -864,17 +864,25 @@ export function Wizard({
                         </div>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <strong>Server Android Emulator (Otomatis Terhubung)</strong>
-                            <span className="section-type-badge select-badge">DEFAULT SERVER AVD</span>
+                            <strong>Smart Android Device Manager (Just-In-Time)</strong>
+                            <span className="section-type-badge select-badge">ON-DEMAND RUNNER</span>
                           </div>
                           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-                            Pengujian otomatis berjalan di emulator server terpasang: <code className="mono">{system?.adb?.devices?.[0] || 'emulator-5554'}</code>. Tidak memerlukan konfigurasi manual perangkat.
+                            {system?.adb?.devices?.length ? (
+                              <>
+                                Perangkat aktif terdeteksi: <code className="mono">{system.adb.devices[0]}</code>. Pengujian akan langsung memakai perangkat ini tanpa membebani memori laptop.
+                              </>
+                            ) : (
+                              <>
+                                Headless Emulator (<code className="mono">qc_worker_headless</code>) akan otomatis menyala saat pengujian dimulai dan langsung mati saat pengujian selesai untuk menghemat RAM & CPU.
+                              </>
+                            )}
                           </p>
                         </div>
                       </div>
                       <div className="server-emulator-tag">
                         <span className="status-dot active" />
-                        <span>Ready on Server</span>
+                        <span>{system?.adb?.devices?.length ? 'Perangkat Aktif' : 'On-Demand Siap'}</span>
                       </div>
                     </div>
                   </div>

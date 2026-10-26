@@ -44,7 +44,7 @@ async function main() {
   }
 
   // Click on the photo item "Dashboard Staff Teknisi (Ahmad Rian - STF001)"
-  const photoCard = page.locator('.evidence-item-card:has-text("Dashboard Staff Teknisi")').first();
+  const photoCard = page.locator('button.qc-playlist-item:has-text("Dashboard Staff Teknisi")').first();
   if (await photoCard.isVisible()) {
     console.log('Clicking Dashboard Staff Teknisi photo card...');
     await photoCard.click();

@@ -1,7 +1,5 @@
-import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,7 +14,8 @@ function loadEnv() {
     FONNTE_TARGET: '08882017549,089508717179,120363411589846495@g.us',
     PORT: '4180',
     QC_ADMIN_EMAIL: 'admin@qcmaestro.com',
-    QC_ADMIN_PASSWORD: 'admin12345'
+    QC_ADMIN_PASSWORD: 'admin12345',
+    QC_PUBLIC_DOMAIN: 'https://timbang.tiraa.my.id'
   };
 
   if (fs.existsSync(envPath)) {
@@ -37,23 +36,10 @@ function loadEnv() {
   return config;
 }
 
-// 2. Dapatkan IP LAN WiFi / Ethernet lokal
-function getLocalIp() {
-  const nets = os.networkInterfaces();
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name] || []) {
-      if (net.family === 'IPv4' && !net.internal) {
-        return net.address;
-      }
-    }
-  }
-  return '127.0.0.1';
-}
-
-// 3. Kirim pesan WhatsApp via Fonnte
-async function sendWhatsAppNotification(token, target, publicUrl, localIp, adminEmail = 'admin@qcmaestro.com', adminPassword = 'admin12345') {
+// 2. Kirim pesan WhatsApp via Fonnte (dengan domain tetap)
+async function sendWhatsAppNotification(token, target, publicUrl, adminEmail = 'admin@qcmaestro.com', adminPassword = 'admin12345') {
   if (!token || !target) {
-    console.log('[TunnelNotifier] Token atau target Fonnte belum dikonfigurasi di .env');
+    console.log('[Notifier] Token atau target Fonnte belum dikonfigurasi di .env');
     return;
   }
 
@@ -64,9 +50,6 @@ Laptop Server aktif dan siap diakses bersama!
 
 🌐 *Link Akses Dashboard:*
 ${publicUrl}
-
-🏠 *Akses Lokal (1 Wi-Fi):*
-http://${localIp}:4180
 
 🔑 *Akun Login Dashboard:*
 Email: ${adminEmail}
@@ -90,68 +73,38 @@ Waktu: ${now} WIB`;
     });
 
     const result = await res.json();
-    console.log('[TunnelNotifier] Notifikasi WA berhasil dikirim:', result?.detail || result);
+    console.log('[Notifier] Notifikasi WA berhasil dikirim:', result?.detail || result);
   } catch (err) {
-    console.error('[TunnelNotifier] Gagal mengirim pesan WA:', err.message);
+    console.error('[Notifier] Gagal mengirim pesan WA:', err.message);
   }
 }
 
-// Helper: Download cloudflared jika belum ada di laptop server
-async function ensureCloudflared(cloudflaredBin, toolsDir) {
-  if (fs.existsSync(cloudflaredBin)) return true;
-
-  if (!fs.existsSync(toolsDir)) {
-    fs.mkdirSync(toolsDir, { recursive: true });
-  }
-
-  const isWindows = process.platform === 'win32';
-  console.log(`[TunnelNotifier] cloudflared belum ada di server. Mengunduh otomatis untuk ${isWindows ? 'Windows' : 'Linux'}...`);
-  const downloadUrl = isWindows
-    ? 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
-    : 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64';
-
-  try {
-    const res = await fetch(downloadUrl, { redirect: 'follow' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    const buffer = await res.arrayBuffer();
-    fs.writeFileSync(cloudflaredBin, Buffer.from(buffer));
-    if (!isWindows) {
-      fs.chmodSync(cloudflaredBin, 0o755);
-    }
-    console.log('[TunnelNotifier] Unduhan cloudflared berhasil!');
-    return true;
-  } catch (err) {
-    console.error('[TunnelNotifier] Gagal mengunduh cloudflared otomatis:', err.message);
-    return false;
-  }
-}
-
-// Helper: Tunggu koneksi internet aktif (misal saat boot WiFi belum konek)
+// 3. Helper: Tunggu koneksi internet aktif
 async function waitForInternet() {
-  console.log('[TunnelNotifier] Memeriksa koneksi internet...');
+  console.log('[Notifier] Memeriksa koneksi internet...');
   while (true) {
     try {
       const res = await fetch('https://1.1.1.1', { signal: AbortSignal.timeout(3000) });
       if (res.ok || res.status) {
-        console.log('[TunnelNotifier] Koneksi internet AKTIF.');
+        console.log('[Notifier] Koneksi internet AKTIF.');
         return;
       }
     } catch (_) {
-      console.log('[TunnelNotifier] Menunggu koneksi internet aktif (WiFi menyambung)... coba lagi dalam 3 detik.');
+      console.log('[Notifier] Menunggu koneksi internet aktif... coba lagi dalam 3 detik.');
       await new Promise(r => setTimeout(r, 3000));
     }
   }
 }
 
-// Helper: Tunggu Web Server siap listening di port target
+// 4. Helper: Tunggu Web Server siap listening di port target (4180)
 async function waitForPort(port) {
-  console.log(`[TunnelNotifier] Memeriksa kesiapan Web Server di port ${port}...`);
+  console.log(`[Notifier] Memeriksa kesiapan Web Server di port ${port}...`);
   const startTime = Date.now();
   while (Date.now() - startTime < 180000) { // maksimal 3 menit
     try {
       const res = await fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(2000) });
       if (res.status >= 200 && res.status < 500) {
-        console.log(`[TunnelNotifier] Web Server di port ${port} SIAP dan merespons.`);
+        console.log(`[Notifier] Web Server di port ${port} SIAP dan merespons.`);
         return true;
       }
     } catch (_) {
@@ -159,83 +112,38 @@ async function waitForPort(port) {
     }
     await new Promise(r => setTimeout(r, 2000));
   }
-  console.log(`[TunnelNotifier] Web Server port ${port} belum merespons, tetap melanjutkan tunnel...`);
+  console.log(`[Notifier] Web Server port ${port} belum merespons, tetap melanjutkan pengiriman link domain...`);
   return false;
 }
 
-// 4. Main Process dengan Auto-Restart Loop
-async function runTunnelSession(cloudflaredExe, env, localIp) {
-  return new Promise((resolve) => {
-    console.log(`[TunnelNotifier] Membuka Cloudflare Tunnel ke http://127.0.0.1:${env.PORT}...`);
-    
-    const tunnelProc = spawn(cloudflaredExe, [
-      'tunnel',
-      '--protocol', 'http2',
-      '--url', `http://127.0.0.1:${env.PORT}`
-    ]);
-
-    let currentTunnelUrl = null;
-
-    const handleOutput = (data) => {
-      const text = data.toString();
-      process.stdout.write(text);
-
-      const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
-      if (match && match[0]) {
-        const publicUrl = match[0];
-        if (publicUrl !== currentTunnelUrl) {
-          currentTunnelUrl = publicUrl;
-          console.log('\n======================================================');
-          console.log(`[TunnelNotifier] URL TUNNEL AKTIF: ${publicUrl}`);
-          console.log('======================================================\n');
-
-          fs.writeFileSync(path.join(rootDir, 'active-tunnel-url.txt'), publicUrl, 'utf8');
-          sendWhatsAppNotification(env.FONNTE_TOKEN, env.FONNTE_TARGET, publicUrl, localIp, env.QC_ADMIN_EMAIL, env.QC_ADMIN_PASSWORD);
-        }
-      }
-    };
-
-    tunnelProc.stdout.on('data', handleOutput);
-    tunnelProc.stderr.on('data', handleOutput);
-
-    tunnelProc.on('close', (code) => {
-      console.log(`[TunnelNotifier] Cloudflared terhenti (exit code: ${code}). Mengulang dalam 5 detik...`);
-      resolve(code);
-    });
-
-    tunnelProc.on('error', (err) => {
-      console.error('[TunnelNotifier] Error proses cloudflared:', err.message);
-      resolve(1);
-    });
-  });
-}
-
+// 5. Main Execution
 async function main() {
   const env = loadEnv();
-  const toolsDir = path.join(rootDir, 'tools');
-  const isWindows = process.platform === 'win32';
-  const cloudflaredBin = path.join(toolsDir, isWindows ? 'cloudflared.exe' : 'cloudflared');
+  const publicUrl = env.QC_PUBLIC_DOMAIN || 'https://timbang.tiraa.my.id';
 
   // 1. Tunggu internet
   await waitForInternet();
 
-  // 2. Pastikan file executable cloudflared ada
-  const ready = await ensureCloudflared(cloudflaredBin, toolsDir);
-  if (!ready) {
-    console.error(`[TunnelNotifier] Gagal menyiapkan cloudflared`);
-    process.exit(1);
-  }
-
-  // 3. Tunggu web server listening di port 4180
+  // 2. Tunggu web server listening di port 4180
   await waitForPort(env.PORT);
 
-  // 4. Loop abadi (jika mati atau koneksi putus, otomatis hidup lagi!)
-  while (true) {
-    const localIp = getLocalIp();
-    console.log(`[TunnelNotifier] IP LAN Terdeteksi: http://${localIp}:${env.PORT}`);
-    await runTunnelSession(cloudflaredBin, env, localIp);
-    await new Promise(r => setTimeout(r, 5000));
-  }
+  // 3. Log domain permanen dan simpan ke active-tunnel-url.txt
+  console.log('\n======================================================');
+  console.log(`[Notifier] DOMAIN TETAP AKTIF: ${publicUrl}`);
+  console.log('======================================================\n');
+
+  fs.writeFileSync(path.join(rootDir, 'active-tunnel-url.txt'), publicUrl, 'utf8');
+
+  // 4. Kirim notifikasi WhatsApp via Fonnte
+  await sendWhatsAppNotification(
+    env.FONNTE_TOKEN,
+    env.FONNTE_TARGET,
+    publicUrl,
+    env.QC_ADMIN_EMAIL,
+    env.QC_ADMIN_PASSWORD
+  );
+
+  console.log('[Notifier] Pengiriman notifikasi WhatsApp selesai.');
 }
 
 main().catch(console.error);

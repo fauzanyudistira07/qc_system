@@ -13,6 +13,7 @@ export function resolveEmulatorBin(): string {
 
   const candidates = [
     androidHome ? path.join(androidHome, 'emulator', process.platform === 'win32' ? 'emulator.exe' : 'emulator') : '',
+    path.join(home, 'Android', 'Sdk', 'emulator', process.platform === 'win32' ? 'emulator.exe' : 'emulator'),
     localAppData ? path.join(localAppData, 'Android', 'Sdk', 'emulator', process.platform === 'win32' ? 'emulator.exe' : 'emulator') : '',
     path.join(home, 'AppData', 'Local', 'Android', 'Sdk', 'emulator', process.platform === 'win32' ? 'emulator.exe' : 'emulator')
   ].filter(Boolean);
@@ -24,15 +25,19 @@ export function resolveEmulatorBin(): string {
 }
 
 function getExtendedEnv(): NodeJS.ProcessEnv {
+  const home = process.env.USERPROFILE || process.env.HOME || '';
   const localAppData = process.env.LOCALAPPDATA || '';
-  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || path.join(localAppData, 'Android', 'Sdk');
+  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || (existsSync(path.join(home, 'Android', 'Sdk')) ? path.join(home, 'Android', 'Sdk') : path.join(localAppData, 'Android', 'Sdk'));
   const emulatorDir = path.join(androidHome, 'emulator');
+  const platformTools = path.join(androidHome, 'platform-tools');
   const currentPath = process.env.PATH || '';
   const sep = process.platform === 'win32' ? ';' : ':';
 
   return {
     ...process.env,
-    PATH: `${emulatorDir}${sep}${currentPath}`
+    ANDROID_HOME: androidHome,
+    ANDROID_SDK_ROOT: androidHome,
+    PATH: `${emulatorDir}${sep}${platformTools}${sep}${currentPath}`
   };
 }
 
@@ -128,9 +133,9 @@ export async function startHeadlessAvd(
   if (options.noWindow !== false) args.push('-no-window');
   if (options.noAudio !== false) args.push('-no-audio');
   if (options.noBootAnim !== false) args.push('-no-boot-anim');
-  args.push('-gpu', options.gpu || 'auto');
-  args.push('-memory', String(options.memoryMb || 3072));
-  args.push('-cores', String(options.cores || 4));
+  args.push('-gpu', options.gpu || 'swiftshader_indirect');
+  args.push('-memory', String(options.memoryMb || 2048));
+  args.push('-cores', String(options.cores || 2));
 
   const beforeDevices = await listAdbDevices();
   const beforeSerials = new Set(beforeDevices.map((d) => d.serial));
@@ -172,6 +177,7 @@ export async function startHeadlessAvd(
   }
 
   activeEmulators.set(foundSerial, child);
+  managedEmulators.add(foundSerial);
 
   // Tunggu hingga proses booting OS tuntas
   const bootSuccess = await waitForBoot(foundSerial, timeoutMs);
@@ -183,9 +189,166 @@ export async function startHeadlessAvd(
   return { success: true, serial: foundSerial };
 }
 
+const managedEmulators = new Set<string>();
+let idleWatchdogTimer: NodeJS.Timeout | null = null;
+let activeJobCount = 0;
+
+export function isManagedEmulator(serial: string): boolean {
+  return managedEmulators.has(serial);
+}
+
+export function getManagedEmulators(): string[] {
+  return Array.from(managedEmulators);
+}
+
+export function markManagedEmulator(serial: string): void {
+  managedEmulators.add(serial);
+}
+
+export function notifyAndroidJobStarted(): void {
+  activeJobCount++;
+  if (idleWatchdogTimer) {
+    clearTimeout(idleWatchdogTimer);
+    idleWatchdogTimer = null;
+  }
+}
+
+export function notifyAndroidJobFinished(): void {
+  activeJobCount = Math.max(0, activeJobCount - 1);
+  if (activeJobCount === 0 && managedEmulators.size > 0) {
+    scheduleIdleShutdown(30000);
+  }
+}
+
+export function scheduleIdleShutdown(delayMs = 30000): void {
+  if (idleWatchdogTimer) {
+    clearTimeout(idleWatchdogTimer);
+  }
+  idleWatchdogTimer = setTimeout(async () => {
+    if (activeJobCount === 0 && managedEmulators.size > 0) {
+      console.log(`[EMULATOR-LIFECYCLE] ⏱️ Tidak ada job aktif dalam ${Math.round(delayMs / 1000)}s. Mematikan Headless Emulator otomatis...`);
+      await stopAllManagedEmulators();
+    }
+    idleWatchdogTimer = null;
+  }, delayMs);
+}
+
+export async function stopAllManagedEmulators(): Promise<void> {
+  if (idleWatchdogTimer) {
+    clearTimeout(idleWatchdogTimer);
+    idleWatchdogTimer = null;
+  }
+  const serials = Array.from(managedEmulators);
+  for (const serial of serials) {
+    try {
+      console.log(`[EMULATOR-LIFECYCLE] 🛑 Mematikan managed emulator ${serial}...`);
+      await stopEmulator(serial);
+      managedEmulators.delete(serial);
+    } catch (err) {
+      console.error(`[EMULATOR-LIFECYCLE] Gagal mematikan emulator ${serial}:`, err);
+    }
+  }
+}
+
+/**
+ * Memastikan ada perangkat Android siap pakai:
+ * 1. Jika ada physical phone (misal 192.168.10.37:5555) -> Pakai langsung tanpa menyalakan emulator.
+ * 2. Jika ada emulator yang sedang aktif -> Pakai langsung.
+ * 3. Jika TIDAK ada sama sekali -> Nyalakan headless emulator (qc_worker_headless) on-demand,
+ *    dan tandai sebagai managed (akan dimatikan otomatis saat job selesai/idle).
+ */
+export async function ensureDeviceReady(requestedDeviceId?: string): Promise<{
+  serial: string;
+  managed: boolean;
+  model?: string;
+  error?: string;
+}> {
+  const currentDevices = await listAdbDevices();
+
+  // 1. Cek spesifik device jika diminta dan valid
+  if (requestedDeviceId) {
+    const matched = currentDevices.find(
+      (d) => d.serial === requestedDeviceId || d.serial.includes(requestedDeviceId)
+    );
+    if (matched && matched.status === 'device') {
+      const ready = await isPackageManagerReady(matched.serial);
+      if (ready) {
+        return {
+          serial: matched.serial,
+          managed: managedEmulators.has(matched.serial),
+          model: matched.model
+        };
+      }
+    }
+  }
+
+  // 2. Prioritaskan physical phone yang sedang terhubung
+  const physical = currentDevices.find((d) => d.type === 'physical' && d.status === 'device');
+  if (physical) {
+    const ready = await isPackageManagerReady(physical.serial);
+    if (ready) {
+      return {
+        serial: physical.serial,
+        managed: false,
+        model: physical.model
+      };
+    }
+  }
+
+  // 3. Gunakan emulator yang sudah aktif jika ada
+  const runningEmulator = currentDevices.find((d) => d.type === 'emulator' && d.status === 'device');
+  if (runningEmulator) {
+    const ready = await isPackageManagerReady(runningEmulator.serial);
+    if (ready) {
+      return {
+        serial: runningEmulator.serial,
+        managed: managedEmulators.has(runningEmulator.serial),
+        model: runningEmulator.model
+      };
+    }
+  }
+
+  // 4. On-Demand: Tidak ada perangkat aktif -> nyalakan headless emulator
+  console.log('[EMULATOR-LIFECYCLE] 🚀 Tidak ada perangkat Android terhubung. Menyalakan Headless Android Emulator (qc_worker_headless)...');
+  const avds = await listAvds();
+  const targetAvd = avds.includes('qc_worker_headless') ? 'qc_worker_headless' : avds[0];
+  if (!targetAvd) {
+    return {
+      serial: '',
+      managed: false,
+      error: 'Tidak ada AVD yang terpasang di sistem. Pasang AVD qc_worker_headless terlebih dahulu.'
+    };
+  }
+
+  const emuResult = await startHeadlessAvd(targetAvd, {
+    noWindow: true,
+    noAudio: true,
+    noBootAnim: true,
+    gpu: 'swiftshader_indirect',
+    memoryMb: 2048,
+    cores: 2,
+    timeoutMs: 120000
+  });
+
+  if (!emuResult.success || !emuResult.serial) {
+    return {
+      serial: '',
+      managed: false,
+      error: emuResult.error || 'Gagal menyalakan headless emulator on-demand.'
+    };
+  }
+
+  return {
+    serial: emuResult.serial,
+    managed: true,
+    model: targetAvd
+  };
+}
+
 export async function stopEmulator(serial: string): Promise<boolean> {
   const child = activeEmulators.get(serial);
   activeEmulators.delete(serial);
+  managedEmulators.delete(serial);
 
   let killed = await killEmulator(serial);
 

@@ -34,13 +34,27 @@ export function getRootProjectName(job: Job, allJobs?: Job[]): string {
   const lowerPkg = (job.config?.apkPackageId || job.config?.appId || '').toLowerCase();
 
   if (
+    (lowerName.includes('al-hikmah') || lowerName.includes('al hikmah') || lowerName.includes('alhikmah')) &&
+    (lowerName.includes('finance') || lowerName.includes('keuangan') || lowerUrl.includes('8000'))
+  ) {
+    return 'Al-Hikmah Finance';
+  }
+
+  if (
+    (lowerName.includes('al-hikmah') || lowerName.includes('al hikmah') || lowerName.includes('alhikmah')) &&
+    (lowerName.includes('school') || lowerName.includes('akademik') || lowerUrl.includes('5173'))
+  ) {
+    return 'Al-Hikmah School Web';
+  }
+
+  if (
     lowerName.includes('al- hikmah') ||
     lowerName.includes('al-hikmah') ||
     lowerName.includes('al hikmah') ||
     lowerName.includes('alhikmah') ||
     lowerPkg.includes('alhikmah')
   ) {
-    return 'AL- Hikmah Digital';
+    return 'Al-Hikmah Digital (Mobile)';
   }
 
   if (lowerName.includes('taskia') || lowerUrl.includes('taskia')) {

@@ -23,6 +23,7 @@ declare module 'node:*' {
   export const unlink: any;
   export const existsSync: any;
   export const readdirSync: any;
+  export const readFileSync: any;
   export const unlinkSync: any;
   export const statSync: any;
   export const createHash: any;

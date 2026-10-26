@@ -164,7 +164,7 @@ function resourceFlows(inventory: Inventory): BusinessFlow[] {
 
 export function buildBusinessFlowMap(inventory: Inventory, config: DiscoveryConfig): BusinessFlowMap {
   const contracts = inventory.featureContractPlan?.contracts ?? [];
-  const loginRoute = config.rules.loginPath;
+  const loginRoute = config?.rules?.loginPath || '/login';
   let flows = contracts.map((contract) => flowFromContract(contract, loginRoute));
   flows = flows.concat(roleFlows(inventory), resourceFlows(inventory));
   if (flows.length === 0) {

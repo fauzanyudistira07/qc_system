@@ -17,6 +17,7 @@ export interface MediaUploadItem {
   type: 'photo' | 'video';
   fileName?: string;
   title?: string;
+  viewport?: string;
 }
 
 export interface CheckFolderResult {
@@ -120,21 +121,73 @@ function webdavRequest(
   });
 }
 
+export interface CheckFolderResult {
+  exists: boolean;
+  projectName: string;
+  targetFolder: string;
+  fullPath: string;
+  suggestedNewFolder: string;
+  webUrl: string;
+  existingFolders?: string[];
+}
+
 /**
  * Memeriksa apakah sebuah folder sudah ada di dalam base directory Nextcloud
  */
 export async function checkNextcloudFolder(projectName: string): Promise<CheckFolderResult> {
   const config = getNextcloudConfig();
-  const cleanProject = sanitizePathComponent(projectName);
+  const rawProject = sanitizePathComponent(projectName);
+  const cleanProject = rawProject.replace(/\s*\([^)]*(?:suite|test|run|retest|e2e|assisted)[^)]*\)/gi, '').trim() || rawProject;
   const targetSubpath = `${config.baseFolder}/${cleanProject}`;
   const url = buildWebDavUrl(config, targetSubpath, false);
 
   let exists = false;
+  let targetFolder = cleanProject;
+  const existingFolders: string[] = [];
+
   try {
     const res = await webdavRequest('PROPFIND', url, config, undefined, { 'Depth': '0' });
-    exists = res.status === 200 || res.status === 207;
+    if (res.status === 200 || res.status === 207) {
+      exists = true;
+      existingFolders.push(cleanProject);
+    }
   } catch (err) {
     exists = false;
+  }
+
+  // Jika folder persis belum ditemukan, cari folder yang cocok di direktori utama Nextcloud
+  try {
+    const parentUrl = buildWebDavUrl(config, config.baseFolder, false);
+    const parentRes = await webdavRequest('PROPFIND', parentUrl, config, undefined, { 'Depth': '1' });
+    if (parentRes.status === 200 || parentRes.status === 207) {
+      const hrefMatches = parentRes.body.match(/<[^:>]*:href[^>]*>([^<]+)<\/[^:>]*:href>/gi) || [];
+      const normProj = cleanProject.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const matchedNames: string[] = [];
+      const baseDirName = config.baseFolder.toLowerCase().split('/').pop() || '';
+
+      for (const rawHref of hrefMatches) {
+        const cleanHref = rawHref.replace(/<[^>]+>/g, '').trim();
+        const decoded = decodeURIComponent(cleanHref).replace(/\/+$/, '');
+        const folderName = decoded.split('/').pop() || '';
+        if (!folderName || folderName.toLowerCase() === baseDirName) continue;
+
+        const normFolder = folderName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (normFolder.includes(normProj) || normProj.includes(normFolder)) {
+          matchedNames.push(folderName);
+        }
+      }
+
+      if (matchedNames.length > 0) {
+        matchedNames.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+        for (const m of matchedNames) {
+          if (!existingFolders.includes(m)) existingFolders.push(m);
+        }
+        exists = true;
+        targetFolder = existingFolders[0];
+      }
+    }
+  } catch (err) {
+    console.warn('[Nextcloud] Gagal memeriksa subfolder matching di direktori induk:', err);
   }
 
   const now = new Date();
@@ -142,13 +195,16 @@ export async function checkNextcloudFolder(projectName: string): Promise<CheckFo
   const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
   const suggestedNewFolder = `${cleanProject} (${dateStr} ${timeStr})`;
 
+  const resolvedSubpath = `${config.baseFolder}/${targetFolder}`;
+
   return {
     exists,
     projectName: cleanProject,
-    targetFolder: cleanProject,
-    fullPath: targetSubpath,
+    targetFolder,
+    fullPath: resolvedSubpath,
     suggestedNewFolder,
-    webUrl: getNextcloudWebUrl(config, targetSubpath)
+    existingFolders,
+    webUrl: getNextcloudWebUrl(config, resolvedSubpath)
   };
 }
 
@@ -273,9 +329,59 @@ export async function uploadFileToNextcloud(
   }
 }
 
+function detectItemViewport(item: MediaUploadItem): string {
+  if (item.viewport) return item.viewport.toLowerCase();
+  const text = `${item.fileName || ''} ${item.url || ''} ${item.title || ''}`.toLowerCase();
+  if (text.includes('_mobile') || text.includes('-mobile') || text.includes(' mobile') || text.includes('[mobile]')) {
+    return 'mobile';
+  }
+  if (text.includes('_tablet') || text.includes('-tablet') || text.includes(' tablet') || text.includes('[tablet]')) {
+    return 'tablet';
+  }
+  if (text.includes('_desktop') || text.includes('-desktop') || text.includes(' desktop') || text.includes('[desktop]')) {
+    return 'desktop';
+  }
+  return 'desktop';
+}
+
+function getFeatureViewportStats(items: MediaUploadItem[]): Map<string, { photos: Set<string>; videos: Set<string> }> {
+  const map = new Map<string, { photos: Set<string>; videos: Set<string> }>();
+  for (const item of items) {
+    const feat = sanitizePathComponent(item.featureName || 'General');
+    if (!map.has(feat)) {
+      map.set(feat, { photos: new Set(), videos: new Set() });
+    }
+    const stat = map.get(feat)!;
+    const vp = detectItemViewport(item);
+    if (item.type === 'video') {
+      stat.videos.add(vp);
+    } else {
+      stat.photos.add(vp);
+    }
+  }
+  return map;
+}
+
+function resolveTypeDirSegments(item: MediaUploadItem, stats: Map<string, { photos: Set<string>; videos: Set<string> }>): string[] {
+  const feat = sanitizePathComponent(item.featureName || 'General');
+  const stat = stats.get(feat);
+  const vp = detectItemViewport(item);
+  if (item.type === 'video') {
+    if (stat && stat.videos.size > 1) {
+      return ['video', vp];
+    }
+    return ['video'];
+  } else {
+    if (stat && stat.photos.size > 1) {
+      return ['foto', vp];
+    }
+    return ['foto'];
+  }
+}
+
 /**
  * Mengunggah sekumpulan media (foto dan video) dengan struktur folder:
- * [Base Folder] / [Project Folder] / [Feature Subfolder] / [foto|video] / [filename]
+ * [Base Folder] / [Project Folder] / [Feature Subfolder] / [foto|video] / [viewport (jika ada variasi)] / [filename]
  */
 export async function uploadMediaBatch(
   folderName: string,
@@ -297,12 +403,14 @@ export async function uploadMediaBatch(
   const ensuredDirs = new Set<string>();
   ensuredDirs.add(projectBasePath);
 
+  const featureStats = getFeatureViewportStats(items);
+
   for (const item of items) {
     const featureClean = sanitizePathComponent(item.featureName || 'General');
-    const typeFolder = item.type === 'video' ? 'video' : 'foto';
-    const targetDir = `${projectBasePath}/${featureClean}/${typeFolder}`;
+    const typeSegments = resolveTypeDirSegments(item, featureStats);
+    const targetDir = [projectBasePath, featureClean, ...typeSegments].join('/');
 
-    // Pastikan subfolder fitur + type sudah dibuat
+    // Pastikan subfolder fitur + type (dan ukuran layar jika ada) sudah dibuat
     if (!ensuredDirs.has(targetDir)) {
       await ensureNextcloudDirectory(config, targetDir);
       ensuredDirs.add(targetDir);
@@ -368,7 +476,7 @@ export async function uploadMediaBatch(
 
 /**
  * Membuat file arsip .ZIP terkompresi dari seluruh media
- * dengan struktur folder: [ProjectName] / [Fitur] / [foto|video] / [Filename]
+ * dengan struktur folder: [ProjectName] / [Fitur] / [foto|video] / [viewport (jika ada variasi)] / [Filename]
  */
 export async function createMediaZipArchive(
   projectName: string,
@@ -384,11 +492,12 @@ export async function createMediaZipArchive(
   await fs.promises.mkdir(projectDir, { recursive: true });
 
   const usedPaths = new Set<string>();
+  const featureStats = getFeatureViewportStats(items);
 
   for (const item of items) {
     const featureClean = sanitizePathComponent(item.featureName || 'General');
-    const typeFolder = item.type === 'video' ? 'video' : 'foto';
-    const targetDir = path.join(projectDir, featureClean, typeFolder);
+    const typeSegments = resolveTypeDirSegments(item, featureStats);
+    const targetDir = path.join(projectDir, featureClean, ...typeSegments);
     await fs.promises.mkdir(targetDir, { recursive: true });
 
     let baseName = sanitizePathComponent(item.title || item.fileName || path.basename(item.url.replace(/\?.*$/, '')));

@@ -141,6 +141,7 @@ export interface NextcloudFolderCheck {
   fullPath: string;
   suggestedNewFolder: string;
   webUrl: string;
+  existingFolders?: string[];
 }
 
 export interface NextcloudUploadPayload {
@@ -192,6 +193,7 @@ export async function downloadMediaZip(payload: {
     type: 'photo' | 'video';
     title?: string;
     fileName?: string;
+    viewport?: string;
   }>;
   jobId?: string;
 }): Promise<void> {
