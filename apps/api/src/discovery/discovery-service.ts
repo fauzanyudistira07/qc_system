@@ -355,7 +355,7 @@ export class DiscoveryService {
     await mkdir(path.join(runRoot, 'findings'), { recursive: true });
     await mkdir(path.join(runRoot, 'final-report'), { recursive: true });
     for (const name of milestoneNames) await mkdir(path.join(runRoot, 'milestones', name), { recursive: true });
-    const safeConfig = { ...config, accounts: config.accounts.map(({ password: _password, ...account }) => account) };
+    const safeConfig = { ...config, accounts: (config.accounts ?? []).map(({ password: _password, ...account }) => account) };
     await writeFile(path.join(projectRoot, 'project.json'), JSON.stringify({ name: config.name, slug: job.workspace.projectSlug, updatedAt: new Date().toISOString(), latestRun: job.workspace.runLabel }, null, 2), 'utf8');
     await writeFile(path.join(projectRoot, 'input', 'config.json'), JSON.stringify(safeConfig, null, 2), 'utf8');
     await writeFile(path.join(runRoot, 'run.json'), JSON.stringify({ jobId: job.id, project: config.name, workspace: job.workspace, createdAt: job.createdAt, status: job.status }, null, 2), 'utf8');
@@ -903,12 +903,12 @@ export class DiscoveryService {
       this.abortControllers.delete(id);
     }
 
-    const safeAccounts = newConfig.accounts.map(a => ({
+    const safeAccounts = (newConfig.accounts ?? []).map(a => ({
       name: a.name,
       email: a.email,
       role: a.role
     }));
-    const auditPassword = newConfig.accounts.find((account) => account.password?.trim())?.password;
+    const auditPassword = (newConfig.accounts ?? []).find((account) => account.password?.trim())?.password;
     if (auditPassword) this.runtimeAuditPasswords.set(id, auditPassword);
 
     const defaultRules = {

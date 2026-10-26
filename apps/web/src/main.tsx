@@ -1960,7 +1960,7 @@ export function App() {
 
         <button
           className="new-job-btn"
-          onClick={() => { setCurrentView('new'); }}
+          onClick={() => { setEditingJob(null); setCurrentView('new'); }}
           title="Mulai Skenario Quality Control Baru (+ New QC Run)"
         >
           <Icon name="plus" size={16} />
@@ -1983,6 +1983,7 @@ export function App() {
               setSelectedMilestone(null);
             }}
             onNewJob={() => {
+              setEditingJob(null);
               setCurrentView('new');
             }}
           />
@@ -2166,7 +2167,7 @@ export function App() {
                     </div>
                   </div>
                   <div className="landing-cta-row">
-                    <button type="button" className="tool-btn primary-btn" onClick={() => setCurrentView('new')}>
+                    <button type="button" className="tool-btn primary-btn" onClick={() => { setEditingJob(null); setCurrentView('new'); }}>
                       <Icon name="plus" size={14} />
                       <span>Mulai QC Run Pertama (+ New QC Run)</span>
                     </button>
@@ -2933,7 +2934,7 @@ export function App() {
                   <h1>Projects &amp; Target Environments</h1>
                   <p>Seluruh riwayat discovery target yang tercatat pada workspace.</p>
                 </div>
-                <button className="primary" onClick={() => setCurrentView('new')}>
+                <button className="primary" onClick={() => { setEditingJob(null); setCurrentView('new'); }}>
                   <Icon name="plus" size={16} /> New Discovery Project
                 </button>
               </div>

@@ -97,6 +97,8 @@ export function Wizard({
     }
     return null;
   });
+  const [localApkPath, setLocalApkPath] = useState('');
+  const [importingApk, setImportingApk] = useState(false);
   const [installingApk, setInstallingApk] = useState(false);
   const [installStatus, setInstallStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [seeding, setSeeding] = useState(false);
@@ -294,12 +296,12 @@ export function Wizard({
               return `Pada mode server runner, port frontend harus berada dalam rentang 5000 - 6000 (port saat ini: ${p}). Ubah port ke 5000 - 6000 (contoh: 5000 atau 5173).`;
             }
           } catch {}
+          if (!fe?.repositoryUrl?.trim()) return 'Masukkan link repository GitHub frontend untuk mode Jalankan di Server.';
+          if (!fe?.branch?.trim()) return 'Tentukan branch GitHub frontend yang digunakan (misal: main).';
         }
-        if (!fe?.repositoryUrl?.trim()) return 'Masukkan link repository GitHub frontend untuk validasi kode sumber.';
-        if (!fe?.branch?.trim()) return 'Tentukan branch GitHub frontend yang digunakan (misal: main).';
       }
       if (config.platform === 'android' && !config.appId?.trim() && !config.apkUploadId) {
-        return 'Unggah file .APK atau masukkan Android Application ID.';
+        return 'Unggah file .APK, muat path APK lokal, atau masukkan Android Application ID.';
       }
       const be = config.backendTarget;
       if (be) {
@@ -311,11 +313,11 @@ export function Wizard({
               return `Pada mode server runner, port backend harus berada dalam rentang 5000 - 6000 (port saat ini: ${p}). Ubah port ke 5000 - 6000 (contoh: 5000 atau 5001).`;
             }
           } catch {}
+          const beRepo = be.sameRepoAsFrontend ? (config.frontendTarget?.repositoryUrl || be.repositoryUrl) : be.repositoryUrl;
+          const beBranch = be.sameRepoAsFrontend ? (config.frontendTarget?.branch || be.branch) : be.branch;
+          if (!beRepo?.trim()) return 'Masukkan link repository GitHub backend untuk mode Jalankan di Server.';
+          if (!beBranch?.trim()) return 'Tentukan branch GitHub backend yang digunakan (misal: main).';
         }
-        const beRepo = be.sameRepoAsFrontend ? (config.frontendTarget?.repositoryUrl || be.repositoryUrl) : be.repositoryUrl;
-        const beBranch = be.sameRepoAsFrontend ? (config.frontendTarget?.branch || be.branch) : be.branch;
-        if (!beRepo?.trim()) return 'Masukkan link repository GitHub backend untuk validasi kode sumber.';
-        if (!beBranch?.trim()) return 'Tentukan branch GitHub backend yang digunakan (misal: main).';
       }
     }
     if (index === 1) {
@@ -336,10 +338,6 @@ export function Wizard({
       }
       if (config.database.engine !== 'none' && config.database.source === 'seed' && !config.database.seedCommand?.trim() && !seedResult?.success) {
         return 'Isi seed command atau klik 1-Click Auto-Seed.';
-      }
-      if (config.platform === 'web' && config.qualityAudit?.enabled !== false) {
-        if (!config.qualityAudit?.browsers?.length) return 'Pilih minimal satu browser untuk Quality Audit.';
-        if (!config.qualityAudit?.viewports?.length) return 'Pilih minimal satu viewport untuk Quality Audit.';
       }
     }
     return '';
@@ -458,6 +456,28 @@ export function Wizard({
       setError(errorText(e));
     } finally {
       setUploading('');
+    }
+  }
+
+  async function importLocalApk() {
+    if (!localApkPath.trim()) return;
+    setImportingApk(true);
+    setError('');
+    try {
+      const res = await send<{ id: string; filename: string; size: number; packageId?: string; appName?: string; versionName?: string }>('/api/v1/uploads/apk-local', { localPath: localApkPath.trim() });
+      setApkInfo(res);
+      patch({
+        platform: 'android',
+        apkUploadId: res.id,
+        apkFilename: res.filename,
+        apkPackageId: res.packageId,
+        appId: res.packageId || config.appId || '',
+        name: config.name || res.appName || res.filename.replace(/\.apk$/i, ''),
+      });
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setImportingApk(false);
     }
   }
 
@@ -852,6 +872,25 @@ export function Wizard({
                           placeholder="com.example.tasdig"
                           onChange={e => patch({ appId: e.target.value })}
                         />
+                      </Field>
+                      <Field label="Path APK Lokal (Instant Disk)" hint="Muat file .apk langsung dari folder disk komputer Anda tanpa proses unggah web.">
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input
+                            value={localApkPath}
+                            placeholder="/home/qa/builds/app-debug.apk"
+                            onChange={e => setLocalApkPath(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void importLocalApk(); } }}
+                          />
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={!localApkPath.trim() || importingApk}
+                            onClick={() => void importLocalApk()}
+                            style={{ whiteSpace: 'nowrap', padding: '0 12px' }}
+                          >
+                            {importingApk ? 'Memuat…' : 'Muat Path'}
+                          </button>
+                        </div>
                       </Field>
                     </div>
 
