@@ -4610,15 +4610,17 @@ fieldset {
 }
 
 .nav-item.active {
-  background: rgba(34, 197, 94, 0.1) !important;
-  color: #FFFFFF !important;
-  border-left: 2px solid #22C55E !important;
-  font-weight: 650 !important;
+  background: var(--bg-surface, #171A1F) !important;
+  color: #ECEEF2 !important;
+  border-left: none !important;
+  border-color: transparent !important;
+  box-shadow: inset 0px 0px 0px 1px var(--border-default, #23272E) !important;
+  font-weight: 600 !important;
 }
 
 .nav-item.active .nav-icon,
 .nav-item.active svg {
-  color: #22C55E !important;
+  color: var(--accent-neon, #B5F934) !important;
 }
 
 /* Surfaces & Panels */
