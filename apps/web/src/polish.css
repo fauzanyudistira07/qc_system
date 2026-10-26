@@ -928,14 +928,14 @@
 }
 
 .project-nav-item.selected {
-  background: var(--bg-surface-elevated);
+  background: rgba(255, 255, 255, 0.08);
   color: #FFFFFF;
-  border-color: var(--border-default);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  border-left: 3px solid var(--proj-rainbow-border, #2B85E4);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
-.project-nav-item.is-live {
-  border-left: 3.5px solid #22C55E;
+.project-nav-item.is-live .nav-live-dot {
+  color: #22C55E;
 }
 
 .project-nav-icon {
@@ -1166,17 +1166,18 @@
 /* Category Filter Toolbar */
 .category-filter-toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0px;
   flex-shrink: 0;
+  margin-bottom: 6px;
 }
 
 .category-tabs-group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 12px;
 }
 
 .category-tab-btn {
@@ -1184,35 +1185,38 @@
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 5px;
+  gap: 6px;
+  padding: 4px 4px 8px;
+  font-family: var(--font-sans);
   font-size: 11.5px;
   font-weight: 700;
-  color: var(--text-muted);
+  color: #94A3B8;
   background: transparent;
-  border: 1px solid transparent;
-  transition: all 100ms ease;
+  border-bottom: 2px solid transparent;
+  transition: all 120ms ease;
+  position: relative;
+  margin-bottom: -1px;
 }
 
 .category-tab-btn:hover {
-  background: var(--bg-surface-hover);
-  color: var(--text-main);
+  color: #FFFFFF;
 }
 
 .category-tab-btn.active {
-  background: var(--bg-surface-elevated);
   color: #FFFFFF;
-  border: 1px solid var(--border-default);
+  border-bottom: 2px solid #FFFFFF;
   font-weight: 800;
+  background: transparent;
 }
 
 .tab-count-badge {
+  font-family: var(--font-mono, monospace);
   font-size: 9.5px;
   font-weight: 800;
-  padding: 0.5px 5px;
+  padding: 1px 6px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.08);
+  color: #94A3B8;
 }
 
 .category-tab-btn.active .tab-count-badge {
@@ -1222,7 +1226,8 @@
 
 .showing-results-text {
   font-size: 11px;
-  color: var(--text-dim);
+  color: #64748B;
+  padding-bottom: 8px;
 }
 
 /* Runs Cards Grid */
@@ -1264,7 +1269,7 @@
 
 /* Run Card Item */
 .run-card {
-  background: var(--bg-surface-elevated);
+  background: #1C2027;
   border: 1px solid var(--border-default);
   border-radius: 7px;
   padding: 12px;
@@ -1278,7 +1283,7 @@
 
 .run-card:hover {
   border-color: var(--border-hover);
-  background: #19253B;
+  background: #20252D;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
@@ -1290,24 +1295,28 @@
 
 .run-card.is-update-room {
   border: 1px solid #D97706;
-  background: #14171D;
+  border-left: 3.5px solid #F59E0B;
+  background: #1C2027;
 }
 
 .run-card.is-update-room:hover {
   border-color: #F59E0B;
-  background: #181C23;
+  border-left-color: #F59E0B;
+  background: #20252D;
 }
 
 .run-card.is-baseline {
   border: 1px solid var(--card-rainbow-border, #0284C7);
-  background: #14171D;
+  border-left: 3.5px solid var(--card-rainbow-border, #0284C7);
+  background: #1C2027;
   transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .run-card.is-baseline:hover {
   border-color: var(--card-rainbow-hover, #38BDF8);
+  border-left-color: var(--card-rainbow-hover, #38BDF8);
   box-shadow: 0 4px 16px var(--card-rainbow-glow, rgba(2, 132, 199, 0.2));
-  background: #181C23;
+  background: #20252D;
 }
 
 .run-card.is-update-room .run-card-open-btn {
@@ -1444,8 +1453,8 @@
 }
 
 .run-card-meta-box {
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 5px;
   padding: 6px 8px;
   display: flex;
@@ -1458,30 +1467,32 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-muted);
+  color: #94A3B8;
 }
 
 .meta-key {
   font-size: 10px;
-  color: var(--text-dim);
+  color: #64748B;
+  font-weight: 600;
 }
 
 .meta-val {
-  color: var(--text-main);
-  font-weight: 650;
+  color: #FFFFFF;
+  font-weight: 700;
 }
 
 .meta-file-tag {
   font-family: var(--font-mono, monospace);
-  font-size: 10px;
-  background: var(--bg-surface-elevated);
-  padding: 1px 5px;
-  border-radius: 3px;
-  color: #38BDF8;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: transparent;
+  padding: 0;
+  border: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 220px;
+  max-width: 240px;
 }
 
 .run-card-bottom-bar {

@@ -360,6 +360,8 @@ export function ProjectSwitcher({
       detail = `${p}/${job.qualityAudit.total} audit`;
     } else if (job.flows?.length) {
       detail = `${job.flows.length} flow`;
+    } else {
+      detail = '0/0 flow';
     }
 
     const dateStr = job.createdAt
@@ -546,6 +548,9 @@ export function ProjectSwitcher({
                         className={`project-nav-item ${isSelected ? 'selected' : ''} ${
                           isCurrentLive ? 'is-live' : ''
                         }`}
+                        style={{
+                          '--proj-rainbow-border': projTheme.border,
+                        } as React.CSSProperties}
                         onClick={() => {
                           setSelectedProjectName(proj.name);
                           setActiveCategoryTab('all');
@@ -816,7 +821,7 @@ export function ProjectSwitcher({
                                 <div className="run-card-bottom-bar">
                                   <div className="metric-info-group">
                                     <strong className="metric-count">{summary.detail}</strong>
-                                    <span className="metric-date"> {summary.dateStr}</span>
+                                    {summary.dateStr && <span className="metric-date"> · {summary.dateStr}</span>}
                                   </div>
                                   <button
                                     type="button"
