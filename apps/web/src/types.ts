@@ -66,7 +66,7 @@ export type Config = {
   apkUploadId?: string; apkFilename?: string; apkPackageId?: string;
 };
 export type Element = { type: string; name: string; selector?: string; testId?: string; tag?: string; source?: string; confidence?: number };
-export type Page = { id: string; path: string; title: string; url?: string; status?: number; state: 'observed' | 'candidate' | 'blocked' | 'error'; elements: Element[]; screenshot?: string; source?: string; authentication?: string; errors?: string[]; links?: string[] };
+export type Page = { id: string; path: string; title: string; url?: string; status?: number; state: 'observed' | 'candidate' | 'blocked' | 'error'; elements: Element[]; screenshot?: string; source?: string; authentication?: string; errors?: string[]; links?: string[]; apiEndpoints?: string[] };
 export type CapabilityEvidence = { routes: string[]; apiRoutes: string[]; elements: string[]; methods: string[] };
 export type DetectedCapability = { id: string; category: string; label: string; confidence: number; status: 'detected' | 'candidate'; rationale: string; evidence: CapabilityEvidence; recommendedChecks: string[] };
 export type NegativeScenarioPlan = { id: string; capability: string; label: string; execution: 'safe-probe' | 'requires-fixture'; checks: string[] };

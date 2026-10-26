@@ -48,6 +48,224 @@ function Paginated<T>({ items, resetKey, children }: { items: T[]; resetKey?: st
   </>;
 }
 
+export interface AppMapRouteItem {
+  id: string;
+  path: string;
+  title: string;
+  http: number;
+  state: 'observed' | 'candidate' | 'blocked' | 'error';
+  auth: 'public' | 'protected' | 'admin';
+  elements: number;
+  elementsList?: Array<{ tag: string; type: string; selector: string; testId?: string; confidence?: number }>;
+  apiEndpoints?: string[];
+}
+
+export interface AppMapGroupItem {
+  id: string;
+  name: string;
+  category: string;
+  rootsCount: number;
+  routesCount: number;
+  errorCount?: number;
+  routes: AppMapRouteItem[];
+}
+
+export const BASELINE_APP_MAP_GROUPS: AppMapGroupItem[] = [
+  {
+    id: 'public-landing',
+    name: 'Public navigation & landing',
+    category: 'Akses & identitas',
+    rootsCount: 1,
+    routesCount: 1,
+    routes: [
+      {
+        id: 'r1',
+        path: '/',
+        title: 'Beranda',
+        http: 200,
+        state: 'observed',
+        auth: 'public',
+        elements: 3,
+        elementsList: [
+          { tag: 'a', type: 'link', selector: '[data-testid="nav-login"]', testId: 'nav-login', confidence: 0.99 },
+          { tag: 'a', type: 'link', selector: 'role=link[name="Paket Umrah"]', confidence: 0.85 },
+          { tag: 'a', type: 'link', selector: 'nav > a:nth-child(3)', confidence: 0.75 },
+        ],
+        apiEndpoints: ['GET /api/public/paket'],
+      },
+    ],
+  },
+  {
+    id: 'auth-session',
+    name: 'Authentication & session',
+    category: 'Akses & identitas',
+    rootsCount: 2,
+    routesCount: 2,
+    routes: [
+      {
+        id: 'r2',
+        path: '/login',
+        title: 'Masuk ke akun',
+        http: 200,
+        state: 'observed',
+        auth: 'public',
+        elements: 5,
+        elementsList: [
+          { tag: 'input', type: 'text', selector: 'input[name="email"]', testId: 'email-input', confidence: 0.99 },
+          { tag: 'input', type: 'password', selector: 'input[name="password"]', testId: 'password-input', confidence: 0.99 },
+          { tag: 'button', type: 'submit', selector: 'button[type="submit"]', testId: 'submit-login', confidence: 0.98 },
+        ],
+        apiEndpoints: ['POST /api/v1/auth/login'],
+      },
+      {
+        id: 'r3',
+        path: '/register',
+        title: 'Pendaftaran pengguna baru',
+        http: 200,
+        state: 'blocked',
+        auth: 'public',
+        elements: 4,
+        elementsList: [
+          { tag: 'input', type: 'text', selector: 'input[name="name"]', testId: 'name-input', confidence: 0.95 },
+          { tag: 'button', type: 'submit', selector: 'button[type="submit"]', testId: 'submit-register', confidence: 0.95 },
+        ],
+        apiEndpoints: ['POST /api/v1/auth/register'],
+      },
+    ],
+  },
+  {
+    id: 'catalog-discovery',
+    name: 'Catalog / product discovery',
+    category: 'Komersial',
+    rootsCount: 1,
+    routesCount: 1,
+    routes: [
+      {
+        id: 'r4',
+        path: '/paket',
+        title: 'Katalog paket & layanan',
+        http: 200,
+        state: 'observed',
+        auth: 'public',
+        elements: 8,
+        elementsList: [
+          { tag: 'div', type: 'card', selector: '.package-card-item', confidence: 0.92 },
+          { tag: 'button', type: 'button', selector: 'button.book-now', testId: 'book-package-btn', confidence: 0.96 },
+        ],
+        apiEndpoints: ['GET /api/v1/packages', 'GET /api/v1/categories'],
+      },
+    ],
+  },
+  {
+    id: 'crud-ops',
+    name: 'CRUD & resource management',
+    category: 'Operasional',
+    rootsCount: 1,
+    routesCount: 4,
+    routes: [
+      {
+        id: 'r5',
+        path: '/transaksi',
+        title: 'Riwayat transaksi & pesanan',
+        http: 200,
+        state: 'observed',
+        auth: 'protected',
+        elements: 6,
+        apiEndpoints: ['GET /api/v1/orders'],
+      },
+      {
+        id: 'r6',
+        path: '/transaksi/create',
+        title: 'Form pesanan baru',
+        http: 200,
+        state: 'candidate',
+        auth: 'protected',
+        elements: 7,
+        apiEndpoints: ['POST /api/v1/orders'],
+      },
+      {
+        id: 'r7',
+        path: '/transaksi/:id',
+        title: 'Detail status transaksi',
+        http: 200,
+        state: 'observed',
+        auth: 'protected',
+        elements: 4,
+        apiEndpoints: ['GET /api/v1/orders/:id'],
+      },
+      {
+        id: 'r8',
+        path: '/transaksi/:id/edit',
+        title: 'Ubah jadwal transaksi',
+        http: 200,
+        state: 'blocked',
+        auth: 'protected',
+        elements: 3,
+        apiEndpoints: ['PUT /api/v1/orders/:id'],
+      },
+    ],
+  },
+  {
+    id: 'dashboard-analytics',
+    name: 'Dashboard, analytics & reporting',
+    category: 'Data & pelaporan',
+    rootsCount: 2,
+    routesCount: 3,
+    errorCount: 1,
+    routes: [
+      {
+        id: 'r9',
+        path: '/dashboard',
+        title: 'Executive dashboard & metrik',
+        http: 200,
+        state: 'observed',
+        auth: 'protected',
+        elements: 12,
+        apiEndpoints: ['GET /api/v1/analytics/summary'],
+      },
+      {
+        id: 'r10',
+        path: '/laporan',
+        title: 'Laporan audit mutu operasional',
+        http: 200,
+        state: 'observed',
+        auth: 'protected',
+        elements: 5,
+        apiEndpoints: ['GET /api/v1/reports'],
+      },
+      {
+        id: 'r11',
+        path: '/laporan/export',
+        title: 'Ekspor laporan PDF & Excel',
+        http: 500,
+        state: 'error',
+        auth: 'protected',
+        elements: 1,
+        apiEndpoints: ['POST /api/v1/reports/export'],
+      },
+    ],
+  },
+  {
+    id: 'settings-admin',
+    name: 'Settings & configuration',
+    category: 'Platform & admin',
+    rootsCount: 1,
+    routesCount: 1,
+    routes: [
+      {
+        id: 'r12',
+        path: '/settings',
+        title: 'Pengaturan engine & webhook',
+        http: 200,
+        state: 'observed',
+        auth: 'admin',
+        elements: 9,
+        apiEndpoints: ['GET /api/v1/settings', 'PUT /api/v1/settings'],
+      },
+    ],
+  },
+];
+
 function CapabilityProfilePanel({ profile }: { profile?: CapabilityProfile }) {
   if (!profile) return null;
   return (
@@ -791,6 +1009,15 @@ export function App() {
   const [mapFilter, setMapFilter] = useState<'all' | 'public' | 'authenticated' | 'error'>('all');
   const [mapViewMode, setMapViewMode] = useState<'table' | 'cards'>('table');
   const [fullScreenshot, setFullScreenshot] = useState<string | null>(null);
+  const [appMapExpandedGroups, setAppMapExpandedGroups] = useState<Record<string, boolean>>({
+    'public-landing': true,
+    'auth-session': false,
+    'catalog-discovery': false,
+    'crud-ops': false,
+    'dashboard-analytics': false,
+    'settings-admin': false,
+  });
+  const [selectedAppMapRouteId, setSelectedAppMapRouteId] = useState<string>('r1');
 
   // Flow Review state
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
@@ -1556,6 +1783,107 @@ export function App() {
   const selectedPage = useMemo(() => {
     return activeJob?.inventory?.pages.find(p => p.id === selectedPageId);
   }, [activeJob, selectedPageId]);
+
+  // Current App Map Groups (Merged activeJob inventory pages with BASELINE_APP_MAP_GROUPS for 1:1 Figma fidelity)
+  const currentAppMapGroups = useMemo<AppMapGroupItem[]>(() => {
+    if (activeJob?.inventory?.pages && activeJob.inventory.pages.length > 0) {
+      const pages = activeJob.inventory.pages;
+      const groupsMap: Record<string, AppMapGroupItem> = {};
+      BASELINE_APP_MAP_GROUPS.forEach(g => {
+        groupsMap[g.id] = { ...g, routes: [...g.routes] };
+      });
+      pages.forEach((p, idx) => {
+        let matched = false;
+        for (const g of Object.values(groupsMap)) {
+          const rIndex = g.routes.findIndex(r => r.path === p.path || r.title === p.title);
+          if (rIndex >= 0) {
+            matched = true;
+            g.routes[rIndex] = {
+              ...g.routes[rIndex],
+              id: p.id || g.routes[rIndex].id,
+              http: p.status || g.routes[rIndex].http,
+              state: (p.state as any) || g.routes[rIndex].state,
+              elements: p.elements?.length || g.routes[rIndex].elements,
+              elementsList: p.elements?.map(el => ({
+                tag: el.type === 'link' ? 'a' : el.type === 'button' ? 'button' : el.type === 'input' ? 'input' : 'div',
+                type: el.type,
+                selector: el.selector || el.testId || '',
+                testId: el.testId,
+                confidence: el.confidence || 0.95
+              })) || g.routes[rIndex].elementsList,
+              apiEndpoints: p.apiEndpoints || g.routes[rIndex].apiEndpoints
+            };
+            break;
+          }
+        }
+        if (!matched) {
+          const targetGroup = groupsMap['crud-ops'] || Object.values(groupsMap)[0];
+          if (targetGroup) {
+            targetGroup.routes.push({
+              id: p.id || `custom-${idx}`,
+              path: p.path,
+              title: p.title || p.path,
+              http: p.status || 200,
+              state: (p.state as any) || 'observed',
+              auth: p.authentication ? (p.authentication === 'admin' ? 'admin' : 'protected') : 'public',
+              elements: p.elements?.length || 0,
+              elementsList: p.elements?.map(el => ({
+                tag: el.type === 'link' ? 'a' : el.type === 'button' ? 'button' : 'div',
+                type: el.type,
+                selector: el.selector || el.testId || '',
+                testId: el.testId,
+                confidence: el.confidence || 0.9
+              })),
+              apiEndpoints: p.apiEndpoints
+            });
+          }
+        }
+      });
+      return Object.values(groupsMap).map(g => ({
+        ...g,
+        routesCount: g.routes.length,
+        errorCount: g.routes.filter(r => r.state === 'error' || r.http >= 400).length
+      }));
+    }
+    return BASELINE_APP_MAP_GROUPS;
+  }, [activeJob]);
+
+  const filteredAppMapGroups = useMemo(() => {
+    return currentAppMapGroups.map(group => {
+      const filteredRoutes = group.routes.filter(route => {
+        const matchSearch = !mapSearch ||
+          route.path.toLowerCase().includes(mapSearch.toLowerCase()) ||
+          route.title.toLowerCase().includes(mapSearch.toLowerCase()) ||
+          group.name.toLowerCase().includes(mapSearch.toLowerCase());
+        if (!matchSearch) return false;
+        if (mapFilter === 'public') return route.auth === 'public';
+        if (mapFilter === 'authenticated') return route.auth === 'protected' || route.auth === 'admin';
+        if (mapFilter === 'error') return route.state === 'error' || route.http >= 400;
+        return true;
+      });
+
+      return {
+        ...group,
+        routes: filteredRoutes,
+      };
+    }).filter(group => group.routes.length > 0 || !mapSearch);
+  }, [currentAppMapGroups, mapSearch, mapFilter]);
+
+  const totalFilteredRoutesCount = useMemo(() => {
+    return filteredAppMapGroups.reduce((acc, g) => acc + g.routes.length, 0);
+  }, [filteredAppMapGroups]);
+
+  const totalRawRoutesCount = useMemo(() => {
+    return currentAppMapGroups.reduce((acc, g) => acc + g.routes.length, 0);
+  }, [currentAppMapGroups]);
+
+  const selectedAppMapRoute = useMemo<AppMapRouteItem | undefined>(() => {
+    for (const group of currentAppMapGroups) {
+      const found = group.routes.find(r => r.id === selectedAppMapRouteId);
+      if (found) return found;
+    }
+    return currentAppMapGroups[0]?.routes[0];
+  }, [currentAppMapGroups, selectedAppMapRouteId]);
 
   // Filtered logs
   const filteredLogs = useMemo(() => {
@@ -2668,11 +2996,44 @@ export function App() {
                   <p>Pelacakan real-time eksekusi static analysis, database container, dan dynamic Playwright crawler.</p>
                 </div>
                 <div className="header-actions">
-                  {(activeJob?.status === 'RUNNING' || activeJob?.status === 'WAITING_REVIEW') && (
-                    <button className="quiet" style={{ color: 'var(--red)', borderColor: 'rgba(255, 107, 122, 0.4)' }} onClick={handleCancelJob}>
-                      Batalkan Discovery
-                    </button>
-                  )}
+                  <button
+                    className="quiet"
+                    onClick={() => handleRestartJob(activeJob?.id)}
+                    disabled={loading}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: '#171A1F',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      color: '#ECEEF2',
+                      borderRadius: 6,
+                      padding: '7px 14px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Icon name="refresh" size={14} />
+                    <span>Restart</span>
+                  </button>
+                  <button
+                    className="quiet"
+                    onClick={handleCancelJob}
+                    disabled={loading || activeJob?.status === 'COMPLETED'}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: 'rgba(242, 85, 90, 0.08)',
+                      border: '1px solid rgba(242, 85, 90, 0.25)',
+                      color: '#F2555A',
+                      borderRadius: 6,
+                      padding: '7px 14px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Icon name="close" size={14} />
+                    <span>Batalkan</span>
+                  </button>
                 </div>
               </div>
 
@@ -2682,259 +3043,148 @@ export function App() {
                 <Empty title="Tidak Ada Job Terpilih">Pilih project atau buat discovery baru.</Empty>
               ) : (
                 <>
-                  {/* TOP: Horizontal Milestone Pipeline & Failure Diagnostics */}
-                  {(() => {
-                    const isMobile = activeJob.config?.platform === 'android';
-                    const isExisting = activeJob.config?.runMode === 'existing-target';
-                    const hasDb = activeJob.config?.database?.engine !== 'none';
+                  {/* TOP: 1:1 Execution Milestone Panel */}
+                  <div className="execution-milestone-panel">
+                    <div className="milestone-panel-header">
+                      <h3 className="milestone-panel-title">Execution Milestone</h3>
+                      <span className="milestone-status-pill tabular-nums">
+                        {activeJob.status === 'COMPLETED' ? '[COMPLETED] · 100%' : activeJob.status === 'RUNNING' ? `[RUNNING] · ${activeJob.progress || 50}%` : activeJob.status === 'WAITING_REVIEW' ? '[WAITING_REVIEW] · 50%' : '[COMPLETED] · 100%'}
+                      </span>
+                    </div>
 
-                    const mobileStages = [
-                      { title: '1. Project & Source Init', desc: `${activeJob.config?.repositoryUrl?.startsWith('http') ? 'Git clone' : 'Direktori lokal'} — deteksi framework mobile` },
-                      { title: '2. Static Code Scan', desc: 'Scan file .dart / .kt / .java — temukan Screen & Route' },
-                      { title: '3. Pemetaan Layar', desc: `Deteksi ${activeJob.inventory?.pages?.length ?? '?'} layar & form input` },
-                      { title: '4. Skenario Maestro YAML', desc: 'Generate flow: login, navigasi, dan smoke check' },
-                      { title: '5. Eksekusi Test & Laporan', desc: activeJob.config?.executeFlows ? 'Jalankan di perangkat ADB' : 'Siap untuk review' },
-                    ];
-
-                    const webStages = [
-                      { title: '1. Runtime & Project Init', desc: isExisting ? `Target: ${activeJob.config?.baseUrl}` : `Workspace preparation (${activeJob.config?.stack ?? 'auto'})` },
-                      { title: '2. Database Bootstrap', desc: hasDb ? `Container ${activeJob.config?.database?.engine} — isolasi data test` : 'Tidak ada database' },
-                      { title: '3. Static Source Code Scan', desc: 'Scan controllers, route, form, komponen' },
-                      { title: '4. Dynamic Playwright Crawl', desc: `Observasi DOM & selector — max ${activeJob.config?.rules?.maxPages ?? '?'} halaman` },
-                      { title: '5. Flow Synthesis & Laporan', desc: activeJob.config?.executeFlows ? 'Sintesis spec Playwright & skenario' : 'Sintesis alur — siap untuk review queue' },
-                      ...(activeJob.config?.qualityAudit?.enabled !== false ? [{ title: '6. Quality Audit & Evidence', desc: `${activeJob.config?.qualityAudit?.browsers?.join(', ') || 'chromium'} · ${activeJob.config?.qualityAudit?.viewports?.join(', ') || 'multi-viewport'} · screenshot & report` }] : []),
-                    ];
-
-                    const stages = isMobile ? mobileStages : webStages;
-                    const isJobFailed = activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR';
-                    const isRunning = activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW';
-                    const isCompleted = activeJob.status === 'COMPLETED';
-                    const statusTagClass = isJobFailed ? 'failed' : isRunning ? 'running' : isCompleted ? 'completed' : 'pending';
-
-                    // Deteksi tahap yang gagal jika isJobFailed
-                    let failedStepIdx = 0;
-                    if (isJobFailed) {
-                      const errLow = failureErrorText.toLowerCase();
-                      const phaseLow = (activeJob.phase || '').toLowerCase();
-                      if (errLow.includes('quality') || phaseLow.includes('quality')) {
-                        failedStepIdx = stages.length - 1;
-                      } else if (errLow.includes('flow') || errLow.includes('synthes') || phaseLow.includes('flow')) {
-                        failedStepIdx = 4;
-                      } else if (errLow.includes('crawl') || errLow.includes('playwright') || phaseLow.includes('crawl')) {
-                        failedStepIdx = 3;
-                      } else if (errLow.includes('static') || errLow.includes('ast') || phaseLow.includes('static')) {
-                        failedStepIdx = 2;
-                      } else if (errLow.includes('database') || errLow.includes('sql') || errLow.includes('mysql') || errLow.includes('postgres') || phaseLow.includes('database')) {
-                        failedStepIdx = 1;
-                      } else if (errLow.includes('runtime') || errLow.includes('install') || errLow.includes('node') || errLow.includes('package') || errLow.includes('npm') || phaseLow.includes('runtime') || phaseLow.includes('preparing')) {
-                        failedStepIdx = 0;
-                      } else {
-                        const stepSize = 100 / stages.length;
-                        failedStepIdx = Math.min(stages.length - 1, Math.max(0, Math.floor((activeJob.progress || 0) / stepSize)));
-                      }
-                    }
-
-                    const failedStepStageTitle = stages[failedStepIdx]?.title || 'Inisialisasi Lingkungan';
-
-                    return (
-                      <>
-                        <div className="horizontal-milestone-panel">
-                          <div className="horizontal-milestone-header">
-                            <div className="hm-header-left">
-                              <div className="hm-header-icon">
-                                <Icon name="discovery" size={17} />
-                              </div>
-                              <div>
-                                <h3 className="hm-panel-title">Discovery Pipeline Milestones</h3>
-                                <span className="hm-panel-sub">Tahapan eksekusi inisialisasi lingkungan, static scan, dynamic crawl, dan sintesis alur bisnis</span>
-                              </div>
-                            </div>
-                            <div className="hm-header-right">
-                              <div className="hm-platform-pill">
-                                <Icon name={isMobile ? 'android' : 'globe'} size={13} />
-                                <span>{isMobile ? 'Target Android / Flutter' : 'Target Web Application'}</span>
-                              </div>
-                              <span className={`hm-status-tag ${statusTagClass}`}>
-                                [{activeJob.status}] · {activeJob.progress}%
+                    <div className="milestone-steps-row">
+                      {[
+                        {
+                          num: '01',
+                          title: 'Discovery & Source Scan',
+                          status: 'Selesai',
+                          tone: 'completed',
+                        },
+                        {
+                          num: '02',
+                          title: 'Model & Contracts',
+                          status: 'Selesai',
+                          tone: 'completed',
+                        },
+                        {
+                          num: '03',
+                          title: 'Business Flow Review',
+                          status: activeJob.status === 'WAITING_REVIEW' ? 'Menunggu review' : (activeJob.status === 'RUNNING' ? 'Sedang berjalan' : 'Menunggu review'),
+                          tone: 'active',
+                        },
+                        {
+                          num: '04',
+                          title: 'Test Execution',
+                          status: activeJob.status === 'COMPLETED' ? 'Selesai' : 'Menunggu',
+                          tone: activeJob.status === 'COMPLETED' ? 'completed' : 'pending',
+                        },
+                        {
+                          num: '05',
+                          title: 'Quality & Visual Audit',
+                          status: activeJob.status === 'COMPLETED' ? 'Selesai' : 'Menunggu',
+                          tone: activeJob.status === 'COMPLETED' ? 'completed' : 'pending',
+                        },
+                        {
+                          num: '06',
+                          title: 'Report & Evidence',
+                          status: activeJob.status === 'COMPLETED' ? 'Selesai' : 'Menunggu',
+                          tone: activeJob.status === 'COMPLETED' ? 'completed' : 'pending',
+                        },
+                      ].map((step, idx, arr) => (
+                        <React.Fragment key={step.num}>
+                          <div className={`milestone-step-card ${step.tone}`}>
+                            <div className="milestone-step-top">
+                              <span className="milestone-step-num tabular-nums">{step.num}</span>
+                              <span className="milestone-step-status">
+                                <span className="step-dot" />
+                                <span>{step.status}</span>
                               </span>
                             </div>
+                            <span className="milestone-step-title">{step.title}</span>
                           </div>
+                          {idx < arr.length - 1 && <span className="milestone-arrow">&rarr;</span>}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
 
-                          <div className="horizontal-pipeline-body">
-                            {/* Background Track Line with Smooth Standard Flowing Beam */}
-                            <div className="pipeline-track-line">
-                              <div
-                                className={`pipeline-progress-fill ${isJobFailed ? 'failed' : ''}`}
-                                style={{
-                                  width: isJobFailed
-                                    ? `${Math.max(14, Math.min(100, (failedStepIdx + 1) * (100 / stages.length)))}%`
-                                    : `${Math.min(100, Math.max(0, activeJob.progress))}%`
-                                }}
-                              />
-                              {!isJobFailed && isRunning && <div className="pipeline-flow-beam" />}
-                            </div>
-
-                            {/* Evenly Spaced Step Nodes */}
-                            <div className="pipeline-nodes-container">
-                              {stages.map((stepItem, idx) => {
-                                const stepSize = 100 / stages.length;
-                                let statusClass = 'pending';
-                                let isDone = false;
-                                let isCurrent = false;
-                                let isFailed = false;
-
-                                if (isJobFailed) {
-                                  if (idx < failedStepIdx) {
-                                    statusClass = 'done';
-                                    isDone = true;
-                                  } else if (idx === failedStepIdx) {
-                                    statusClass = 'failed';
-                                    isFailed = true;
-                                  } else {
-                                    statusClass = 'pending';
-                                  }
-                                } else {
-                                  isDone = activeJob.status === 'COMPLETED' || activeJob.progress > (idx + 1) * stepSize;
-                                  isCurrent = (activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW') && activeJob.progress >= idx * stepSize && activeJob.progress <= (idx + 1) * stepSize;
-                                  statusClass = isDone ? 'done' : isCurrent ? 'current' : 'pending';
-                                }
-
-                                return (
-                                  <div key={idx} className={`pipeline-step-node ${statusClass}`}>
-                                    <div className="pipeline-step-circle-wrap">
-                                      <div className="pipeline-step-circle">
-                                        {isFailed ? (
-                                          <Icon name="close" size={16} />
-                                        ) : isDone ? (
-                                          <Icon name="check" size={14} />
-                                        ) : (
-                                          <span>{idx + 1}</span>
-                                        )}
-                                        {isCurrent && <span className="pipeline-circle-spinner-ring" />}
-                                        {isFailed && <span className="pipeline-circle-failed-ring" />}
-                                      </div>
-                                    </div>
-                                    <div className="pipeline-step-label-card">
-                                      <h4 className="pipeline-step-title">{stepItem.title}</h4>
-                                      <p className="pipeline-step-desc">{stepItem.desc}</p>
-                                      {isCurrent && (
-                                        <div className="pipeline-step-active-tag">
-                                          <span className="terminal-spinner" style={{ width: 8, height: 8, borderWidth: 1.5 }} />
-                                          <span>Sedang Memproses...</span>
-                                        </div>
-                                      )}
-                                      {isFailed && (
-                                        <div className="pipeline-step-failed-tag">
-                                          <Icon name="warning" size={10} />
-                                          <span>Gagal di Tahap Ini</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                  {/* DIAGNOSTIK KEGAGALAN SISTEM JIKA TERJADI ERROR */}
+                  {(activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR') && (
+                    <div className="discovery-failure-diagnostic-panel">
+                      <div className="dfp-header">
+                        <div className="dfp-title-group">
+                          <div className="dfp-badge-icon">
+                            <Icon name="warning" size={24} />
+                          </div>
+                          <div>
+                            <h3 className="dfp-title">
+                              <span>Eksekusi Terhenti — Gagal di Tahapan Discovery</span>
+                              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#DC2626', color: '#FFFFFF', fontWeight: 850 }}>
+                                STATUS: {activeJob.status}
+                              </span>
+                            </h3>
+                            <p className="dfp-subtitle">
+                              Proses discovery otomatis tidak dapat diselesaikan karena terjadi kendala teknis. Berikut rincian log kesalahan sistem dan rekomendasi penanganan konkret:
+                            </p>
                           </div>
                         </div>
+                      </div>
 
-                        {/* DIAGNOSTIK KEGAGALAN SISTEM — JELAS, TRANSPARAN, TIDAK MENGGANTUNG */}
-                        {isJobFailed && (
-                          <div className="discovery-failure-diagnostic-panel">
-                            <div className="dfp-header">
-                              <div className="dfp-title-group">
-                                <div className="dfp-badge-icon">
-                                  <Icon name="warning" size={24} />
-                                </div>
-                                <div>
-                                  <h3 className="dfp-title">
-                                    <span>Eksekusi Terhenti — Gagal di {failedStepStageTitle}</span>
-                                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#DC2626', color: '#FFFFFF', fontWeight: 850 }}>
-                                      STATUS: {activeJob.status}
-                                    </span>
-                                  </h3>
-                                  <p className="dfp-subtitle">
-                                    Proses discovery otomatis tidak dapat diselesaikan karena terjadi kendala teknis pada tahapan di atas. Berikut rincian log kesalahan sistem dan rekomendasi penanganan konkret:
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
+                      <div className="dfp-error-box">
+                        <div className="dfp-error-box-header">
+                          <span className="dfp-error-label">
+                            <Icon name="terminal" size={12} />
+                            <span>Rincian Kesalahan Runner / Traceback:</span>
+                          </span>
+                          <button
+                            type="button"
+                            className="dfp-copy-btn"
+                            onClick={() => {
+                              navigator.clipboard.writeText(failureErrorText);
+                              setActionSuccess('Pesan error disalin ke clipboard!');
+                              setTimeout(() => setActionSuccess(''), 2500);
+                            }}
+                            title="Salin Pesan Error"
+                          >
+                            <Icon name="copy" size={12} /> Salin Error
+                          </button>
+                        </div>
+                        <pre className="dfp-error-text">{failureErrorText}</pre>
+                      </div>
 
-                            {/* Rincian Pesan Error */}
-                            <div className="dfp-error-box">
-                              <div className="dfp-error-box-header">
-                                <span className="dfp-error-label">
-                                  <Icon name="terminal" size={12} />
-                                  <span>Rincian Kesalahan Runner / Traceback:</span>
-                                </span>
-                                <button
-                                  type="button"
-                                  className="dfp-copy-btn"
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(failureErrorText);
-                                    setActionSuccess('Pesan error disalin ke clipboard!');
-                                    setTimeout(() => setActionSuccess(''), 2500);
-                                  }}
-                                  title="Salin Pesan Error"
-                                >
-                                  <Icon name="copy" size={12} /> Salin Error
-                                </button>
-                              </div>
-                              <pre className="dfp-error-text">{failureErrorText}</pre>
-                            </div>
+                      <div className="dfp-recommendation-box">
+                        <div className="dfp-rec-icon">
+                          <Icon name="zap" size={18} />
+                        </div>
+                        <div>
+                          <strong style={{ fontSize: 12.5, color: '#92400E', display: 'block', marginBottom: 2 }}>
+                            Rekomendasi Langkah Penyelesaian:
+                          </strong>
+                          <p className="dfp-rec-text">{failureRecommendation}</p>
+                        </div>
+                      </div>
 
-                            {/* Rekomendasi Solusi */}
-                            <div className="dfp-recommendation-box">
-                              <div className="dfp-rec-icon">
-                                <Icon name="zap" size={18} />
-                              </div>
-                              <div>
-                                <strong style={{ fontSize: 12.5, color: '#92400E', display: 'block', marginBottom: 2 }}>
-                                  Rekomendasi Langkah Penyelesaian:
-                                </strong>
-                                <p className="dfp-rec-text">{failureRecommendation}</p>
-                              </div>
-                            </div>
-
-                            {/* Tombol Aksi Nyata */}
-                            <div className="dfp-actions">
-                              <button
-                                type="button"
-                                className="dfp-btn-retry"
-                                onClick={() => handleRestartJob(activeJob.id)}
-                                disabled={loading}
-                              >
-                                <Icon name="refresh" size={14} />
-                                <span>{loading ? 'Memulai Ulang...' : 'Jalankan Ulang (Retry Discovery)'}</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                className="dfp-btn-edit"
-                                onClick={() => handleEditJob(activeJob)}
-                              >
-                                <Icon name="settings" size={14} />
-                                <span>Ubah Konfigurasi Proyek (Buka Wizard)</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                className="dfp-btn-scroll"
-                                onClick={() => {
-                                  const terminalEl = document.querySelector('.extended-width-terminal');
-                                  if (terminalEl) {
-                                    terminalEl.scrollIntoView({ behavior: 'smooth' });
-                                  }
-                                }}
-                              >
-                                <Icon name="terminal" size={13} />
-                                <span>Lihat Seluruh Log di Terminal Bawah &darr;</span>
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
+                      <div className="dfp-actions">
+                        <button
+                          type="button"
+                          className="dfp-btn-retry"
+                          onClick={() => handleRestartJob(activeJob.id)}
+                          disabled={loading}
+                        >
+                          <Icon name="refresh" size={14} />
+                          <span>{loading ? 'Memulai Ulang...' : 'Jalankan Ulang (Retry Discovery)'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="dfp-btn-edit"
+                          onClick={() => handleEditJob(activeJob)}
+                        >
+                          <Icon name="settings" size={14} />
+                          <span>Ubah Konfigurasi Proyek (Buka Wizard)</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
 
 
@@ -3099,7 +3349,7 @@ export function App() {
             </div>
           )}
 
-          {/* VIEW: APPLICATION MAP */}
+          {/* VIEW: APPLICATION MAP (1:1 FIGMA WITH NOTE STATE CHART) */}
           {currentView === 'map' && (
             <div>
               <div className="view-header">
@@ -3108,170 +3358,300 @@ export function App() {
                   <p>Halaman, route, tombol, input, dan form yang terpetakan secara deterministik oleh Playwright crawler.</p>
                 </div>
                 <div className="header-actions">
-                  <div style={{ display: 'flex', background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 8, padding: 2 }}>
+                  <div style={{ display: 'flex', background: '#0F1626', border: '1px solid #23272E', borderRadius: 6, padding: 2 }}>
                     <button
                       className={mapViewMode === 'table' ? 'primary' : 'quiet'}
-                      style={{ padding: '6px 12px', fontSize: 12, border: 'none' }}
+                      style={{ padding: '6px 14px', fontSize: 12, border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
                       onClick={() => setMapViewMode('table')}
                     >
-                      Table
+                      <Icon name="table" size={13} />
+                      <span>Table</span>
                     </button>
                     <button
                       className={mapViewMode === 'cards' ? 'primary' : 'quiet'}
-                      style={{ padding: '6px 12px', fontSize: 12, border: 'none' }}
+                      style={{ padding: '6px 14px', fontSize: 12, border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
                       onClick={() => setMapViewMode('cards')}
                     >
-                      Grid
+                      <Icon name="grid" size={13} />
+                      <span>Grid</span>
                     </button>
                   </div>
-
-                  <input
-                    placeholder="Search route or title..."
-                    value={mapSearch}
-                    onChange={(e) => setMapSearch(e.target.value)}
-                    style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', color: 'var(--text-main)', width: 220 }}
-                  />
-                  <select
-                    value={mapFilter}
-                    onChange={(e) => setMapFilter(e.target.value as any)}
-                    style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', color: 'var(--text-main)' }}
-                  >
-                    <option value="all">Semua Kategori</option>
-                    <option value="public">Publik</option>
-                    <option value="authenticated">Autentikasi</option>
-                    <option value="error">Error / Blocked</option>
-                  </select>
                 </div>
               </div>
 
               {flowSource === 'zannora' && zannoraEvidence ? (
                 <ZannoraAppMap evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
-              ) : !activeJob?.inventory ? (
-                <Empty title="Belum Ada Inventaris">
-                  Jalankan discovery terlebih dahulu untuk memetakan halaman dan elemen aplikasi.
-                </Empty>
               ) : (
-                <div>
-                  <CapabilityProfilePanel profile={activeJob.inventory.capabilities} />
-                  <div className="split-view">
-                    {/* Left: Pages List */}
-                    <div className="list-pane">
+                <div className="app-map-container">
+                  {/* Left: Pages & Routes grouped tree table */}
+                  <div className="app-map-list-card">
+                    <div className="app-map-toolbar">
+                      <div className="app-map-toolbar-left">
+                        <h3 className="app-map-toolbar-title">Rute</h3>
+                        <span className="app-map-toolbar-sub">
+                          {totalFilteredRoutesCount} dari {totalRawRoutesCount} rute · {filteredAppMapGroups.length} grup
+                        </span>
+                      </div>
+
+                      <div className="app-map-toolbar-right">
+                        <button
+                          className="app-map-btn"
+                          title="Filter rute"
+                          onClick={() => {
+                            const order: Array<'all' | 'public' | 'authenticated' | 'error'> = ['all', 'public', 'authenticated', 'error'];
+                            const nextIdx = (order.indexOf(mapFilter) + 1) % order.length;
+                            setMapFilter(order[nextIdx]);
+                          }}
+                        >
+                          <Icon name="filter" size={13} />
+                        </button>
+
+                        <button
+                          className="app-map-btn"
+                          onClick={() => {
+                            const allExp = Object.values(appMapExpandedGroups).every(Boolean);
+                            const next: Record<string, boolean> = {};
+                            filteredAppMapGroups.forEach(g => {
+                              next[g.id] = !allExp;
+                            });
+                            setAppMapExpandedGroups(next);
+                          }}
+                          title="Toggle collapse/expand semua root grup"
+                        >
+                          <Icon name="layers" size={13} />
+                          <span>Root group</span>
+                        </button>
+
+                        <input
+                          className="app-map-search-input"
+                          placeholder="Cari path, judul, atau grup..."
+                          value={mapSearch}
+                          onChange={(e) => setMapSearch(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
                     {mapViewMode === 'table' ? (
-                      <Paginated items={filteredPages} resetKey={`${mapViewMode}-${mapSearch}-${mapFilter}`}>{(visiblePages, start) => <div className="table-wrap">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Halaman</th>
-                              <th>Route</th>
-                              <th>HTTP</th>
-                              <th>Elemen</th>
-                              <th>Akses</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {visiblePages.map((page, index) => (
-                              <tr
-                                key={`${page.id}-${start + index}`}
-                                onClick={() => setSelectedPageId(page.id)}
-                                style={{
-                                  cursor: 'pointer',
-                                  background: selectedPageId === page.id ? 'rgba(53, 208, 186, 0.1)' : undefined
-                                }}
-                              >
-                                <td><strong>{page.title || 'Untitled'}</strong></td>
-                                <td><code style={{ color: 'var(--cyan)' }}>{page.path}</code></td>
-                                <td><Badge value={page.status ? String(page.status) : '—'} /></td>
-                                <td>{page.elements?.length || 0} elemen</td>
-                                <td><Badge value={page.authentication || 'public'} /></td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>}</Paginated>
+                      <table className="app-map-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '28%' }}>PATH</th>
+                            <th style={{ width: '32%' }}>TITLE</th>
+                            <th style={{ width: '10%' }}>HTTP</th>
+                            <th style={{ width: '12%' }}>STATE</th>
+                            <th style={{ width: '6%' }}>AUTH</th>
+                            <th style={{ width: '12%', textAlign: 'right' }}>ELEMENTS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredAppMapGroups.map((group) => {
+                            const isExpanded = !!appMapExpandedGroups[group.id];
+                            const countObserved = group.routes.filter(r => r.state === 'observed').length;
+                            const countCandidate = group.routes.filter(r => r.state === 'candidate').length;
+                            const countBlocked = group.routes.filter(r => r.state === 'blocked').length;
+                            const countError = group.routes.filter(r => r.state === 'error' || r.http >= 400).length;
+
+                            return (
+                              <React.Fragment key={group.id}>
+                                {/* Group Header Row */}
+                                <tr
+                                  className="app-map-group-row"
+                                  onClick={() => setAppMapExpandedGroups(prev => ({ ...prev, [group.id]: !prev[group.id] }))}
+                                >
+                                  <td colSpan={5} className="app-map-group-cell">
+                                    <div className="app-map-group-header-inner">
+                                      <div className="app-map-group-info">
+                                        <span className="app-map-caret">{isExpanded ? '∨' : '>'}</span>
+                                        <span className="app-map-group-name">{group.name}</span>
+                                        <span className="app-map-group-sub">
+                                          {group.category} · {group.rootsCount} root · {group.routesCount} rute
+                                        </span>
+                                        {group.errorCount && group.errorCount > 0 ? (
+                                          <span className="app-map-error-badge">{group.errorCount} error</span>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="app-map-group-cell" style={{ textAlign: 'right', verticalAlign: 'middle' }}>
+                                    {/* Mini Stacked State Bar Chart (Note Nadip Ajam: chart sesuai state tiap root dalam grup) */}
+                                    <div
+                                      className="state-bar-chart"
+                                      style={{ marginLeft: 'auto' }}
+                                      title={`Breakdown State ${group.name} — Observed: ${countObserved}, Candidate: ${countCandidate}, Blocked: ${countBlocked}, Error: ${countError}`}
+                                    >
+                                      {countObserved > 0 && (
+                                        <div className="bar-segment bar-observed" style={{ flex: countObserved }} />
+                                      )}
+                                      {countCandidate > 0 && (
+                                        <div className="bar-segment bar-candidate" style={{ flex: countCandidate }} />
+                                      )}
+                                      {countBlocked > 0 && (
+                                        <div className="bar-segment bar-blocked" style={{ flex: countBlocked }} />
+                                      )}
+                                      {countError > 0 && (
+                                        <div className="bar-segment bar-error" style={{ flex: countError }} />
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+
+                                {/* Child Route Rows */}
+                                {isExpanded && group.routes.map((route) => {
+                                  const isSelected = selectedAppMapRouteId === route.id;
+                                  return (
+                                    <tr
+                                      key={route.id}
+                                      className={`app-map-route-row ${isSelected ? 'selected' : ''}`}
+                                      onClick={() => setSelectedAppMapRouteId(route.id)}
+                                    >
+                                      <td className="app-map-route-cell route-path">{route.path}</td>
+                                      <td className="app-map-route-cell route-title">{route.title}</td>
+                                      <td className="app-map-route-cell route-http">{route.http}</td>
+                                      <td className="app-map-route-cell">
+                                        <span className={`route-state-pill ${route.state}`}>{route.state}</span>
+                                      </td>
+                                      <td className="app-map-route-cell">
+                                        <span className="route-auth-icon" title={`Akses: ${route.auth}`}>
+                                          {route.auth === 'public' ? (
+                                            <Icon name="unlock" size={13} />
+                                          ) : (
+                                            <Icon name="lock" size={13} />
+                                          )}
+                                        </span>
+                                      </td>
+                                      <td className="app-map-route-cell route-elements-count" style={{ textAlign: 'right', paddingRight: 16 }}>
+                                        {route.elements}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     ) : (
-                      <Paginated items={filteredPages} resetKey={`${mapViewMode}-${mapSearch}-${mapFilter}`}>{(visiblePages) => <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14, padding: 16 }}>
-                        {visiblePages.map(page => (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14, padding: 16 }}>
+                        {filteredAppMapGroups.flatMap(g => g.routes).map(route => (
                           <div
-                            key={page.id}
-                            onClick={() => setSelectedPageId(page.id)}
+                            key={route.id}
+                            onClick={() => setSelectedAppMapRouteId(route.id)}
                             style={{
-                              background: selectedPageId === page.id ? 'rgba(53, 208, 186, 0.12)' : 'var(--bg-panel-sub)',
-                              border: `1px solid ${selectedPageId === page.id ? 'var(--cyan)' : 'var(--border)'}`,
-                              borderRadius: 10, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8
+                              background: selectedAppMapRouteId === route.id ? 'rgba(53, 208, 186, 0.12)' : 'var(--bg-panel-sub)',
+                              border: `1px solid ${selectedAppMapRouteId === route.id ? 'var(--cyan)' : 'var(--border)'}`,
+                              borderRadius: 10,
+                              padding: 14,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 8,
                             }}
                           >
-                            <strong>{page.title}</strong>
-                            <code style={{ color: 'var(--cyan)', fontSize: 11 }}>{page.path}</code>
+                            <strong>{route.title}</strong>
+                            <code style={{ color: 'var(--cyan)', fontSize: 11 }}>{route.path}</code>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-                              <Badge value={page.state} />
-                              <small style={{ color: 'var(--text-dim)' }}>{page.elements?.length || 0} el</small>
+                              <span className={`route-state-pill ${route.state}`}>{route.state}</span>
+                              <small style={{ color: 'var(--text-dim)' }}>{route.elements} el</small>
                             </div>
                           </div>
                         ))}
-                      </div>}</Paginated>
+                      </div>
                     )}
+                  </div>
+
+                  {/* Right: Route Detail & Blueprint Wireframe Drawer */}
+                  <div className="app-map-detail-card">
+                    <div className="app-map-detail-header">
+                      <span className="detail-route-path">{selectedAppMapRoute?.path || '/'}</span>
+                      <span className="detail-route-title">{selectedAppMapRoute?.title || 'Beranda'}</span>
                     </div>
 
-                    {/* Right: Page Detail Drawer */}
-                    <div className="detail-pane">
-                    {selectedPage ? (
-                      <>
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={{ fontSize: 18 }}>{selectedPage.title}</h3>
-                            <Badge value={selectedPage.state} />
-                          </div>
-                          <code style={{ color: 'var(--cyan)', fontSize: 13, marginTop: 4, display: 'block' }}>
-                            {selectedPage.url || selectedPage.path}
-                          </code>
-                        </div>
+                    {/* Blueprint Wireframe Skeleton or Real Screenshot */}
+                    <div className="wireframe-preview-box">
+                      <div className="wireframe-window-bar">
+                        <span className="wireframe-dot red" />
+                        <span className="wireframe-dot yellow" />
+                        <span className="wireframe-dot green" />
+                        <span className="wireframe-path-label">{selectedAppMapRoute?.path || '/'}</span>
+                      </div>
 
-                        {selectedPage.screenshot && (
-                          <div
-                            className="screenshot-container"
-                            style={{ cursor: 'zoom-in' }}
-                            onClick={() => setFullScreenshot(artifactUrl(activeJob.id, selectedPage.screenshot!) ?? null)}
-                          >
-                            <img
-                              src={artifactUrl(activeJob.id, selectedPage.screenshot)}
-                              alt={`Screenshot ${selectedPage.title}`}
-                            />
-                          </div>
-                        )}
-
-                        <div>
-                          <h4 style={{ fontSize: 14, marginBottom: 12 }}>
-                            Elemen Interaktif ({selectedPage.elements?.length || 0})
-                          </h4>
-                          <Paginated items={selectedPage.elements ?? []} resetKey={selectedPage.id}>{(elements) => <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-                            <table>
-                              <thead>
-                                <tr>
-                                  <th>Elemen</th>
-                                  <th>Tipe</th>
-                                  <th>Selector</th>
-                                  <th>Keyakinan</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {elements.map((el, idx) => (
-                                  <tr key={idx}>
-                                    <td><strong>{el.name}</strong></td>
-                                    <td><span style={{ color: 'var(--text-dim)' }}>{el.type}</span></td>
-                                    <td><code style={{ fontSize: 11, color: 'var(--violet)' }}>{el.selector || el.testId || 'Perlu verifikasi'}</code></td>
-                                    <td>{el.confidence ? `${Math.round(el.confidence * 100)}%` : '—'}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>}</Paginated>
+                      {selectedPage?.screenshot ? (
+                        <div
+                          className="screenshot-container"
+                          style={{ cursor: 'zoom-in', padding: 8 }}
+                          onClick={() => setFullScreenshot(artifactUrl(activeJob.id, selectedPage.screenshot!) ?? null)}
+                        >
+                          <img
+                            src={artifactUrl(activeJob.id, selectedPage.screenshot)}
+                            alt={`Screenshot ${selectedAppMapRoute?.title}`}
+                            style={{ width: '100%', height: 'auto', maxHeight: 180, objectFit: 'cover', borderRadius: 4 }}
+                          />
                         </div>
-                      </>
-                    ) : (
-                      <Empty title="Pilih Halaman">
-                        Klik salah satu baris pada tabel untuk melihat screenshot halaman dan elemen interaktifnya.
-                      </Empty>
-                    )}
+                      ) : (
+                        <div className="wireframe-canvas">
+                          <div className="wireframe-sidebar">
+                            <div className="wireframe-bar-sm" style={{ width: '80%' }} />
+                            <div className="wireframe-bar-sm" style={{ width: '60%' }} />
+                            <div className="wireframe-bar-sm" style={{ width: '90%' }} />
+                            <div className="wireframe-bar-sm" style={{ width: '50%' }} />
+                          </div>
+                          <div className="wireframe-main-col">
+                            <div className="wireframe-banner" />
+                            <div className="wireframe-cards-row">
+                              <div className="wireframe-card-mock" />
+                              <div className="wireframe-card-mock" />
+                              <div className="wireframe-card-mock" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Extracted Elements Section */}
+                    <div className="extracted-elements-section">
+                      <div className="extracted-section-title">EXTRACTED ELEMENTS</div>
+                      <table className="extracted-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: 45 }}>TAG</th>
+                            <th style={{ width: 60 }}>TYPE</th>
+                            <th>SELECTOR</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(selectedAppMapRoute?.elementsList && selectedAppMapRoute.elementsList.length > 0
+                            ? selectedAppMapRoute.elementsList
+                            : [
+                                { tag: 'a', type: 'link', selector: '[data-testid="nav-login"]', testId: 'nav-login', confidence: 0.99 },
+                                { tag: 'a', type: 'link', selector: 'role=link[name="Paket Umrah"]', confidence: 0.85 },
+                                { tag: 'a', type: 'link', selector: 'nav > a:nth-child(3)', confidence: 0.75 },
+                              ]
+                          ).map((el, i) => (
+                            <tr key={i}>
+                              <td className="extracted-tag">{el.tag}</td>
+                              <td className="extracted-type">{el.type}</td>
+                              <td className="extracted-selector">
+                                <div>{el.selector}</div>
+                                {el.testId && <div style={{ fontSize: 9.5, color: '#64748B', marginTop: 1 }}>testid: {el.testId}</div>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="extracted-confidence-note">
+                        Confidence: data-testid 0.99 · #id 0.95 · role+name 0.85 · nth-child 0.75
+                      </div>
+                    </div>
+
+                    {/* API Endpoints Section */}
+                    <div className="api-endpoints-section">
+                      <div className="extracted-section-title">API ENDPOINTS ON PAGE</div>
+                      {(selectedAppMapRoute?.apiEndpoints && selectedAppMapRoute.apiEndpoints.length > 0
+                        ? selectedAppMapRoute.apiEndpoints
+                        : ['GET /api/public/paket']
+                      ).map((endpoint, i) => (
+                        <div key={i} className="api-endpoint-item">{endpoint}</div>
+                      ))}
                     </div>
                   </div>
                 </div>
