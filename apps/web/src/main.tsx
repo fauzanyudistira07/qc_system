@@ -1029,6 +1029,7 @@ export function App() {
   // Terminal state
   const [logFilter, setLogFilter] = useState<string>('all');
   const [logSearch, setLogSearch] = useState<string>('');
+  const [isDiagnosticExpanded, setIsDiagnosticExpanded] = useState<boolean>(true);
 
   // Target Health & Reachability Probe (Live Telemetry from Backend)
   const [targetProbe, setTargetProbe] = useState<TargetProbeResult | null>(null);
@@ -3044,215 +3045,285 @@ export function App() {
               ) : (
                 <>
                   {/* TOP: 1:1 Execution Milestone Panel */}
-                  <div className="execution-milestone-panel">
-                    <div className="milestone-panel-header">
-                      <h3 className="milestone-panel-title">Execution Milestone</h3>
-                      <span className="milestone-status-pill tabular-nums">
-                        {activeJob.status === 'COMPLETED' ? '[COMPLETED] · 100%' : activeJob.status === 'RUNNING' ? `[RUNNING] · ${activeJob.progress || 50}%` : activeJob.status === 'WAITING_REVIEW' ? '[WAITING_REVIEW] · 50%' : '[COMPLETED] · 100%'}
-                      </span>
-                    </div>
+                  {(() => {
+                    const isFailed = activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR';
+                    const isCompleted = activeJob.status === 'COMPLETED';
+                    const isWaitingReview = activeJob.status === 'WAITING_REVIEW';
+                    const phase = activeJob.phase || '';
 
-                    <div className="milestone-steps-row">
-                      {[
-                        {
-                          num: '01',
-                          title: 'Discovery & Source Scan',
-                          status: 'Selesai',
-                          tone: 'completed',
-                        },
-                        {
-                          num: '02',
-                          title: 'Model & Contracts',
-                          status: 'Selesai',
-                          tone: 'completed',
-                        },
-                        {
-                          num: '03',
-                          title: 'Business Flow Review',
-                          status: activeJob.status === 'WAITING_REVIEW' ? 'Menunggu review' : (activeJob.status === 'RUNNING' ? 'Sedang berjalan' : 'Menunggu review'),
-                          tone: 'active',
-                        },
-                        {
-                          num: '04',
-                          title: 'Test Execution',
-                          status: activeJob.status === 'COMPLETED' ? 'Selesai' : 'Menunggu',
-                          tone: activeJob.status === 'COMPLETED' ? 'completed' : 'pending',
-                        },
-                        {
-                          num: '05',
-                          title: 'Quality & Visual Audit',
-                          status: activeJob.status === 'COMPLETED' ? 'Selesai' : 'Menunggu',
-                          tone: activeJob.status === 'COMPLETED' ? 'completed' : 'pending',
-                        },
-                        {
-                          num: '06',
-                          title: 'Report & Evidence',
-                          status: activeJob.status === 'COMPLETED' ? 'Selesai' : 'Menunggu',
-                          tone: activeJob.status === 'COMPLETED' ? 'completed' : 'pending',
-                        },
-                      ].map((step, idx, arr) => (
-                        <React.Fragment key={step.num}>
-                          <div className={`milestone-step-card ${step.tone}`}>
-                            <div className="milestone-step-top">
-                              <span className="milestone-step-num tabular-nums">{step.num}</span>
-                              <span className="milestone-step-status">
-                                <span className="step-dot" />
-                                <span>{step.status}</span>
-                              </span>
-                            </div>
-                            <span className="milestone-step-title">{step.title}</span>
-                          </div>
-                          {idx < arr.length - 1 && <span className="milestone-arrow">&rarr;</span>}
-                        </React.Fragment>
-                      ))}
-                    </div>
-                  </div>
+                    let failedAtStep = 1;
+                    if (['BUILDING_INVENTORY', 'SYNTHESIZING_FLOWS', 'GENERATING_FLOWS'].includes(phase)) failedAtStep = 2;
+                    else if (['WAITING_REVIEW', 'BUSINESS_FLOW_REVIEW'].includes(phase)) failedAtStep = 3;
+                    else if (['EXECUTING_TESTS'].includes(phase)) failedAtStep = 4;
+                    else if (['QUALITY_AUDIT'].includes(phase)) failedAtStep = 5;
 
-                  {/* DIAGNOSTIK KEGAGALAN SISTEM JIKA TERJADI ERROR */}
+                    const milestoneSteps = [
+                      {
+                        num: '01',
+                        title: 'Discovery & Source Scan',
+                        filter: 'discovery',
+                        status: isFailed && failedAtStep === 1 ? 'Gagal' : (isCompleted || (!isFailed && activeJob.progress > 20)) ? 'Selesai' : 'Sedang berjalan',
+                        tone: isFailed && failedAtStep === 1 ? 'error' : (isCompleted || (!isFailed && activeJob.progress > 20)) ? 'completed' : 'active',
+                      },
+                      {
+                        num: '02',
+                        title: 'Model & Contracts',
+                        filter: 'runtime',
+                        status: isFailed && failedAtStep === 2 ? 'Gagal' : isFailed && failedAtStep < 2 ? 'Terhenti' : isCompleted || activeJob.progress > 40 ? 'Selesai' : activeJob.progress > 20 ? 'Sedang berjalan' : 'Menunggu',
+                        tone: isFailed && failedAtStep === 2 ? 'error' : isFailed && failedAtStep < 2 ? 'pending' : isCompleted || activeJob.progress > 40 ? 'completed' : activeJob.progress > 20 ? 'active' : 'pending',
+                      },
+                      {
+                        num: '03',
+                        title: 'Business Flow Review',
+                        filter: 'flow-builder',
+                        status: isFailed && failedAtStep === 3 ? 'Gagal' : isFailed && failedAtStep < 3 ? 'Terhenti' : isCompleted || activeJob.progress > 60 ? 'Selesai' : isWaitingReview ? 'Menunggu review' : 'Menunggu',
+                        tone: isFailed && failedAtStep === 3 ? 'error' : isFailed && failedAtStep < 3 ? 'pending' : isCompleted || activeJob.progress > 60 ? 'completed' : isWaitingReview ? 'active' : 'pending',
+                      },
+                      {
+                        num: '04',
+                        title: 'Test Execution',
+                        filter: 'runner',
+                        status: isFailed && failedAtStep === 4 ? 'Gagal' : isFailed && failedAtStep < 4 ? 'Terhenti' : isCompleted ? 'Selesai' : activeJob.phase === 'EXECUTING_TESTS' ? 'Sedang berjalan' : 'Menunggu',
+                        tone: isFailed && failedAtStep === 4 ? 'error' : isFailed && failedAtStep < 4 ? 'pending' : isCompleted ? 'completed' : activeJob.phase === 'EXECUTING_TESTS' ? 'active' : 'pending',
+                      },
+                      {
+                        num: '05',
+                        title: 'Quality & Visual Audit',
+                        filter: 'quality',
+                        status: isFailed && failedAtStep === 5 ? 'Gagal' : isFailed && failedAtStep < 5 ? 'Terhenti' : isCompleted ? 'Selesai' : activeJob.phase === 'QUALITY_AUDIT' ? 'Sedang berjalan' : 'Menunggu',
+                        tone: isFailed && failedAtStep === 5 ? 'error' : isFailed && failedAtStep < 5 ? 'pending' : isCompleted ? 'completed' : activeJob.phase === 'QUALITY_AUDIT' ? 'active' : 'pending',
+                      },
+                      {
+                        num: '06',
+                        title: 'Report & Evidence',
+                        filter: 'system',
+                        status: isFailed ? 'Terhenti' : isCompleted ? 'Selesai' : 'Menunggu',
+                        tone: isCompleted ? 'completed' : 'pending',
+                      },
+                    ];
+
+                    return (
+                      <div className="execution-milestone-panel">
+                        <div className="milestone-panel-header">
+                          <h3 className="milestone-panel-title">Execution Milestone</h3>
+                          <span className={`milestone-status-pill tabular-nums ${isFailed ? 'error' : isCompleted ? 'completed' : isWaitingReview ? 'review' : 'running'}`}>
+                            {isFailed ? '[FAILED] · EKSEKUSI GAGAL' : isCompleted ? '[COMPLETED] · 100%' : isWaitingReview ? `[WAITING REVIEW] · ${activeJob.progress || 50}%` : `[RUNNING] · ${activeJob.progress || 10}%`}
+                          </span>
+                        </div>
+
+                        <div className="milestone-steps-row">
+                          {milestoneSteps.map((step, idx, arr) => (
+                            <React.Fragment key={step.num}>
+                              <div
+                                className={`milestone-step-card ${step.tone} ${logFilter === step.filter ? 'active' : ''}`}
+                                onClick={() => setLogFilter(step.filter)}
+                                title={`Klik untuk memfilter log terminal: --${step.filter}`}
+                              >
+                                <div className="milestone-step-top">
+                                  <span className="milestone-step-num tabular-nums">{step.num}</span>
+                                  <span className="milestone-step-status">
+                                    <span className="step-dot" />
+                                    <span>{step.status}</span>
+                                  </span>
+                                </div>
+                                <span className="milestone-step-title">{step.title}</span>
+                              </div>
+                              {idx < arr.length - 1 && <span className="milestone-arrow">&rarr;</span>}
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* DIAGNOSTIK KEGAGALAN SISTEM JIKA TERJADI ERROR (DARK PRECISION TECH) */}
                   {(activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR') && (
                     <div className="discovery-failure-diagnostic-panel">
                       <div className="dfp-header">
                         <div className="dfp-title-group">
                           <div className="dfp-badge-icon">
-                            <Icon name="warning" size={24} />
+                            <Icon name="warning" size={20} />
                           </div>
                           <div>
                             <h3 className="dfp-title">
                               <span>Eksekusi Terhenti — Gagal di Tahapan Discovery</span>
-                              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#DC2626', color: '#FFFFFF', fontWeight: 850 }}>
+                              <span className="dfp-status-tag">
                                 STATUS: {activeJob.status}
                               </span>
                             </h3>
                             <p className="dfp-subtitle">
-                              Proses discovery otomatis tidak dapat diselesaikan karena terjadi kendala teknis. Berikut rincian log kesalahan sistem dan rekomendasi penanganan konkret:
+                              Proses discovery otomatis tidak dapat diselesaikan karena terjadi kendala teknis. Rincian kesalahan runner dan rekomendasi penanganan:
                             </p>
                           </div>
                         </div>
-                      </div>
 
-                      <div className="dfp-error-box">
-                        <div className="dfp-error-box-header">
-                          <span className="dfp-error-label">
-                            <Icon name="terminal" size={12} />
-                            <span>Rincian Kesalahan Runner / Traceback:</span>
-                          </span>
-                          <button
-                            type="button"
-                            className="dfp-copy-btn"
-                            onClick={() => {
-                              navigator.clipboard.writeText(failureErrorText);
-                              setActionSuccess('Pesan error disalin ke clipboard!');
-                              setTimeout(() => setActionSuccess(''), 2500);
-                            }}
-                            title="Salin Pesan Error"
-                          >
-                            <Icon name="copy" size={12} /> Salin Error
-                          </button>
-                        </div>
-                        <pre className="dfp-error-text">{failureErrorText}</pre>
-                      </div>
-
-                      <div className="dfp-recommendation-box">
-                        <div className="dfp-rec-icon">
-                          <Icon name="zap" size={18} />
-                        </div>
-                        <div>
-                          <strong style={{ fontSize: 12.5, color: '#92400E', display: 'block', marginBottom: 2 }}>
-                            Rekomendasi Langkah Penyelesaian:
-                          </strong>
-                          <p className="dfp-rec-text">{failureRecommendation}</p>
-                        </div>
-                      </div>
-
-                      <div className="dfp-actions">
                         <button
                           type="button"
-                          className="dfp-btn-retry"
-                          onClick={() => handleRestartJob(activeJob.id)}
-                          disabled={loading}
+                          className="dfp-toggle-btn"
+                          onClick={() => setIsDiagnosticExpanded(!isDiagnosticExpanded)}
+                          title={isDiagnosticExpanded ? 'Sembunyikan rincian diagnostic' : 'Tampilkan rincian diagnostic'}
                         >
-                          <Icon name="refresh" size={14} />
-                          <span>{loading ? 'Memulai Ulang...' : 'Jalankan Ulang (Retry Discovery)'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="dfp-btn-edit"
-                          onClick={() => handleEditJob(activeJob)}
-                        >
-                          <Icon name="settings" size={14} />
-                          <span>Ubah Konfigurasi Proyek (Buka Wizard)</span>
+                          <Icon name={isDiagnosticExpanded ? 'chevron-up' : 'chevron-down'} size={13} />
+                          <span>{isDiagnosticExpanded ? 'Sembunyikan' : 'Buka Detail Error'}</span>
                         </button>
                       </div>
+
+                      {isDiagnosticExpanded && (
+                        <>
+                          <div className="dfp-error-box">
+                            <div className="dfp-error-box-header">
+                              <span className="dfp-error-label">
+                                <Icon name="terminal" size={12} />
+                                <span>Rincian Kesalahan Runner / Traceback:</span>
+                              </span>
+                              <button
+                                type="button"
+                                className="dfp-copy-btn"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(failureErrorText);
+                                  setActionSuccess('Pesan error disalin ke clipboard!');
+                                  setTimeout(() => setActionSuccess(''), 2500);
+                                }}
+                                title="Salin Pesan Error"
+                              >
+                                <Icon name="copy" size={12} /> Salin Error
+                              </button>
+                            </div>
+                            <pre className="dfp-error-text">{failureErrorText}</pre>
+                          </div>
+
+                          <div className="dfp-recommendation-box">
+                            <div className="dfp-rec-icon">
+                              <Icon name="zap" size={16} />
+                            </div>
+                            <div>
+                              <strong style={{ fontSize: 11.5, color: '#F59E0B', display: 'block', marginBottom: 2 }}>
+                                Rekomendasi Langkah Penyelesaian:
+                              </strong>
+                              <p className="dfp-rec-text">{failureRecommendation}</p>
+                            </div>
+                          </div>
+
+                          <div className="dfp-actions">
+                            <button
+                              type="button"
+                              className="dfp-btn-retry"
+                              onClick={() => handleRestartJob(activeJob.id)}
+                              disabled={loading}
+                            >
+                              <Icon name="refresh" size={13} />
+                              <span>{loading ? 'Memulai Ulang...' : 'Jalankan Ulang (Retry Discovery)'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="dfp-btn-edit"
+                              onClick={() => handleEditJob(activeJob)}
+                            >
+                              <Icon name="settings" size={13} />
+                              <span>Ubah Konfigurasi Proyek (Buka Wizard)</span>
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
-
-
-                      {/* BOTTOM: Modern High-tech Authentic Terminal (Extended Full Width) */}
-                      <div className="terminal modern-terminal extended-width-terminal">
-                        <div className="terminal-modern-bar">
-                          <div className="terminal-bar-left-group">
-                            <div className="terminal-dots-monochrome">
-                              <span className="terminal-dot red" title="Tutup Sesi" />
-                              <span className="terminal-dot yellow" title="Minimize" />
-                              <span className="terminal-dot green" title="Maximize" />
-                            </div>
-
-                            <div className="terminal-session-badge">
-                              <span className="term-user">maestro@engine</span>
-                              <span className="term-colon">:</span>
-                              <span className="term-dir">~/discovery</span>
-                              <span className="term-branch">(main:live)</span>
-                            </div>
-
-                            <span className="terminal-live-indicator">
-                              <span className="terminal-pulse-dot" />
-                              <span>LIVE</span>
-                            </span>
-                          </div>
-
-                          <div className="terminal-category-tabs">
-                            {['all', 'system', 'runtime', 'database', 'discovery', 'browser', 'flow-builder', 'runner', 'quality'].map(cat => (
-                              <button
-                                key={cat}
-                                className={`terminal-tab-btn ${logFilter === cat ? 'active' : ''}`}
-                                onClick={() => setLogFilter(cat)}
-                              >
-                                {cat === 'all' ? '--all' : `--${cat}`}
-                              </button>
-                            ))}
-                          </div>
-
-                          <div className="terminal-bar-right-group">
-                            <div className="terminal-search-wrap">
-                              <Icon name="search" size={13} />
-                              <input
-                                className="terminal-search-input"
-                                placeholder="/ grep log..."
-                                value={logSearch}
-                                onChange={(e) => setLogSearch(e.target.value)}
-                              />
-                              {logSearch && (
-                                <button
-                                  className="terminal-search-clear"
-                                  onClick={() => setLogSearch('')}
-                                  title="Hapus filter pencarian"
-                                >
-                                  <Icon name="close" size={11} />
-                                </button>
-                              )}
-                            </div>
-
-                            <button
-                              className="terminal-scroll-down-btn"
-                              onClick={() => scrollToBottom(true)}
-                              title="Scroll ke output paling baru"
-                            >
-                              <Icon name="arrow" size={12} />
-                              <span>Terbawah</span>
-                            </button>
-                          </div>
+                  {/* BOTTOM: Modern High-tech Authentic Terminal (Extended Full Width) */}
+                  <div className="terminal modern-terminal extended-width-terminal">
+                    <div className="terminal-modern-bar">
+                      <div className="terminal-bar-left-group">
+                        <div className="terminal-dots-monochrome">
+                          <span className="terminal-dot red" title="Tutup Sesi" />
+                          <span className="terminal-dot yellow" title="Minimize" />
+                          <span className="terminal-dot green" title="Maximize" />
                         </div>
+
+                        <div className="terminal-session-badge">
+                          <span className="term-user">maestro@engine</span>
+                          <span className="term-colon">:</span>
+                          <span className="term-dir">~/discovery</span>
+                          <span className="term-branch">(main:live)</span>
+                        </div>
+
+                        {activeJob.status === 'RUNNING' ? (
+                          <span className="terminal-live-indicator">
+                            <span className="terminal-pulse-dot" />
+                            <span>LIVE</span>
+                          </span>
+                        ) : activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR' ? (
+                          <span className="terminal-live-indicator" style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#EF4444' }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#EF4444' }} />
+                            <span>STOPPED</span>
+                          </span>
+                        ) : activeJob.status === 'COMPLETED' ? (
+                          <span className="terminal-live-indicator" style={{ background: 'rgba(34, 197, 94, 0.15)', borderColor: 'rgba(34, 197, 94, 0.4)', color: '#22C55E' }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22C55E' }} />
+                            <span>COMPLETED</span>
+                          </span>
+                        ) : (
+                          <span className="terminal-live-indicator" style={{ background: 'rgba(245, 158, 11, 0.15)', borderColor: 'rgba(245, 158, 11, 0.4)', color: '#F59E0B' }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B' }} />
+                            <span>WAITING</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="terminal-category-tabs">
+                        {['all', 'system', 'runtime', 'database', 'discovery', 'browser', 'flow-builder', 'runner', 'quality'].map(cat => (
+                          <button
+                            key={cat}
+                            className={`terminal-tab-btn ${logFilter === cat ? 'active' : ''}`}
+                            onClick={() => setLogFilter(cat)}
+                          >
+                            {cat === 'all' ? '--all' : `--${cat}`}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="terminal-bar-right-group">
+                        <div className="terminal-search-wrap">
+                          <Icon name="search" size={13} />
+                          <input
+                            className="terminal-search-input"
+                            placeholder="/ grep log..."
+                            value={logSearch}
+                            onChange={(e) => setLogSearch(e.target.value)}
+                          />
+                          {logSearch && (
+                            <button
+                              className="terminal-search-clear"
+                              onClick={() => setLogSearch('')}
+                              title="Hapus filter pencarian"
+                            >
+                              <Icon name="close" size={11} />
+                            </button>
+                          )}
+                        </div>
+
+                        <button
+                          className="terminal-scroll-down-btn"
+                          onClick={() => {
+                            const allText = filteredLogs.map((l, i) => `[${formatLogTime(l.time)}] [${l.category}] ${l.message}`).join('\n');
+                            navigator.clipboard.writeText(allText);
+                            setActionSuccess(`${filteredLogs.length} baris log disalin!`);
+                            setTimeout(() => setActionSuccess(''), 2500);
+                          }}
+                          title="Salin seluruh log yang sedang tampil"
+                        >
+                          <Icon name="copy" size={12} />
+                          <span>Salin Log</span>
+                        </button>
+
+                        <button
+                          className="terminal-scroll-down-btn"
+                          onClick={() => scrollToBottom(true)}
+                          title="Scroll ke output paling baru"
+                        >
+                          <Icon name="arrow" size={12} />
+                          <span>Terbawah</span>
+                        </button>
+                      </div>
+                    </div>
 
                         {/* Shell prompt */}
                         <div className="terminal-shell-prompt-bar">
@@ -3271,14 +3342,18 @@ export function App() {
                             </div>
                           ) : (
                             <>
-                              {filteredLogs.map((log, i) => (
-                                <div key={i} className="log-row">
-                                  <span className="log-line-num">{String(i + 1).padStart(3, '0')}</span>
-                                  <span className="log-time">{formatLogTime(log.time)}</span>
-                                  <span className={`log-cat ${log.category}`}>{log.category}</span>
-                                  <span className="log-text">{log.message}</span>
-                                </div>
-                              ))}
+                              {filteredLogs.map((log, i) => {
+                                const isErr = /error|fatal|fail|exit\s+128/i.test(log.message) || log.category === 'error';
+                                const isWarn = /warn|warning/i.test(log.message) || log.category === 'warn';
+                                return (
+                                  <div key={i} className={`log-row ${isErr ? 'has-error' : isWarn ? 'has-warn' : ''}`}>
+                                    <span className="log-line-num">{String(i + 1).padStart(3, '0')}</span>
+                                    <span className="log-time">{formatLogTime(log.time)}</span>
+                                    <span className={`log-cat ${log.category}`}>{log.category}</span>
+                                    <span className="log-text">{log.message}</span>
+                                  </div>
+                                );
+                              })}
                               {(activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW') && (
                                 <div className="log-row running-indicator">
                                   <span className="terminal-spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />

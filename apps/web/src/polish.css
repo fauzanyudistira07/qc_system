@@ -4847,6 +4847,25 @@ button:disabled {
   word-break: break-word;
 }
 
+.terminal.modern-terminal .log-row.has-error {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border-left: 2px solid #EF4444;
+}
+
+.terminal.modern-terminal .log-row.has-error .log-text {
+  color: #FCA5A5 !important;
+  font-weight: 600;
+}
+
+.terminal.modern-terminal .log-row.has-warn {
+  background: rgba(245, 158, 11, 0.06) !important;
+  border-left: 2px solid #F59E0B;
+}
+
+.terminal.modern-terminal .log-row.has-warn .log-text {
+  color: #FDE68A !important;
+}
+
 .terminal-idle-stream-row {
   margin-top: 8px;
   color: #64748B;
@@ -6889,55 +6908,58 @@ button:disabled {
   box-shadow: 0 0 10px rgba(239, 68, 68, 0.5) !important;
 }
 
+/* ==========================================================================
+   FAILURE DIAGNOSTIC PANEL (PRECISION DARK TECH / INDUSTRIAL BRUTALISM)
+   ========================================================================== */
 .discovery-failure-diagnostic-panel {
   margin: 16px 0 20px 0;
-  background: #FFFFFF;
-  border: 1.5px solid #FCA5A5;
-  border-left: 5px solid #DC2626;
-  border-radius: 12px;
-  padding: 20px 24px;
-  box-shadow: 0 4px 18px rgba(220, 38, 38, 0.08);
+  background: #110B0E;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-left: 4px solid #EF4444;
+  border-radius: 8px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(239, 68, 68, 0.05);
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  animation: fadeInDown 0.2s ease-out;
+  gap: 14px;
+  animation: fadeInDown 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .dfp-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
 }
 
 .dfp-title-group {
   display: flex;
   align-items: flex-start;
-  gap: 14px;
+  gap: 12px;
   flex: 1;
   min-width: 280px;
 }
 
 .dfp-badge-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  background: #FEE2E2;
-  color: #DC2626;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.14);
+  color: #EF4444;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border: 1px solid #FCA5A5;
-  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
 }
 
 .dfp-title {
   margin: 0;
-  font-size: 15px;
-  font-weight: 850;
-  color: #991B1B;
+  font-size: 14px;
+  font-weight: 750;
+  color: #FCA5A5;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -6945,21 +6967,54 @@ button:disabled {
   line-height: 1.35;
 }
 
+.dfp-status-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #F87171;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
 .dfp-subtitle {
   margin: 4px 0 0 0;
-  font-size: 12px;
-  color: #7F1D1D;
+  font-size: 11.5px;
+  color: #94A3B8;
   line-height: 1.45;
 }
 
+.dfp-toggle-btn {
+  background: #171A23;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94A3B8;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 120ms ease;
+}
+
+.dfp-toggle-btn:hover {
+  background: #232733;
+  color: #ECEEF2;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
 .dfp-error-box {
-  background: #140A0A;
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  border-radius: 8px;
-  padding: 12px 14px;
+  background: #080A0F;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .dfp-error-box-header {
@@ -6971,10 +7026,10 @@ button:disabled {
 
 .dfp-error-label {
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 750;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: #F87171;
   display: flex;
   align-items: center;
@@ -6982,58 +7037,60 @@ button:disabled {
 }
 
 .dfp-copy-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #FCA5A5;
-  font-size: 11px;
+  background: #171A23;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ECEEF2;
+  font-size: 10.5px;
   font-weight: 600;
-  padding: 4px 11px;
-  border-radius: 5px;
+  padding: 3px 9px;
+  border-radius: 4px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  transition: all 0.15s ease;
+  transition: all 120ms ease;
 }
 
 .dfp-copy-btn:hover {
-  background: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.2);
   border-color: #EF4444;
   color: #FFFFFF;
 }
 
 .dfp-error-text {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.5;
-  color: #FECACA;
+  color: #FCA5A5;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 140px;
+  max-height: 120px;
   overflow-y: auto;
   margin: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .dfp-recommendation-box {
-  background: #FFFBEB;
-  border: 1px solid #FDE68A;
-  border-radius: 8px;
-  padding: 12px 14px;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 6px;
+  padding: 10px 12px;
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: flex-start;
 }
 
 .dfp-rec-icon {
-  color: #D97706;
+  color: #F59E0B;
   flex-shrink: 0;
   margin-top: 1px;
 }
 
 .dfp-rec-text {
-  font-size: 12px;
-  line-height: 1.55;
-  color: #92400E;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #FDE68A;
   margin: 0;
 }
 
@@ -7046,22 +7103,23 @@ button:disabled {
 }
 
 .dfp-btn-retry {
-  background: #DC2626;
+  background: #EF4444;
   color: #FFFFFF;
-  border: 1px solid #B91C1C;
-  border-radius: 8px;
-  font-size: 12.5px;
-  font-weight: 750;
-  padding: 8px 18px;
+  border: 1px solid #DC2626;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 16px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  transition: background 0.15s ease, transform 0.05s ease;
+  gap: 6px;
+  transition: all 120ms ease;
 }
 
 .dfp-btn-retry:hover {
-  background: #B91C1C;
+  background: #DC2626;
+  transform: translateY(-1px);
 }
 
 .dfp-btn-retry:active {
@@ -7069,18 +7127,24 @@ button:disabled {
 }
 
 .dfp-btn-edit {
-  background: #FAF6F1;
-  color: #4A392B;
-  border: 1.5px solid #DBC4AC;
-  border-radius: 8px;
-  font-size: 12.5px;
-  font-weight: 750;
-  padding: 8px 18px;
+  background: #171A23;
+  color: #ECEEF2;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 16px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  transition: all 0.15s ease;
+  gap: 6px;
+  transition: all 120ms ease;
+}
+
+.dfp-btn-edit:hover {
+  background: #232733;
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .dfp-btn-edit:hover {
@@ -10156,6 +10220,24 @@ button:disabled {
   color: #B5F934;
 }
 
+.milestone-status-pill.error {
+  background: rgba(239, 68, 68, 0.15) !important;
+  border-color: #EF4444 !important;
+  color: #EF4444 !important;
+}
+
+.milestone-status-pill.running {
+  background: rgba(56, 189, 248, 0.12) !important;
+  border-color: #38BDF8 !important;
+  color: #38BDF8 !important;
+}
+
+.milestone-status-pill.review {
+  background: rgba(245, 158, 11, 0.12) !important;
+  border-color: #F59E0B !important;
+  color: #F59E0B !important;
+}
+
 .milestone-steps-row {
   display: flex;
   align-items: center;
@@ -10190,6 +10272,20 @@ button:disabled {
 .milestone-step-card.completed {
   border-color: rgba(34, 197, 94, 0.3);
   background: rgba(34, 197, 94, 0.03);
+}
+
+.milestone-step-card.error {
+  border-color: #EF4444 !important;
+  background: rgba(239, 68, 68, 0.06) !important;
+}
+
+.milestone-step-card.error .milestone-step-status {
+  color: #EF4444;
+}
+
+.milestone-step-card.error .step-dot {
+  background: #EF4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.8);
 }
 
 .milestone-step-top {
