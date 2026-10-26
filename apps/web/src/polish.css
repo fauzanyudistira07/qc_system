@@ -10804,4 +10804,230 @@ button:disabled {
   color: #22C55E;
 }
 
+/* ==========================================================================
+   REMAINING PAGES: 1:1 FIGMA MATCH & THEME UNIFICATION
+   ========================================================================== */
+
+/* 1. Skenario Test Sub-tabs */
+.flows-sub-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #11151F;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 3px;
+  width: fit-content;
+  margin-bottom: 20px;
+}
+
+.flows-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94A3B8;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.flows-tab-btn:hover {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.flows-tab-btn.active {
+  color: #FFFFFF;
+  background: #171A23;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* 2. Top Metric Cards for Execution Runs & Findings */
+.runs-metrics-grid,
+.findings-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 1024px) {
+  .runs-metrics-grid,
+  .findings-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.metric-card-linear {
+  background: #1C2027;
+  border: 0.8px solid #292C3D;
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0px 4px 12px -4px rgba(0, 0, 0, 0.45), 0px 1px 2px 0px rgba(0, 0, 0, 0.5), inset 0px 1px 0px 0px rgba(255, 255, 255, 0.04);
+  transition: transform 120ms ease, border-color 120ms ease;
+}
+
+.metric-card-linear:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.metric-accent-stripe {
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 0 4px 4px 0;
+}
+
+.metric-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.metric-card-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8E95A3;
+}
+
+.metric-card-val {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 750;
+  color: #FFFFFF;
+  margin: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-card-sub {
+  font-size: 11px;
+  color: #6B7280;
+}
+
+/* 3. Output - Media Split View */
+.media-split-container {
+  display: grid;
+  grid-template-columns: 1fr 440px;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .media-split-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+.media-viewer-pane {
+  background: #171A1F;
+  border: 0.8px solid #2B313B;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0px 4px 12px -4px rgba(0, 0, 0, 0.45);
+}
+
+.media-viewer-header {
+  padding: 10px 16px;
+  background: #1C2027;
+  border-bottom: 0.8px solid #2B313B;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.media-viewer-stage {
+  padding: 16px;
+  background: #101216;
+  min-height: 480px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-sidebar-pane {
+  background: #171A1F;
+  border: 0.8px solid #292C3D;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.media-sidebar-header {
+  padding: 14px;
+  background: #1C2027;
+  border-bottom: 1px solid #292C3D;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 4. Output - Final Report */
+.report-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.report-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #1C2027;
+  border: 0.8px solid #3D4552;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: #ECEEF2;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.report-action-btn:hover {
+  background: #232733;
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #FFFFFF;
+}
+
+/* 5. System - Engine & Settings */
+.settings-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .settings-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-probe-card {
+  background: #171A1F;
+  border: 0.8px solid #292C3D;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0px 4px 12px -4px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 
