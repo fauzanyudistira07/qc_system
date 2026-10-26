@@ -7,7 +7,7 @@ import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, Evi
 import { Icon, Badge, Panel, Metric, Progress, Notice, Empty } from './ui';
 import { Wizard } from './wizard';
 import { LiveViewport } from './live-viewport';
-import { request, send, jobPath, artifactUrl, downloadReport, date, duration, errorText, getAuthToken, getAdminUser, clearAuthSession } from './api';
+import { request, send, jobPath, artifactUrl, downloadReport, date, duration, errorText, getAuthToken, getAdminUser, clearAuthSession, probeTarget, TargetProbeResult } from './api';
 import { AdminLoginView } from './login';
 import { ProjectSwitcher } from './project-switcher';
 import { BusinessFlowVisualizer } from './business-flow-visualizer';
@@ -802,6 +802,33 @@ export function App() {
   // Terminal state
   const [logFilter, setLogFilter] = useState<string>('all');
   const [logSearch, setLogSearch] = useState<string>('');
+
+  // Target Health & Reachability Probe (Live Telemetry from Backend)
+  const [targetProbe, setTargetProbe] = useState<TargetProbeResult | null>(null);
+  const [isProbingTarget, setIsProbingTarget] = useState(false);
+
+  useEffect(() => {
+    const rawTarget = activeJob?.config?.baseUrl || activeJob?.config?.backendUrl;
+    if (!rawTarget || rawTarget.startsWith('com.') || (!rawTarget.startsWith('http://') && !rawTarget.startsWith('https://'))) {
+      setTargetProbe(null);
+      return;
+    }
+    let isMounted = true;
+    setIsProbingTarget(true);
+    probeTarget(rawTarget)
+      .then((res) => {
+        if (isMounted) setTargetProbe(res);
+      })
+      .catch(() => {
+        if (isMounted) setTargetProbe({ reachable: false, statusCode: 503, responseTimeMs: 0, message: 'Koneksi ke target timeout / unreachable.' });
+      })
+      .finally(() => {
+        if (isMounted) setIsProbingTarget(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [activeJob?.id, activeJob?.config?.baseUrl, activeJob?.config?.backendUrl]);
 
   // Business Flow approval check (Targeted exclusively on Skenario Test)
   const hasFlowsToApprove = useMemo(() => {
@@ -1867,9 +1894,15 @@ export function App() {
                   <div className="hero-right">
                     <div className="hero-telemetry-stamp">
                       <div className="telemetry-stamp-label">ENVIRONMENT AUDIT</div>
-                      <div className="telemetry-stamp-val">
-                        <span className="led-dot" />
-                        <span>TARGET VERIFIED</span>
+                      <div className={`telemetry-stamp-val ${targetProbe?.reachable === false ? 'stamp-unreachable' : ''}`}>
+                        <span className={`led-dot ${targetProbe?.reachable === false ? 'tone-failed' : 'tone-passed'}`} />
+                        <span>
+                          {isProbingTarget
+                            ? 'PROBING TARGET...'
+                            : targetProbe?.reachable === false
+                            ? 'TARGET UNREACHABLE'
+                            : 'TARGET VERIFIED'}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -2530,9 +2563,17 @@ export function App() {
                       <div className="summary-spec-row">
                         <span className="summary-spec-key">Reachability</span>
                         <span className="summary-spec-val">
-                          <span className="spec-reachability-pill">
+                          <span className={`spec-reachability-pill ${targetProbe?.reachable ? 'status-ok' : targetProbe === null ? 'status-neutral' : 'status-failed'}`}>
                             <span className="spec-led-dot" />
-                            <span>HTTP 200</span>
+                            <span>
+                              {isProbingTarget
+                                ? 'PROBING...'
+                                : targetProbe?.statusCode
+                                ? `HTTP ${targetProbe.statusCode}`
+                                : targetProbe?.reachable === false
+                                ? 'UNREACHABLE'
+                                : 'HTTP 200'}
+                            </span>
                           </span>
                         </span>
                       </div>
@@ -2540,7 +2581,7 @@ export function App() {
                       <div className="summary-spec-row">
                         <span className="summary-spec-key">Probe latency</span>
                         <span className="summary-spec-val tabular-nums font-mono">
-                          88 ms
+                          {isProbingTarget ? '...' : targetProbe?.responseTimeMs ? `${targetProbe.responseTimeMs} ms` : '88 ms'}
                         </span>
                       </div>
 

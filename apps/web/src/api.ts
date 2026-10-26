@@ -315,4 +315,17 @@ export async function diagnoseFailureWithAi(payload: {
   return data;
 }
 
+export interface TargetProbeResult {
+  reachable: boolean;
+  url?: string;
+  statusCode?: number;
+  statusText?: string;
+  responseTimeMs?: number;
+  message?: string;
+}
+
+export async function probeTarget(url: string, timeoutMs = 3500): Promise<TargetProbeResult> {
+  return send<TargetProbeResult>('/api/v1/system/probe-target', { url, timeoutMs });
+}
+
 

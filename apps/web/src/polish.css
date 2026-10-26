@@ -858,19 +858,19 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-default);
-  border-radius: 6px;
+  border: 0.8px solid var(--accent-neon, #B5F934);
+  border-radius: 5px;
   background: var(--bg-surface-hover);
   cursor: pointer;
-  color: var(--text-muted);
+  color: var(--accent-neon, #B5F934);
   transition: all 120ms ease;
   flex-shrink: 0;
 }
 
 .project-picker-close-btn:hover {
-  background: var(--bg-surface-elevated);
-  color: #FFFFFF;
-  border-color: var(--border-focus);
+  background: var(--accent-neon, #B5F934);
+  color: #0B0C0F;
+  box-shadow: 0 0 10px rgba(181, 249, 52, 0.4);
 }
 
 /* Master-Detail Split Body */
@@ -1018,18 +1018,19 @@
   padding: 7px 10px;
   border-radius: 6px;
   background: transparent;
-  border: 1.5px dashed var(--border-default);
+  border: 0.8px dashed var(--accent-neon, #B5F934);
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 700;
-  color: var(--text-muted);
+  color: var(--accent-neon, #B5F934);
   cursor: pointer;
   transition: all 120ms ease;
 }
 
 .sidebar-new-project-btn:hover {
-  border-color: var(--border-focus);
-  color: var(--text-main);
-  background: var(--bg-surface-hover);
+  background: rgba(181, 249, 52, 0.1);
+  color: var(--accent-neon-hover, #c4fb57);
+  box-shadow: 0 0 10px rgba(181, 249, 52, 0.2);
 }
 
 /* RIGHT PANE: Sub-project Runs Detail */
