@@ -97,6 +97,154 @@ function formatFileDisplay(fullPath: string): string {
   return parts[parts.length - 1] || fullPath;
 }
 
+export interface RainbowColorTheme {
+  name: string;
+  id: string;
+  border: string;       // 1px solid card border
+  borderHover: string;  // card hover border
+  badgeBg: string;      // tag background (pill)
+  badgeText: string;    // tag text color
+  btnText: string;      // button text color and meta tag
+  btnHoverBg: string;   // button hover background
+  glow: string;         // subtle box shadow glow
+}
+
+export const RAINBOW_PALETTE: RainbowColorTheme[] = [
+  // 1. Merah (Rose / Crimson)
+  {
+    name: 'Merah',
+    id: 'red',
+    border: '#F43F5E',
+    borderHover: '#FB7185',
+    badgeBg: '#FFE4E6',
+    badgeText: '#9F1239',
+    btnText: '#FB7185',
+    btnHoverBg: '#F43F5E',
+    glow: 'rgba(244, 63, 94, 0.25)',
+  },
+  // 2. Jingga (Orange / Tangerine)
+  {
+    name: 'Jingga',
+    id: 'orange',
+    border: '#F97316',
+    borderHover: '#FB923C',
+    badgeBg: '#FFEDD5',
+    badgeText: '#9A3412',
+    btnText: '#FB923C',
+    btnHoverBg: '#F97316',
+    glow: 'rgba(249, 115, 22, 0.25)',
+  },
+  // 3. Kuning (Gold / Amber)
+  {
+    name: 'Kuning',
+    id: 'yellow',
+    border: '#EAB308',
+    borderHover: '#FACC15',
+    badgeBg: '#FEF9C3',
+    badgeText: '#854D0E',
+    btnText: '#FACC15',
+    btnHoverBg: '#EAB308',
+    glow: 'rgba(234, 179, 8, 0.25)',
+  },
+  // 4. Hijau (Emerald Green)
+  {
+    name: 'Hijau',
+    id: 'green',
+    border: '#10B981',
+    borderHover: '#34D399',
+    badgeBg: '#D1FAE5',
+    badgeText: '#065F46',
+    btnText: '#34D399',
+    btnHoverBg: '#10B981',
+    glow: 'rgba(16, 185, 129, 0.25)',
+  },
+  // 5. Biru (Sky / Cyan Blue)
+  {
+    name: 'Biru',
+    id: 'blue',
+    border: '#0284C7',
+    borderHover: '#38BDF8',
+    badgeBg: '#BAE6FD',
+    badgeText: '#0369A1',
+    btnText: '#38BDF8',
+    btnHoverBg: '#0284C7',
+    glow: 'rgba(2, 132, 199, 0.25)',
+  },
+  // 6. Nila (Indigo)
+  {
+    name: 'Nila',
+    id: 'indigo',
+    border: '#6366F1',
+    borderHover: '#818CF8',
+    badgeBg: '#E0E7FF',
+    badgeText: '#3730A3',
+    btnText: '#818CF8',
+    btnHoverBg: '#6366F1',
+    glow: 'rgba(79, 70, 229, 0.25)',
+  },
+  // 7. Ungu (Violet / Purple)
+  {
+    name: 'Ungu',
+    id: 'violet',
+    border: '#8B5CF6',
+    borderHover: '#A78BFA',
+    badgeBg: '#EDE9FE',
+    badgeText: '#5B21B6',
+    btnText: '#A78BFA',
+    btnHoverBg: '#8B5CF6',
+    glow: 'rgba(139, 92, 246, 0.25)',
+  },
+  // 8. Magenta (Fuchsia Pink)
+  {
+    name: 'Magenta',
+    id: 'magenta',
+    border: '#D946EF',
+    borderHover: '#F0ABFC',
+    badgeBg: '#FAE8FF',
+    badgeText: '#86198F',
+    btnText: '#F0ABFC',
+    btnHoverBg: '#D946EF',
+    glow: 'rgba(217, 70, 239, 0.25)',
+  },
+  // 9. Tosca (Teal)
+  {
+    name: 'Tosca',
+    id: 'teal',
+    border: '#14B8A6',
+    borderHover: '#2DD4BF',
+    badgeBg: '#CCFBF1',
+    badgeText: '#115E59',
+    btnText: '#2DD4BF',
+    btnHoverBg: '#14B8A6',
+    glow: 'rgba(20, 184, 166, 0.25)',
+  },
+];
+
+// Mapping eksplisit untuk memastikan tiap projek utama mendapat warna pelangi yang unik & bervariasi
+const PROJECT_RAINBOW_BASE_INDEX: Record<string, number> = {
+  'Al-Hikmah Finance': 3, // Hijau / Emerald (#10B981)
+  'Al-Hikmah School Web': 5, // Nila / Indigo (#6366F1)
+  'Al-Hikmah Digital (Mobile)': 8, // Tosca / Teal (#14B8A6)
+  'Taskia Digital': 0, // Merah / Rose (#F43F5E)
+  'SIMPUL CMMS': 6, // Ungu / Violet (#8B5CF6)
+  'Jamaahku Travel Agent': 2, // Kuning / Gold (#EAB308)
+  'Zannora': 4, // Biru / Sky (#0284C7)
+};
+
+export function getProjectRainbowTheme(projectName: string, indexOffset = 0): RainbowColorTheme {
+  let baseIndex = PROJECT_RAINBOW_BASE_INDEX[projectName];
+  if (baseIndex === undefined) {
+    let hash = 0;
+    for (let i = 0; i < projectName.length; i++) {
+      hash = (hash << 5) - hash + projectName.charCodeAt(i);
+      hash |= 0;
+    }
+    baseIndex = Math.abs(hash);
+  }
+  const finalIndex = (baseIndex + indexOffset) % RAINBOW_PALETTE.length;
+  return RAINBOW_PALETTE[finalIndex];
+}
+
 export function ProjectSwitcher({
   jobs,
   activeJobId,
@@ -390,6 +538,7 @@ export function ProjectSwitcher({
                   {rootProjects.map((proj) => {
                     const isSelected = proj.name === selectedProjectName;
                     const isCurrentLive = proj.name === currentRootProjectName;
+                    const projTheme = getProjectRainbowTheme(proj.name);
 
                     return (
                       <div
@@ -409,7 +558,14 @@ export function ProjectSwitcher({
                           }
                         }}
                       >
-                        <div className={`project-nav-icon platform-${proj.platform}`}>
+                        <div
+                          className={`project-nav-icon platform-${proj.platform}`}
+                          style={{
+                            borderColor: `${projTheme.border}66`,
+                            color: projTheme.btnText,
+                            background: `${projTheme.border}1a`,
+                          }}
+                        >
                           <Icon name={proj.platform === 'android' ? 'android' : 'globe'} size={14} />
                         </div>
                         <div className="project-nav-text">
@@ -454,10 +610,22 @@ export function ProjectSwitcher({
                     {/* Header Konten Projek Terpilih */}
                     <div className="project-detail-header-card">
                       <div className="detail-header-left">
-                        <div className={`detail-platform-badge platform-${selectedProject.platform}`}>
-                          <Icon name={selectedProject.platform === 'android' ? 'android' : 'globe'} size={14} />
-                          <span>{selectedProject.platform.toUpperCase()}</span>
-                        </div>
+                        {(() => {
+                          const selectedTheme = getProjectRainbowTheme(selectedProject.name);
+                          return (
+                            <div
+                              className={`detail-platform-badge platform-${selectedProject.platform}`}
+                              style={{
+                                borderColor: `${selectedTheme.border}66`,
+                                color: selectedTheme.btnText,
+                                background: `${selectedTheme.border}1a`,
+                              }}
+                            >
+                              <Icon name={selectedProject.platform === 'android' ? 'android' : 'globe'} size={14} />
+                              <span>{selectedProject.platform.toUpperCase()}</span>
+                            </div>
+                          );
+                        })()}
                         <div className="detail-title-group">
                           <div className="detail-name-row">
                             <h3>{selectedProject.name}</h3>
@@ -556,12 +724,33 @@ export function ProjectSwitcher({
                             const files = run.commitInfo?.filesChanged || [];
                             const impactedMod = run.impactReport?.impactedModules?.[0] || (isIncremental ? 'Bandara' : 'FLIGHT');
 
+                            const baseIdx = selectedProject.baselineRuns.findIndex((b) => b.id === run.id);
+                            const baseNum = baseIdx !== -1 ? selectedProject.baselineRuns.length - baseIdx : idx + 1;
+                            // Ambil tema warna pelangi: tiap projek memiliki palet uniknya dan jika ada multi run berputar dinamis
+                            const cardTheme = getProjectRainbowTheme(
+                              selectedProject.name,
+                              baseIdx !== -1 ? baseIdx : idx
+                            );
+
                             return (
                               <div
                                 key={run.id}
                                 className={`run-card ${isIncremental ? 'is-update-room' : 'is-baseline'} ${
                                   isRunActive ? 'active-room' : ''
                                 }`}
+                                style={
+                                  !isIncremental
+                                    ? ({
+                                        '--card-rainbow-border': cardTheme.border,
+                                        '--card-rainbow-hover': cardTheme.borderHover,
+                                        '--card-rainbow-badge-bg': cardTheme.badgeBg,
+                                        '--card-rainbow-badge-text': cardTheme.badgeText,
+                                        '--card-rainbow-btn-text': cardTheme.btnText,
+                                        '--card-rainbow-btn-hover': cardTheme.btnHoverBg,
+                                        '--card-rainbow-glow': cardTheme.glow,
+                                      } as React.CSSProperties)
+                                    : undefined
+                                }
                                 onClick={() => {
                                   onSelectJob(run.id);
                                   setIsModalOpen(false);
@@ -576,15 +765,11 @@ export function ProjectSwitcher({
                                       <span className="tag-room-update">
                                         UPDATE {shaShort ? `#${shaShort}` : ''}
                                       </span>
-                                    ) : (() => {
-                                      const baseIdx = selectedProject.baselineRuns.findIndex((b) => b.id === run.id);
-                                      const baseNum = baseIdx !== -1 ? selectedProject.baselineRuns.length - baseIdx : idx + 1;
-                                      return (
-                                        <span className="tag-room-baseline">
-                                          BASELINE #{baseNum}
-                                        </span>
-                                      );
-                                    })()}
+                                    ) : (
+                                      <span className="tag-room-baseline">
+                                        BASELINE #{baseNum}
+                                      </span>
+                                    )}
                                     {isRunActive && <span className="tag-current-opened">SEDANG DIBUKA</span>}
                                   </div>
 

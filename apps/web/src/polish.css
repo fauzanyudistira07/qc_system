@@ -1299,12 +1299,14 @@
 }
 
 .run-card.is-baseline {
-  border: 1px solid #0284C7;
+  border: 1px solid var(--card-rainbow-border, #0284C7);
   background: #14171D;
+  transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .run-card.is-baseline:hover {
-  border-color: #38BDF8;
+  border-color: var(--card-rainbow-hover, #38BDF8);
+  box-shadow: 0 4px 16px var(--card-rainbow-glow, rgba(2, 132, 199, 0.2));
   background: #181C23;
 }
 
@@ -1321,15 +1323,19 @@
 }
 
 .run-card.is-baseline .run-card-open-btn {
-  border-color: #0284C7;
-  color: #38BDF8;
-  background: rgba(2, 132, 199, 0.05);
+  border-color: var(--card-rainbow-border, #0284C7);
+  color: var(--card-rainbow-btn-text, #38BDF8);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .run-card.is-baseline .run-card-open-btn:hover {
-  background: #0284C7;
+  background: var(--card-rainbow-border, #0284C7);
   color: #0B0C0F;
-  border-color: #0284C7;
+  border-color: var(--card-rainbow-border, #0284C7);
+}
+
+.run-card.is-baseline .meta-file-tag {
+  color: var(--card-rainbow-btn-text, #38BDF8);
 }
 
 .meta-val-neon {
@@ -1364,9 +1370,9 @@
   font-family: var(--font-mono, monospace);
   font-size: 9.5px;
   font-weight: 800;
-  background: #BAE6FD;
-  color: #0369A1;
-  border: 1px solid #0284C7;
+  background: var(--card-rainbow-badge-bg, #BAE6FD);
+  color: var(--card-rainbow-badge-text, #0369A1);
+  border: 1px solid var(--card-rainbow-border, #0284C7);
   padding: 1px 6px;
   border-radius: 3px;
 }
