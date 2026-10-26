@@ -2037,12 +2037,6 @@ export function App() {
           <button className={`nav-item ${currentView === 'reports' ? 'active' : ''}`} onClick={() => setCurrentView('reports')}>
             <div className="nav-item-left"><Icon name="doc-text" size={18} /><span>Final Report</span></div>
           </button>
-
-          {/* SECTION 4: SYSTEM */}
-          <div className="nav-section-title">SYSTEM</div>
-          <button className={`nav-item ${currentView === 'settings' ? 'active' : ''}`} onClick={() => setCurrentView('settings')}>
-            <div className="nav-item-left"><Icon name="settings" size={18} /><span>Engine &amp; Settings</span></div>
-          </button>
         </div>
 
         {/* BOTTOM LEFT: ADMIN ACCOUNT */}
@@ -5252,9 +5246,9 @@ export function App() {
                             fontWeight: 700,
                             padding: '2px 8px',
                             borderRadius: 4,
-                            background: '#FAF6F1',
-                            border: '1px solid #DBC4AC',
-                            color: '#7B6858'
+                            background: 'rgba(255, 255, 255, 0.06)',
+                            border: '1px solid #23272E',
+                            color: '#ECEEF2'
                           }}>
                             {(activeJob.config?.platform || 'WEB').toUpperCase()}
                           </span>
@@ -5269,7 +5263,7 @@ export function App() {
                             <Icon name="shield" size={13} /> QA Health Score
                           </div>
                           <div className="fr-telemetry-val" style={{
-                            color: healthScore == null ? '#7B6858' : healthScore >= 80 ? '#15803D' : '#DC2626'
+                            color: healthScore == null ? '#6B7280' : healthScore >= 80 ? '#22C55E' : '#EF4444'
                           }}>
                             {healthScore != null ? `${healthScore}%` : '—'}
                           </div>
@@ -5299,7 +5293,7 @@ export function App() {
                             <Icon name="warning" size={13} /> Defect Terdeteksi
                           </div>
                           <div className="fr-telemetry-val" style={{
-                            color: totalDefectsCombined > 0 ? '#DC2626' : '#15803D'
+                            color: totalDefectsCombined > 0 ? '#EF4444' : '#22C55E'
                           }}>
                             {totalDefectsCombined}
                           </div>
@@ -5417,28 +5411,31 @@ export function App() {
                         {!hasRunData ? (
                           /* Belum ada eksekusi */
                           <div style={{
-                            background: isJobFailed ? '#FEF2F2' : '#EFF6FF',
-                            border: `1px solid ${isJobFailed ? '#FCA5A5' : '#BFDBFE'}`,
+                            background: isJobFailed ? '#160B0E' : '#0F1626',
+                            border: `1px solid ${isJobFailed ? 'rgba(239, 68, 68, 0.45)' : 'rgba(56, 189, 248, 0.3)'}`,
+                            borderLeft: `4px solid ${isJobFailed ? '#EF4444' : '#38BDF8'}`,
                             borderRadius: 8,
-                            padding: '16px 20px',
+                            padding: '18px 22px',
                             display: 'flex',
                             alignItems: 'flex-start',
                             gap: 14
                           }}>
-                            <Icon name={isJobFailed ? 'warning' : 'shield'} size={20} />
-                            <div>
-                              <strong style={{ fontSize: 13.5, fontWeight: 800, color: isJobFailed ? '#DC2626' : '#1D4ED8', display: 'block', marginBottom: 6 }}>
+                            <div style={{ color: isJobFailed ? '#EF4444' : '#38BDF8', marginTop: 2, flexShrink: 0 }}>
+                              <Icon name={isJobFailed ? 'warning' : 'shield'} size={20} />
+                            </div>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <strong style={{ fontSize: 13.5, fontWeight: 700, color: isJobFailed ? '#F87171' : '#60A5FA', display: 'block', marginBottom: 6 }}>
                                 {isJobFailed
                                   ? `Discovery berhenti — Status: ${activeJob.status}`
                                   : `${activeJob.flows?.length ?? 0} Skenario Siap — Belum Dieksekusi`}
                               </strong>
-                              <p style={{ margin: 0, fontSize: 12.5, color: '#7B6858', lineHeight: 1.55 }}>
+                              <p style={{ margin: 0, fontSize: 12.5, color: isJobFailed ? '#FECACA' : '#94A3B8', lineHeight: 1.55, wordBreak: 'break-all' }}>
                                 {isJobFailed
                                   ? (failureErrorText || 'Proses gagal pada tahap inisialisasi runtime.')
                                   : `Discovery selesai: ${filesScanned} modul & ${pages.length} rute terpetakan. Jalankan skenario test untuk menghasilkan metrik kelulusan.`}
                               </p>
                               {isJobFailed && (
-                                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
                                   <button type="button" className="tool-btn primary"
                                     onClick={() => handleRestartJob(activeJob.id)}
                                     style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
@@ -5446,7 +5443,7 @@ export function App() {
                                   </button>
                                   <button type="button" className="tool-btn"
                                     onClick={() => setCurrentView('discovery')}
-                                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, background: '#1C2027', border: '1px solid #23272E', color: '#ECEEF2' }}>
                                     <Icon name="terminal" size={13} /> Live Terminal
                                   </button>
                                 </div>
@@ -5454,7 +5451,7 @@ export function App() {
                               {!isJobFailed && (
                                 <button type="button" className="tool-btn primary"
                                   onClick={() => setCurrentView('flows')}
-                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 10 }}>
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 12 }}>
                                   <Icon name="runs" size={13} /> Buka Skenario Test &amp; Mulai Eksekusi
                                 </button>
                               )}
@@ -5525,10 +5522,10 @@ export function App() {
                                     return (
                                       <tr key={i}>
                                         <td>
-                                          <strong style={{ fontSize: 13, color: '#14181D', display: 'block' }}>
+                                          <strong style={{ fontSize: 13, color: '#ECEEF2', display: 'block' }}>
                                             {flowObj?.name || res.flowId}
                                           </strong>
-                                          <code style={{ fontSize: 10.5, color: '#8E7C6C', fontFamily: 'var(--font-mono)' }}>{res.flowId}</code>
+                                          <code style={{ fontSize: 10.5, color: '#A3A9B4', fontFamily: 'var(--font-mono)' }}>{res.flowId}</code>
                                         </td>
                                         <td>
                                           <span className={`linear-status-badge ${res.status === 'PASSED' ? 'passed' : 'failed'}`}>
@@ -5537,12 +5534,12 @@ export function App() {
                                           </span>
                                         </td>
                                         <td>
-                                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#7B6858', fontVariantNumeric: 'tabular-nums' }}>
+                                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#ECEEF2', fontVariantNumeric: 'tabular-nums' }}>
                                             {passedSteps}/{totalSteps}
                                           </span>
                                         </td>
                                         <td>
-                                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#7B6858' }}>
+                                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#ECEEF2' }}>
                                             {durationStr}
                                           </span>
                                         </td>
@@ -5558,16 +5555,16 @@ export function App() {
                                                     style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
                                                     onClick={() => setFullScreenshot(resolved)}>
                                                     <img src={resolved} alt="Bukti"
-                                                      style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 4, border: '1px solid #DBC4AC' }} />
+                                                      style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 4, border: '1px solid #23272E' }} />
                                                   </button>
                                                 );
                                               })}
                                               {flowScreenshots.length > 3 && (
-                                                <span style={{ fontSize: 11, color: '#8E7C6C' }}>+{flowScreenshots.length - 3}</span>
+                                                <span style={{ fontSize: 11, color: '#A3A9B4' }}>+{flowScreenshots.length - 3}</span>
                                               )}
                                             </div>
                                           ) : (
-                                            <span style={{ fontSize: 12, color: '#A89B8F' }}>—</span>
+                                            <span style={{ fontSize: 12, color: '#6B7280' }}>—</span>
                                           )}
                                         </td>
                                       </tr>
@@ -5645,12 +5642,12 @@ export function App() {
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                           <div className={`report-signoff-stamp ${isJobFailed ? '' : ''}`} style={
                             isJobFailed
-                              ? { borderColor: '#DC2626', background: '#FEF2F2', color: '#DC2626' }
+                              ? { borderColor: '#EF4444', background: 'rgba(239, 68, 68, 0.15)', color: '#F87171' }
                               : !hasRunData
-                              ? { borderColor: '#B45309', background: '#FFFBEB', color: '#B45309' }
+                              ? { borderColor: '#F59E0B', background: 'rgba(245, 158, 11, 0.15)', color: '#FBBF24' }
                               : runsScore != null && runsScore >= 80
-                              ? {}
-                              : { borderColor: '#DC2626', background: '#FEF2F2', color: '#DC2626' }
+                              ? { borderColor: '#22C55E', background: 'rgba(34, 197, 94, 0.15)', color: '#4ADE80' }
+                              : { borderColor: '#EF4444', background: 'rgba(239, 68, 68, 0.15)', color: '#F87171' }
                           }>
                             <Icon name={isJobFailed ? 'warning' : runsScore != null && runsScore >= 80 ? 'check' : 'warning'} size={13} />
                             {verdictLabel}
