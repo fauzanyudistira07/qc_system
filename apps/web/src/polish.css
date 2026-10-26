@@ -1289,11 +1289,52 @@
 }
 
 .run-card.is-update-room {
-  border-left: 3.5px solid #F59E0B;
+  border: 1px solid #D97706;
+  background: #14171D;
+}
+
+.run-card.is-update-room:hover {
+  border-color: #F59E0B;
+  background: #181C23;
 }
 
 .run-card.is-baseline {
-  border-left: 3.5px solid #38BDF8;
+  border: 1px solid #0284C7;
+  background: #14171D;
+}
+
+.run-card.is-baseline:hover {
+  border-color: #38BDF8;
+  background: #181C23;
+}
+
+.run-card.is-update-room .run-card-open-btn {
+  border-color: #D97706;
+  color: #F59E0B;
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.run-card.is-update-room .run-card-open-btn:hover {
+  background: #D97706;
+  color: #0B0C0F;
+  border-color: #D97706;
+}
+
+.run-card.is-baseline .run-card-open-btn {
+  border-color: #0284C7;
+  color: #38BDF8;
+  background: rgba(2, 132, 199, 0.05);
+}
+
+.run-card.is-baseline .run-card-open-btn:hover {
+  background: #0284C7;
+  color: #0B0C0F;
+  border-color: #0284C7;
+}
+
+.meta-val-neon {
+  color: var(--accent-neon, #B5F934) !important;
+  font-weight: 700;
 }
 
 .run-card-top-bar {
@@ -1312,9 +1353,9 @@
   font-family: var(--font-mono, monospace);
   font-size: 9.5px;
   font-weight: 800;
-  background: rgba(245, 158, 11, 0.15);
-  color: #F59E0B;
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: #FDE68A;
+  color: #78350F;
+  border: 1px solid #F59E0B;
   padding: 1px 6px;
   border-radius: 3px;
 }
@@ -1323,9 +1364,9 @@
   font-family: var(--font-mono, monospace);
   font-size: 9.5px;
   font-weight: 800;
-  background: rgba(56, 189, 248, 0.15);
-  color: #38BDF8;
-  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: #BAE6FD;
+  color: #0369A1;
+  border: 1px solid #0284C7;
   padding: 1px 6px;
   border-radius: 3px;
 }
@@ -3840,20 +3881,26 @@ button:disabled {
 }
 
 .kpi-icon-wrap {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   display: grid;
   place-items: center;
-  background: var(--bg-surface-elevated);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-default);
   color: var(--text-dim);
   transition: all 120ms ease;
 }
 
+.kpi-corner-arrow {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .summary-kpi-card:hover .kpi-icon-wrap {
-  background: var(--cyan);
-  border-color: var(--cyan);
+  background: var(--accent-neon, #B5F934);
+  border-color: var(--accent-neon, #B5F934);
   color: #080C14;
 }
 

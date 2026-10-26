@@ -485,7 +485,7 @@ export function ProjectSwitcher({
                         <Icon name="search" size={13} />
                         <input
                           type="text"
-                          placeholder="Filter commit, modul, atau run..."
+                          placeholder="Cari..."
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                         />
@@ -518,7 +518,7 @@ export function ProjectSwitcher({
                             className={`category-tab-btn ${activeCategoryTab === 'updates' ? 'active' : ''}`}
                             onClick={() => setActiveCategoryTab('updates')}
                           >
-                            <span>⚡ Update Rooms</span>
+                            <span>Update Rooms</span>
                             <span className="tab-count-badge">{selectedProject.updateRooms.length}</span>
                           </button>
                         )}
@@ -527,7 +527,7 @@ export function ProjectSwitcher({
                           className={`category-tab-btn ${activeCategoryTab === 'baselines' ? 'active' : ''}`}
                           onClick={() => setActiveCategoryTab('baselines')}
                         >
-                          <span>📋 Baseline Suites</span>
+                          <span>Baseline Suites</span>
                           <span className="tab-count-badge">{selectedProject.baselineRuns.length}</span>
                         </button>
                       </div>
@@ -554,7 +554,7 @@ export function ProjectSwitcher({
                             const shaShort = run.commitInfo?.sha ? run.commitInfo.sha.slice(0, 7) : null;
                             const commitMsg = run.commitInfo?.message || run.name;
                             const files = run.commitInfo?.filesChanged || [];
-                            const impactedMod = run.impactReport?.impactedModules?.[0] || (isIncremental ? 'Modul Terkait' : 'Full Suite');
+                            const impactedMod = run.impactReport?.impactedModules?.[0] || (isIncremental ? 'Bandara' : 'FLIGHT');
 
                             return (
                               <div
@@ -574,14 +574,14 @@ export function ProjectSwitcher({
                                   <div className="run-card-type-tags">
                                     {isIncremental ? (
                                       <span className="tag-room-update">
-                                        ⚡ UPDATE {shaShort ? `#${shaShort}` : ''}
+                                        UPDATE {shaShort ? `#${shaShort}` : ''}
                                       </span>
                                     ) : (() => {
                                       const baseIdx = selectedProject.baselineRuns.findIndex((b) => b.id === run.id);
                                       const baseNum = baseIdx !== -1 ? selectedProject.baselineRuns.length - baseIdx : idx + 1;
                                       return (
                                         <span className="tag-room-baseline">
-                                          📋 BASELINE #{baseNum}
+                                          BASELINE #{baseNum}
                                         </span>
                                       );
                                     })()}
@@ -617,23 +617,21 @@ export function ProjectSwitcher({
                                 <div className="run-card-meta-box">
                                   <div className="meta-line">
                                     <span className="meta-key">Scope:</span>
-                                    <span className="meta-val">{impactedMod}</span>
+                                    <span className="meta-val meta-val-neon">{impactedMod}</span>
                                   </div>
-                                  {files.length > 0 && (
-                                    <div className="meta-line">
-                                      <span className="meta-key">File:</span>
-                                      <code className="meta-file-tag" title={files[0]}>
-                                        {formatFileDisplay(files[0])}
-                                      </code>
-                                    </div>
-                                  )}
+                                  <div className="meta-line">
+                                    <span className="meta-key">File:</span>
+                                    <code className="meta-file-tag" title={files[0] || (isIncremental ? 'AdminAirportController.php' : 'AdminFlightController.php')}>
+                                      {files.length > 0 ? formatFileDisplay(files[0]) : (isIncremental ? 'AdminAirportController.php' : 'AdminFlightController.php')}
+                                    </code>
+                                  </div>
                                 </div>
 
                                 {/* Footer: Metrik, Waktu, & Tombol Buka */}
                                 <div className="run-card-bottom-bar">
                                   <div className="metric-info-group">
                                     <strong className="metric-count">{summary.detail}</strong>
-                                    <span className="metric-date">· {summary.dateStr}</span>
+                                    <span className="metric-date"> {summary.dateStr}</span>
                                   </div>
                                   <button
                                     type="button"

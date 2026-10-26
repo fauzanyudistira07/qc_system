@@ -2295,13 +2295,12 @@ export function App() {
                     <div className="kpi-top">
                       <span className="kpi-label">01 // CAKUPAN HALAMAN</span>
                       <div className="kpi-icon-wrap">
-                        <Icon name="map" size={15} />
+                        <span className="kpi-corner-arrow">↗</span>
                       </div>
                     </div>
                     <span className="kpi-val tabular-nums">{stats.pagesCount}</span>
                     <div className="kpi-sub-row">
                       <span className="kpi-sub">{activeJob?.inventory?.routes?.length ?? stats.pagesCount} route terpetakan</span>
-                      <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
                     </div>
                   </div>
 
@@ -2309,13 +2308,12 @@ export function App() {
                     <div className="kpi-top">
                       <span className="kpi-label">02 // ELEMEN INTERAKTIF</span>
                       <div className="kpi-icon-wrap">
-                        <Icon name="discovery" size={15} />
+                        <span className="kpi-corner-arrow">↗</span>
                       </div>
                     </div>
                     <span className="kpi-val tabular-nums">{stats.elementsCount}</span>
                     <div className="kpi-sub-row">
                       <span className="kpi-sub">Form, button, input &amp; navigasi</span>
-                      <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
                     </div>
                   </div>
 
@@ -2323,13 +2321,12 @@ export function App() {
                     <div className="kpi-top">
                       <span className="kpi-label">03 // SKENARIO REGRESI</span>
                       <div className="kpi-icon-wrap">
-                        <Icon name="flows" size={15} />
+                        <span className="kpi-corner-arrow">↗</span>
                       </div>
                     </div>
                     <span className="kpi-val tabular-nums">{stats.flowsCount}</span>
                     <div className="kpi-sub-row">
                       <span className="kpi-sub">Playwright &amp; Maestro otomatis</span>
-                      <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
                     </div>
                   </div>
 
@@ -2337,7 +2334,7 @@ export function App() {
                     <div className="kpi-top">
                       <span className="kpi-label">04 // TINGKAT KELULUSAN</span>
                       <div className="kpi-icon-wrap">
-                        <Icon name="runs" size={15} />
+                        <span className="kpi-corner-arrow">↗</span>
                       </div>
                     </div>
                     {(() => {
@@ -2349,7 +2346,6 @@ export function App() {
                             </span>
                             <div className="kpi-sub-row">
                               <span className="kpi-sub" style={{ color: '#0369A1' }}>Sedang berjalan ({activeJob.progress || 0}%)</span>
-                              <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
                             </div>
                           </>
                         );
@@ -2367,7 +2363,6 @@ export function App() {
                           </span>
                           <div className="kpi-sub-row">
                             <span className="kpi-sub">{total ? `${passed} lulus · ${failed} gagal (${unit})` : 'Belum ada eksekusi atau bukti uji'}</span>
-                            <span className="kpi-jump-arrow"><Icon name="arrow" size={12} /></span>
                           </div>
                         </>
                       );
