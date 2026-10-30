@@ -6,9 +6,7 @@ interface ProjectSwitcherProps {
   jobs: Job[];
   activeJobId: string | null;
   activeJob: Job | null;
-  flowSource: 'job' | 'zannora';
   onSelectJob: (jobId: string) => void;
-  onSelectZannora: () => void;
   onNewJob: () => void;
 }
 
@@ -249,9 +247,7 @@ export function ProjectSwitcher({
   jobs,
   activeJobId,
   activeJob,
-  flowSource: _flowSource,
   onSelectJob,
-  onSelectZannora: _onSelectZannora,
   onNewJob,
 }: ProjectSwitcherProps) {
   // Modal Card di tengah layar terbuka/tertutup

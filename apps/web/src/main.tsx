@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './tailwind.css';
 import './styles.css';
 import './polish.css';
-import { Job, Page, Flow, Result, Step, SystemStatus, View, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus, FeatureContractPlan, BusinessFlowMap, ENABLE_MOBILE_SUPPORT } from './types';
+import { Job, Page, Flow, Result, Step, SystemStatus, View, QualityEvidence, ZannoraEvidence, EvidenceAsset, EvidenceGroup, EvidenceFinding, CapabilityProfile, RunHistoryEntry, FindingWorkflowStatus, FeatureContractPlan, BusinessFlowMap, ENABLE_MOBILE_SUPPORT } from './types';
 import { Icon, Badge, Panel, Metric, Progress, Notice, Empty } from './ui';
 import { Wizard } from './wizard';
 import { LiveViewport } from './live-viewport';
@@ -306,7 +306,7 @@ function ProcessMap({ nodes, progress, centralStatus, onNavigate }: { nodes: Pro
     <section className="qc-map-panel" aria-label="QC Maestro technical process map">
       <div className="qc-map-header">
         <div>
-          <div className="qc-map-kicker">ZANNORA QC / TECHNICAL MAP v1.0</div>
+          <div className="qc-map-kicker">QC MAESTRO / TECHNICAL MAP v1.0</div>
           <h2>QC Execution Topology</h2>
           <p>Jalur kerja dari target discovery sampai evidence, defect, dan retest. Klik node untuk membuka detail proses.</p>
         </div>
@@ -338,7 +338,7 @@ function ProcessMap({ nodes, progress, centralStatus, onNavigate }: { nodes: Pro
           <div className="qc-map-center-orbit" />
           <div className="qc-map-center-icon"><Icon name="shield" size={30} /></div>
           <strong>QC Maestro</strong>
-          <span>Zannora E2E Control</span>
+          <span>Automated E2E Control</span>
           <em className={`qc-map-center-status ${centralStatus.toLowerCase()}`}><i />{centralStatus}</em>
         </div>
 
@@ -759,46 +759,6 @@ function findingKey(finding: EvidenceFinding, index: number) {
   return `${finding.groupId || 'finding'}|${finding.route || ''}|${finding.viewport || ''}|${finding.browser || ''}|${finding.name || ''}|${index}`;
 }
 
-function ZannoraOverview({ evidence, onNavigate, onOpenEvidence }: { evidence: ZannoraEvidence; onNavigate: (view: View) => void; onOpenEvidence: (id: string) => void }) {
-  const routes = zannoraRoutes(evidence);
-  const designGroups = evidence.groups.filter((group) => ['api-e2e', 'crud', 'roles'].includes(group.id));
-  const executionGroups = evidence.groups.filter((group) => ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation'].includes(group.id));
-  const executionMetric = executionGroups.reduce((acc, group) => { const metric = evidenceMetric(group); return { passed: acc.passed + metric.passed, total: acc.total + metric.total }; }, { passed: 0, total: 0 });
-  const passRate = executionMetric.total ? Math.round((executionMetric.passed / executionMetric.total) * 100) : 0;
-  const findings = zannoraFindings(evidence).length;
-  return (
-    <div>
-      <div className="view-header"><div><h1>Project Summary</h1><p>Snapshot real dari evidence QC terakhir. Semua angka di bawah berasal dari report yang tersimpan.</p></div><div className="header-actions"><button className="quiet" onClick={() => onNavigate('process')}><Icon name="map" size={15} /> Milestone Flow</button><button className="primary" onClick={() => onNavigate('evidence')}><Icon name="reports" size={15} /> Evidence Center</button></div></div>
-      <div className="metric-grid">
-        <Metric tone="cyan" label="Route Terpetakan" value={routes.length} note="route pada quality scope" icon="map" onClick={() => onNavigate('map')} />
-        <Metric tone="violet" label="Test Design Suites" value={designGroups.length} note={designGroups.reduce((n, group) => n + evidenceMetric(group).total, 0) + ' assertion'} icon="flows" onClick={() => onNavigate('flows')} />
-        <Metric tone="yellow" label="Execution Checks" value={executionMetric.total} note={executionMetric.passed + ' passed · ' + (executionMetric.total - executionMetric.passed) + ' failed'} icon="runs" onClick={() => onNavigate('runs')} />
-        <Metric tone="green" label="Pass Rate" value={passRate + '%'} note={findings + ' open finding'} icon="warning" onClick={() => onNavigate('findings')} />
-      </div>
-      <Panel title="Evidence Snapshot" description={'Generated ' + date(evidence.generatedAt) + ' · ' + evidence.totals.assets + ' artifact terindeks'}>
-        <Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Suite</th><th>Status</th><th>Coverage</th><th>Evidence</th><th>Action</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.category}</small></td><td><Badge value={group.status} /></td><td>{metric.passed}/{metric.total}</td><td>{group.screenshots.length} screenshot · {group.videos.length} video</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div>}</Paginated>
-      </Panel>
-    </div>
-  );
-}
-
-function ZannoraDiscovery({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
-  const routes = zannoraRoutes(evidence);
-  return <div><div className="view-header"><div><h1>Discovery &amp; Inventory</h1><p>Inventory diambil dari scope quality/responsive dan suite yang benar-benar dijalankan.</p></div><span className="evidence-project-chip">LIVE EVIDENCE SNAPSHOT</span></div><div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.25fr) minmax(280px, .75fr)', gap: 18 }}><Panel title={'Evidence pipeline (' + evidence.groups.length + ' suites)'}><Paginated items={evidence.groups}>{(groups) => <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{groups.map((group) => { const metric = evidenceMetric(group); return <button key={group.id} className="milestone-related-evidence-card" onClick={() => onOpenEvidence(group.id)}><span><strong>{group.title}</strong><small>{metric.passed}/{metric.total} checks · {group.assets.length} asset · {date(group.report?.updatedAt)}</small></span><Badge value={group.status} /><Icon name="arrow" size={13} /></button>; })}</div>}</Paginated></Panel><Panel title={'Route scope (' + routes.length + ')'}><Paginated items={routes}>{(visibleRoutes) => <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{visibleRoutes.length ? visibleRoutes.map((route) => <code key={route} style={{ color: 'var(--cyan)', padding: '8px 10px', background: 'var(--bg-panel)', borderRadius: 6 }}>{route}</code>) : <Empty title="Route scope belum tersedia">Report suite belum membawa daftar route.</Empty>}</div>}</Paginated></Panel></div></div>;
-}
-
-function ZannoraAppMap({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
-  const routes = zannoraRoutes(evidence);
-  const quality = evidence.groups.find((group) => group.id === 'quality');
-  const qualityGroups = evidence.groups.filter((group) => group.category === 'UI Quality');
-  return <div><div className="view-header"><div><h1>App Map</h1><p>Route inventory real dari report quality, dengan browser, viewport, dan status evidence.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Inspect quality evidence</button></div><div className="split-view"><div className="list-pane"><div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700 }}>Routes ({routes.length})</div><Paginated items={routes}>{(visibleRoutes) => visibleRoutes.map((route) => <div key={route} style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}><strong>{route}</strong><small style={{ display: 'block', marginTop: 5, color: 'var(--text-dim)' }}>covered by quality audit · desktop / tablet / mobile</small></div>)}</Paginated></div><div className="detail-pane"><Panel title="Inventory source" description={quality?.summary}><div className="evidence-inline-meta"><Badge value={quality?.status ?? 'UNKNOWN'} /><span>{quality?.metadata?.browsers?.join(' · ') || 'browser scope unavailable'}</span><span>{quality?.metadata?.viewports?.join(' · ') || 'viewport scope unavailable'}</span></div><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>App Map ini memakai daftar route yang tersimpan di report; bukan data demo atau hasil hitungan statis.</p></Panel><Panel title="Quality coverage"><Paginated items={qualityGroups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Area</th><th>Checks</th><th>Status</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td>{group.title}</td><td>{metric.passed}/{metric.total}</td><td><Badge value={group.status} /></td></tr>; })}</tbody></table></div>}</Paginated></Panel></div></div></div>;
-}
-
-function ZannoraTestDesign({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
-  const groups = evidence.groups.filter((group) => ['API & CRUD', 'Web Flow'].includes(group.category));
-  return <div><div className="view-header"><div><h1>Test Design</h1><p>Suite nyata yang menjadi dasar test design: API, CRUD, role access, navigation, dan full flow.</p></div><button className="quiet" onClick={() => onOpenEvidence('api-e2e')}><Icon name="reports" size={15} /> Open source evidence</button></div><Paginated items={groups}>{(visibleGroups) => <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>{visibleGroups.map((group) => { const metric = evidenceMetric(group); return <Panel key={group.id} title={group.title} description={group.summary} actions={<Badge value={group.status} />}><div className="evidence-inline-meta"><strong>{metric.passed}/{metric.total}</strong><span>{group.category}</span></div><div className="evidence-asset-count"><span>{group.assets.length} artifact</span><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Detail &amp; evidence <Icon name="arrow" size={12} /></button></div></Panel>; })}</div>}</Paginated></div>;
-}
-
 function CrudCoveragePanel({ plan }: { plan?: import('./types').CrudPlan }) {
   if (!plan) return <Panel title="CRUD coverage"><Empty title="CRUD matrix belum tersedia">Jalankan discovery ulang untuk menyusun resource dan operasi CRUD dari inventory.</Empty></Panel>;
   const labels: Record<string, string> = { list: 'List', detail: 'Detail', create: 'Create', update: 'Update', delete: 'Delete', duplicate: 'Duplicate', 'delete-in-use': 'Delete in-use' };
@@ -900,15 +860,6 @@ function BusinessFlowEditorPanel({ map, onApprove, onUpdate }: { map?: BusinessF
   </Panel>;
 }
 
-function ZannoraRuns({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
-  return <div><div className="view-header"><div><h1>Execution Runs</h1><p>Ringkasan eksekusi yang dirakit dari report JSON terbaru tiap suite.</p></div><span className="evidence-project-chip">{evidence.totals.passed}/{evidence.totals.groups} SUITES PASSED</span></div><Panel title="Real execution ledger"><Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Run</th><th>Passed / Total</th><th>Failed</th><th>Artifacts</th><th>Report</th></tr></thead><tbody>{groups.map((group) => { const metric = evidenceMetric(group); return <tr key={group.id}><td><strong>{group.title}</strong><small style={{ display: 'block', color: 'var(--text-dim)' }}>{group.id}</small></td><td>{metric.passed}/{metric.total}</td><td>{metric.failed}</td><td>{group.assets.length}</td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Inspect <Icon name="arrow" size={12} /></button></td></tr>; })}</tbody></table></div>}</Paginated></Panel></div>;
-}
-
-function ZannoraReport({ evidence, onOpenEvidence }: { evidence: ZannoraEvidence; onOpenEvidence: (id: string) => void }) {
-  const total = evidence.groups.reduce((acc, group) => { const metric = evidenceMetric(group); return { passed: acc.passed + metric.passed, total: acc.total + metric.total }; }, { passed: 0, total: 0 });
-  return <div><div className="view-header"><div><h1>Final Report</h1><p>Executive summary live dari seluruh report dan evidence yang tersedia.</p></div><button className="primary" onClick={() => onOpenEvidence('quality')}><Icon name="reports" size={15} /> Open quality report</button></div><div className="metric-grid"><Metric tone="green" label="Suite Clear" value={evidence.totals.passed + '/' + evidence.totals.groups} note="evidence groups" icon="check" /><Metric tone="cyan" label="Checks Passed" value={total.passed + '/' + total.total} note="across all reports" icon="runs" /><Metric tone="violet" label="Screenshots" value={evidence.totals.screenshots} note="checkpoint evidence" icon="reports" /><Metric tone="yellow" label="Videos" value={evidence.totals.videos} note="flow recording" icon="discovery" /></div><Panel title="Report index"><Paginated items={evidence.groups}>{(groups) => <div className="table-wrap"><table><thead><tr><th>Category</th><th>Summary</th><th>Folder</th><th>Open</th></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td><Badge value={group.category} /></td><td>{group.summary}</td><td><code>{group.folder}</code></td><td><button className="quiet" onClick={() => onOpenEvidence(group.id)}>Evidence <Icon name="arrow" size={12} /></button></td></tr>)}</tbody></table></div>}</Paginated></Panel></div>;
-}
-
 export function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('qc_theme') as 'dark' | 'light') || 'dark';
@@ -925,8 +876,7 @@ export function App() {
     const routeViews: Record<string, View> = {
       '/': 'overview', '/overview': 'overview', '/process': 'overview', '/projects': 'overview',
       '/discovery': 'discovery', '/discovery/new': 'new', '/map': 'map', '/flows': 'flows',
-      '/runs': 'runs', '/findings': 'findings', '/reports': 'reports', '/evidence': 'evidence',
-      '/settings': 'settings', '/live': 'live'
+      '/runs': 'runs', '/findings': 'findings', '/reports': 'reports', '/evidence': 'evidence'
     };
     const path = window.location.pathname.replace(/\/$/, '') || '/';
     if (path !== '/' && routeViews[path]) {
@@ -1081,16 +1031,14 @@ export function App() {
   const [reportSubTab, setReportSubTab] = useState<'summary' | 'gallery' | 'document' | 'videos'>('summary');
   const [galleryFilter, setGalleryFilter] = useState<string>('all');
 
-  // Curated Zannora evidence state
-  const [zannoraEvidence, setZannoraEvidence] = useState<ZannoraEvidence | null>(null);
-  const [targetEvidence, setTargetEvidence] = useState<ZannoraEvidence | null>(null);
+  // Target quality evidence state
+  const [targetEvidence, setTargetEvidence] = useState<QualityEvidence | null>(null);
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState('');
   const [evidenceGroupFilter, setEvidenceGroupFilter] = useState('all');
   const [evidenceSubTab, setEvidenceSubTab] = useState<'gallery' | 'audit'>('gallery');
   const [evidenceFocus, setEvidenceFocus] = useState<EvidenceFocus>(null);
-  const [flowSource, setFlowSource] = useState<'zannora' | 'job'>('job');
   const [findingStatuses, setFindingStatuses] = useState<Record<string, FindingWorkflowStatus>>({});
   const lastAutoFlowJobIdRef = useRef<string | null>(null);
 
@@ -1151,9 +1099,6 @@ export function App() {
         // Prioritaskan project web terlebih dahulu agar mobile run tidak membingungkan
         const webJob = data.find(j => (j.config?.platform || 'web') === 'web');
         setActiveJobId(webJob ? webJob.id : data[0].id);
-        setFlowSource('job');
-      } else if (!data.length) {
-        setFlowSource('job');
       }
     } catch {
       // API may be booting
@@ -1183,19 +1128,6 @@ export function App() {
     return () => clearInterval(interval);
   }, [authToken, refreshSystem, refreshJobs]);
 
-  const refreshZannoraEvidence = useCallback(async () => {
-    setEvidenceLoading(true);
-    try {
-      const evidence = await request<ZannoraEvidence>('/api/v1/zannora-evidence');
-      setZannoraEvidence(evidence);
-      setEvidenceError('');
-    } catch (error) {
-      setEvidenceError(errorText(error));
-    } finally {
-      setEvidenceLoading(false);
-    }
-  }, []);
-
   const refreshTargetEvidence = useCallback(async (jobId: string | null = activeJobId) => {
     if (!jobId) {
       setTargetEvidence(null);
@@ -1204,7 +1136,7 @@ export function App() {
     }
     setEvidenceLoading(true);
     try {
-      const evidence = await request<ZannoraEvidence>(`/api/v1/discovery/jobs/${jobId}/quality-evidence`);
+      const evidence = await request<QualityEvidence>(`/api/v1/discovery/jobs/${jobId}/quality-evidence`);
       setTargetEvidence(evidence);
       setEvidenceError('');
     } catch (error) {
@@ -1229,30 +1161,16 @@ export function App() {
   }, [activeJobId]);
 
   useEffect(() => {
-    if (!authToken) return;
-    void refreshZannoraEvidence();
-  }, [authToken, refreshZannoraEvidence]);
+    if (!authToken || !activeJobId) return;
+    void refreshTargetEvidence(activeJobId);
+    void refreshRunHistory(activeJobId);
+  }, [authToken, activeJobId, refreshRunHistory, refreshTargetEvidence]);
 
   useEffect(() => {
-    if (!authToken) return;
-    if (flowSource !== 'job') return;
-    if (activeJobId) {
-      void refreshTargetEvidence(activeJobId);
-      void refreshRunHistory(activeJobId);
-    }
-  }, [authToken, activeJobId, flowSource, refreshRunHistory, refreshTargetEvidence]);
-
-  // Keep the selected evidence source live. Zannora is the default source, so its report-backed nav data refreshes too.
-  useEffect(() => {
-    if (!authToken) return;
-    if (flowSource === 'zannora') {
-      const timer = window.setInterval(() => void refreshZannoraEvidence(), 5000);
-      return () => clearInterval(timer);
-    }
-    if (!activeJobId || !activeJob || (activeJob.status !== 'RUNNING' && activeJob.status !== 'QUEUED' && currentView !== 'findings')) return;
+    if (!authToken || !activeJobId || !activeJob || (activeJob.status !== 'RUNNING' && activeJob.status !== 'QUEUED' && currentView !== 'findings')) return;
     const timer = window.setInterval(() => { void refreshTargetEvidence(activeJobId); void refreshRunHistory(activeJobId); }, 5000);
     return () => clearInterval(timer);
-  }, [authToken, activeJob, activeJobId, currentView, flowSource, refreshRunHistory, refreshTargetEvidence, refreshZannoraEvidence]);
+  }, [authToken, activeJob, activeJobId, currentView, refreshRunHistory, refreshTargetEvidence]);
 
   // Poll active job details
   useEffect(() => {
@@ -1273,7 +1191,6 @@ export function App() {
         // Otomatis arahkan ke halaman Skenario Test saat pemetaan alur bisnis selesai dan menunggu approval user
         if (job.status === 'WAITING_REVIEW' && lastAutoFlowJobIdRef.current !== job.id) {
           lastAutoFlowJobIdRef.current = job.id;
-          setFlowSource('job');
           setCurrentView('flows');
         }
         if (job.status === 'RUNNING' || job.status === 'QUEUED' || job.status === 'WAITING_REVIEW') {
@@ -1344,16 +1261,11 @@ export function App() {
     return { pagesCount, elementsCount, flowsCount, passedCount, failedCount, totalRuns };
   }, [activeJob, runHistory]);
 
-  const flowJob = flowSource === 'job' ? activeJob : null;
-  const flowEvidence = flowSource === 'zannora' ? zannoraEvidence : targetEvidence;
-  const flowSourceLabel = flowSource === 'zannora' ? 'Zannora · latest evidence' : flowJob?.name || 'Active discovery run';
-  const zannoraRouteCount = zannoraRoutes(zannoraEvidence).length;
-  const zannoraOpenFindings = zannoraFindings(zannoraEvidence);
-  const activeEvidence = flowSource === 'zannora' ? zannoraEvidence : targetEvidence;
-  const activeOpenFindings = zannoraFindings(activeEvidence).map((finding, index) => ({ ...finding, workflowStatus: flowSource === 'job' ? (findingStatuses[findingKey(finding, index)] || 'OPEN') : 'OPEN', findingIndex: index })).filter((finding) => finding.workflowStatus !== 'PASSED');
-  const zannoraDesignGroups = zannoraEvidence?.groups.filter((group) => ['api-e2e', 'crud', 'roles'].includes(group.id)) ?? [];
-  const zannoraExecutionGroups = zannoraEvidence?.groups.filter((group) => ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation'].includes(group.id)) ?? [];
-  const zannoraExecutionTotal = zannoraExecutionGroups.reduce((total, group) => total + evidenceMetric(group).total, 0);
+  const flowJob = activeJob;
+  const flowEvidence = targetEvidence;
+  const flowSourceLabel = flowJob?.name || 'Active discovery run';
+  const activeEvidence = targetEvidence;
+  const activeOpenFindings = zannoraFindings(activeEvidence).map((finding, index) => ({ ...finding, workflowStatus: (findingStatuses[findingKey(finding, index)] || 'OPEN'), findingIndex: index })).filter((finding) => finding.workflowStatus !== 'PASSED');
   const [selectedMilestone, setSelectedMilestone] = useState<ProcessNode | null>(null);
   const [expandedFindingKey, setExpandedFindingKey] = useState<string | null>(null);
   const [findingCategoryFilter, setFindingCategoryFilter] = useState<'all' | FindingCategory>('all');
@@ -1402,31 +1314,26 @@ export function App() {
     const hasOpenRetest = ['responsive', 'quality', 'target-quality'].some((id) => ['FAILED', 'PASSED_WITH_LIMITATIONS'].includes(groups.get(id)?.status || '')) || failedJob;
     const retestStatus: MilestoneStatus = phaseMatches(/RETEST|RETRY|EVIDENCE/) ? 'RUNNING' : hasOpenRetest ? 'RETEST' : flowEvidence && flowEvidence.totals.assets > 0 ? 'CLEAR' : flowJob?.results?.length && !failedJob ? 'CLEAR' : 'READY';
     const evidenceStatus: MilestoneStatus = flowEvidence && flowEvidence.totals.assets > 0 ? (flowEvidence.totals.failed > 0 ? 'ATTENTION' : 'CLEAR') : flowJob?.results?.length ? (failedJob ? 'ATTENTION' : 'CLEAR') : 'READY';
-    const requiredEvidenceIds = flowSource === 'zannora' ? ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation', 'responsive', 'quality'] : ['target-quality'];
+    const requiredEvidenceIds = ['target-quality'];
     const allEvidenceReady = flowEvidence ? requiredEvidenceIds.every((id) => groups.get(id)?.status === 'PASSED') : flowJob?.status === 'COMPLETED';
     const finalStatus: MilestoneStatus = hasOpenRetest || evidenceStatus === 'ATTENTION' ? 'ATTENTION' : hasSource && allEvidenceReady ? 'CLEAR' : 'READY';
     const pageCount = flowJob?.inventory?.pages?.length;
     const evidenceCount = flowEvidence?.totals.assets;
     const nodes: ProcessNode[] = [
-      { id: 'start-analysis', eyebrow: 'PHASE 01', title: 'Start & Analysis', description: 'Repository, scope, stack, dan target', icon: 'overview', color: 'blue', status: failedJob ? 'ATTENTION' : hasSource ? 'CLEAR' : 'READY', count: hasSource ? 'Target mapped' : 'Waiting input', items: ['Repository', 'Scope', 'Stack'], details: ['Project input tervalidasi', 'Repository / target URL tercatat', 'Scope dan platform pengujian ditetapkan'], evidenceIds: [], target: 'projects', x: 12, y: 20 },
+      { id: 'start-analysis', eyebrow: 'PHASE 01', title: 'Start & Analysis', description: 'Repository, scope, stack, dan target', icon: 'overview', color: 'blue', status: failedJob ? 'ATTENTION' : hasSource ? 'CLEAR' : 'READY', count: hasSource ? 'Target mapped' : 'Waiting input', items: ['Repository', 'Scope', 'Stack'], details: ['Project input tervalidasi', 'Repository / target URL tercatat', 'Scope dan platform pengujian ditetapkan'], evidenceIds: [], target: 'overview', x: 12, y: 20 },
       { id: 'setup-environment', eyebrow: 'PHASE 02', title: 'Setup Environment', description: 'ENV, database, service, dan akun uji', icon: 'settings', color: 'cyan', status: setupStatus, count: setupStatus === 'RUNNING' ? 'Preparing' : hasSource ? 'Environment ready' : 'Waiting', items: ['ENV', 'DB', 'Service'], details: ['Environment variables disiapkan', 'Database dan service health check', 'Akun testing siap digunakan'], evidenceIds: [], target: 'discovery', x: 39, y: 20 },
       { id: 'discovery-inventory', eyebrow: 'PHASE 03', title: 'Discovery & Inventory', description: 'Halaman, endpoint, elemen, dan evidence awal', icon: 'discovery', color: 'green', status: discoveryStatus, count: pageCount ? `${pageCount} pages` : flowEvidence ? `${flowEvidence.totals.groups} suites` : hasSource ? 'Asset mapped' : 'Waiting', items: ['Pages', 'Routes', 'Evidence'], details: ['Static source analysis', 'Dynamic crawl dan route inventory', 'Screenshot halaman awal'], evidenceIds: [], target: 'map', x: 66, y: 20 },
-      { id: 'test-design', eyebrow: 'PHASE 04', title: 'Test Design', description: 'Skenario role, CRUD, API, UI, dan full flow', icon: 'flows', color: 'yellow', status: designStatus, count: flowEvidence ? '83 API · 3 suites' : flowJob?.flows?.length ? `${flowJob.flows.length} flows` : 'Waiting', items: ['Roles', 'CRUD', 'Flow'], details: ['Canonical scenarios dibuat', 'Access matrix setiap role', 'Flow siap dieksekusi atau review'], evidenceIds: ['api-e2e', 'crud', 'roles'], target: 'flows', x: 89, y: 20 },
-      { id: 'execution', eyebrow: 'PHASE 05', title: 'Execution', description: 'API, master data, role access, dan customer journey', icon: 'runs', color: 'green', status: executionStatus, count: groups.get('full-flow')?.status === 'PASSED' ? '28 steps' : flowJob?.results?.length ? `${flowJob.results.length} runs` : 'Queued', items: ['API', 'UI', 'E2E'], details: ['API E2E seluruh endpoint', 'CRUD dan role access', 'Booking, payment ACC, ticket, e-ticket'], evidenceIds: ['api-e2e', 'full-flow', 'navigation'], target: 'runs', x: 89, y: 78 },
-      { id: 'responsive-quality', eyebrow: 'PHASE 06', title: 'Responsive & UI Quality', description: 'Desktop, tablet, mobile, layout, dan usability', icon: 'discovery', color: 'violet', status: qualityStatus, count: groups.get('responsive')?.status === 'FAILED' || groups.get('quality')?.status === 'FAILED' || groups.get('target-quality')?.status === 'FAILED' ? 'Quality findings' : groups.has('quality') ? `${groups.get('quality')?.screenshots.length ?? 0} quality assets` : groups.has('responsive') ? `${groups.get('responsive')?.screenshots.length ?? 0} checks` : groups.has('target-quality') ? `${groups.get('target-quality')?.screenshots.length ?? 0} quality assets` : 'Waiting', items: ['Desktop', 'Tablet', 'Mobile'], details: ['Viewport desktop, tablet, mobile', 'Contrast, typography, pixel regression, dan dense data', 'Keyboard, ARIA, state, dan cross-browser smoke'], evidenceIds: flowSource === 'zannora' ? ['responsive', 'quality'] : ['target-quality'], target: 'findings', x: 66, y: 78 },
-      { id: 'evidence-retest', eyebrow: 'PHASE 07', title: 'Evidence & Retest', description: 'Screenshot, video, report, defect, dan retest', icon: 'reports', color: 'blue', status: retestStatus, count: evidenceCount ? `${evidenceCount} files` : 'Waiting', items: ['Screenshot', 'Video', 'Retest'], details: ['Evidence dikelompokkan per milestone', 'Video full flow 30 FPS 720p', 'Defect diperbaiki dan diverifikasi ulang'], evidenceIds: flowSource === 'zannora' ? ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation', 'responsive', 'quality'] : ['target-quality'], target: 'evidence', x: 38, y: 78 },
-      { id: 'final-report', eyebrow: 'PHASE 08', title: 'Defect & Final Report', description: 'Triage defect, status akhir, dan kesimpulan QC', icon: 'reports', color: 'violet', status: finalStatus, count: finalStatus === 'CLEAR' ? 'Final ready' : finalStatus === 'ATTENTION' ? 'Review needed' : 'Waiting', items: ['Defect', 'Report', 'Summary'], details: ['Severity critical/high/medium/low', 'Final milestone summary', 'Laporan siap diunduh atau dibagikan'], evidenceIds: flowSource === 'zannora' ? ['api-e2e', 'crud', 'roles', 'full-flow', 'navigation', 'responsive', 'quality'] : ['target-quality'], target: 'reports', x: 12, y: 78 },
+      { id: 'test-design', eyebrow: 'PHASE 04', title: 'Test Design', description: 'Skenario role, CRUD, API, UI, dan full flow', icon: 'flows', color: 'yellow', status: designStatus, count: flowJob?.flows?.length ? `${flowJob.flows.length} flows` : 'Waiting', items: ['Roles', 'CRUD', 'Flow'], details: ['Canonical scenarios dibuat', 'Access matrix setiap role', 'Flow siap dieksekusi atau review'], evidenceIds: ['api-e2e', 'crud', 'roles'], target: 'flows', x: 89, y: 20 },
+      { id: 'execution', eyebrow: 'PHASE 05', title: 'Execution', description: 'API, master data, role access, dan customer journey', icon: 'runs', color: 'green', status: executionStatus, count: groups.get('full-flow')?.status === 'PASSED' ? '28 steps' : flowJob?.results?.length ? `${flowJob.results.length} runs` : 'Queued', items: ['API', 'UI', 'E2E'], details: ['API E2E seluruh endpoint', 'CRUD dan role access'], evidenceIds: ['api-e2e', 'full-flow', 'navigation'], target: 'runs', x: 89, y: 78 },
+      { id: 'responsive-quality', eyebrow: 'PHASE 06', title: 'Responsive & UI Quality', description: 'Desktop, tablet, mobile, layout, dan usability', icon: 'discovery', color: 'violet', status: qualityStatus, count: groups.get('target-quality')?.status === 'FAILED' ? 'Quality findings' : groups.has('target-quality') ? `${groups.get('target-quality')?.screenshots.length ?? 0} quality assets` : 'Waiting', items: ['Desktop', 'Tablet', 'Mobile'], details: ['Viewport desktop, tablet, mobile', 'Contrast, typography, pixel regression, dan dense data', 'Keyboard, ARIA, state, dan cross-browser smoke'], evidenceIds: ['target-quality'], target: 'findings', x: 66, y: 78 },
+      { id: 'evidence-retest', eyebrow: 'PHASE 07', title: 'Evidence & Retest', description: 'Screenshot, video, report, defect, dan retest', icon: 'reports', color: 'blue', status: retestStatus, count: evidenceCount ? `${evidenceCount} files` : 'Waiting', items: ['Screenshot', 'Video', 'Retest'], details: ['Evidence dikelompokkan per milestone', 'Video full flow 30 FPS 720p', 'Defect diperbaiki dan diverifikasi ulang'], evidenceIds: ['target-quality'], target: 'evidence', x: 38, y: 78 },
+      { id: 'final-report', eyebrow: 'PHASE 08', title: 'Defect & Final Report', description: 'Triage defect, status akhir, dan kesimpulan QC', icon: 'reports', color: 'violet', status: finalStatus, count: finalStatus === 'CLEAR' ? 'Final ready' : finalStatus === 'ATTENTION' ? 'Review needed' : 'Waiting', items: ['Defect', 'Report', 'Summary'], details: ['Severity critical/high/medium/low', 'Final milestone summary', 'Laporan siap diunduh atau dibagikan'], evidenceIds: ['target-quality'], target: 'reports', x: 12, y: 78 },
     ];
     return nodes.map((node) => {
-      if (!flowEvidence) return node;
-      if (flowSource === 'job' && node.id === 'test-design') return { ...node, count: `${flowJob?.flows?.length ?? 0} flows` };
-      if (flowSource === 'job' && node.id === 'execution') return node;
-      if (node.id === 'test-design') return { ...node, count: `${zannoraDesignGroups.reduce((total, group) => total + evidenceMetric(group).total, 0)} checks · ${zannoraDesignGroups.length} suites` };
-      if (node.id === 'execution') { const fullFlow = groups.get('full-flow'); return { ...node, count: fullFlow ? `${evidenceMetric(fullFlow).passed}/${evidenceMetric(fullFlow).total} full-flow` : node.count }; }
-      if (node.id === 'responsive-quality') { const quality = groups.get('quality') || groups.get('responsive') || groups.get('target-quality'); return { ...node, count: quality ? `${evidenceMetric(quality).passed}/${evidenceMetric(quality).total} checks` : node.count }; }
+      if (node.id === 'test-design' && flowJob?.flows?.length) return { ...node, count: `${flowJob.flows.length} flows` };
       return node;
     });
-  }, [flowEvidence, flowJob, flowSource, zannoraDesignGroups]);
+  }, [flowEvidence, flowJob]);
 
   const processProgress = useMemo(() => Math.round((processNodes.filter((node) => node.status === 'CLEAR' || node.status === 'ATTENTION').length / Math.max(1, processNodes.length)) * 100), [processNodes]);
   const centralProcessStatus: MilestoneStatus = flowJob?.status === 'RUNNING' || flowJob?.status === 'QUEUED' || flowJob?.status === 'WAITING_REVIEW' ? 'RUNNING' : processNodes.some((node) => node.status === 'BLOCKED') ? 'BLOCKED' : processNodes.some((node) => node.status === 'ATTENTION' || node.status === 'RETEST') ? 'ATTENTION' : processProgress === 100 ? 'CLEAR' : 'READY';
@@ -1567,7 +1474,7 @@ export function App() {
   };
 
   const updateFindingStatus = async (finding: EvidenceFinding & { findingIndex?: number }, status: FindingWorkflowStatus) => {
-    if (flowSource !== 'job' || !activeJobId) return;
+    if (!activeJobId) return;
     const key = findingKey(finding, finding.findingIndex ?? 0);
     setLoading(true);
     setActionError('');
@@ -1740,7 +1647,6 @@ export function App() {
       const updated = await send<Job>(`/api/v1/discovery/jobs/${jobId}/restart`, {}, 'POST');
       setActiveJobId(updated.id);
       setActiveJob(updated);
-      setFlowSource('job');
       setCurrentView('discovery');
       setActionSuccess('Discovery job berhasil dijalankan ulang!');
       setTimeout(() => setActionSuccess(''), 3000);
@@ -1972,14 +1878,8 @@ export function App() {
             jobs={jobs}
             activeJobId={activeJobId}
             activeJob={activeJob}
-            flowSource={flowSource}
             onSelectJob={(jobId) => {
-              setFlowSource('job');
               setActiveJobId(jobId);
-              setSelectedMilestone(null);
-            }}
-            onSelectZannora={() => {
-              setFlowSource('zannora');
               setSelectedMilestone(null);
             }}
             onNewJob={() => {
@@ -2008,7 +1908,7 @@ export function App() {
           <button className={`nav-item ${currentView === 'map' ? 'active' : ''}`} onClick={() => setCurrentView('map')}>
             <div className="nav-item-left"><Icon name="map-folded" size={18} /><span>App Map</span></div>
           </button>
-          <button className={`nav-item ${currentView === 'flows' ? 'active' : ''}`} onClick={() => { setCurrentView('flows'); if (activeJob) setFlowSource('job'); }}>
+          <button className={`nav-item ${currentView === 'flows' ? 'active' : ''}`} onClick={() => setCurrentView('flows')}>
             <div className="nav-item-left">
               <Icon name="flows" size={18} />
               <span>Skenario Test</span>
@@ -2109,7 +2009,6 @@ export function App() {
                  currentView === 'findings' ? 'Findings & Retest' :
                  currentView === 'evidence' ? 'Media' :
                  currentView === 'reports' ? 'Final Report' :
-                 currentView === 'settings' ? 'Engine & Settings' :
                  currentView === 'new' ? 'New QC Run' : 'Workspace'}
               </span>
             </div>
@@ -2174,8 +2073,6 @@ export function App() {
                   </div>
                 </div>
               </div>
-            ) : flowSource === 'zannora' && zannoraEvidence ? (
-              <ZannoraOverview evidence={zannoraEvidence} onNavigate={setCurrentView} onOpenEvidence={openEvidenceGroup} />
             ) : (
               <div className="summary-dashboard-container">
                 {/* 1. Single Hero Header: Identitas & Status Utama Target */}
@@ -2926,66 +2823,6 @@ export function App() {
           )}
 
 
-          {/* VIEW: PROJECTS */}
-          {currentView === 'projects' && (
-            <div>
-              <div className="view-header">
-                <div>
-                  <h1>Projects &amp; Target Environments</h1>
-                  <p>Seluruh riwayat discovery target yang tercatat pada workspace.</p>
-                </div>
-                <button className="primary" onClick={() => { setEditingJob(null); setCurrentView('new'); }}>
-                  <Icon name="plus" size={16} /> New Discovery Project
-                </button>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18 }}>
-                <Paginated items={jobs}>{(visibleJobs) => visibleJobs.map(j => (
-                  <div key={j.id} className="panel" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <h3 style={{ fontSize: 17 }}>{j.name}</h3>
-                        <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 2 }}>
-                          {j.config?.runMode === 'demo' ? 'Local Demo Application' : j.config?.repositoryUrl || j.config?.baseUrl}
-                        </p>
-                      </div>
-                      <Badge value={j.status} />
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--text-muted)', padding: '10px 0', borderTop: '1px solid var(--border-subtle)', borderBottom: '1px solid var(--border-subtle)' }}>
-                      <span><strong>{j.inventory?.pages?.length ?? 0}</strong> Halaman</span>
-                      <span><strong>{j.flows?.length ?? 0}</strong> Skenario</span>
-                      <span><strong>{j.results?.length ?? 0}</strong> Hasil Test</span>
-                    </div>
-
-                <div style={{ display: 'flex', gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
-                      <button className="primary" style={{ flex: 1 }} onClick={() => { setActiveJobId(j.id); setCurrentView('map'); }}>
-                        Application Map
-                      </button>
-                      <button className="quiet" onClick={() => { setActiveJobId(j.id); setCurrentView('flows'); }}>
-                        Flows
-                      </button>
-                      <button className="quiet" onClick={() => handleRestartJob(j.id)} title="Jalankan Ulang Discovery">
-                        <Icon name="refresh" size={15} />
-                      </button>
-                      <button className="quiet" onClick={() => handleEditJob(j)} title="Edit Suite">
-                        <Icon name="edit" size={15} />
-                      </button>
-                      <button
-                        className="quiet"
-                        style={{ color: 'var(--red)' }}
-                        onClick={() => handleDeleteJob(j.id)}
-                        title="Hapus Job"
-                      >
-                        <Icon name="trash" size={15} />
-                      </button>
-                    </div>
-                  </div>
-                ))}</Paginated>
-              </div>
-            </div>
-          )}
-
           {/* VIEW: DISCOVERY PROGRESS */}
           {currentView === 'discovery' && (
             <div>
@@ -3036,9 +2873,7 @@ export function App() {
                 </div>
               </div>
 
-              {flowSource === 'zannora' && zannoraEvidence ? (
-                <ZannoraDiscovery evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
-              ) : !activeJob ? (
+              {!activeJob ? (
                 <Empty title="Tidak Ada Job Terpilih">Pilih project atau buat discovery baru.</Empty>
               ) : (
                 <>
@@ -3452,10 +3287,7 @@ export function App() {
                 </div>
               </div>
 
-              {flowSource === 'zannora' && zannoraEvidence ? (
-                <ZannoraAppMap evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
-              ) : (
-                <div className="app-map-container">
+              <div className="app-map-container">
                   {/* Left: Pages & Routes grouped tree table */}
                   <div className="app-map-list-card">
                     <div className="app-map-toolbar">
@@ -3728,7 +3560,6 @@ export function App() {
                     </div>
                   </div>
                 </div>
-              )}
             </div>
           )}
 
@@ -3931,7 +3762,7 @@ export function App() {
               {/* TAB 1: DIAGRAM FITUR */}
               {flowsActiveTab === 'diagram' && (
                 <div>
-                  {flowSource === 'job' && activeJob && !activeJob.businessFlowMap && (!activeJob.flows || activeJob.flows.length === 0) && (activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW' || activeJob.status === 'QUEUED') ? (
+                  {activeJob && !activeJob.businessFlowMap && (!activeJob.flows || activeJob.flows.length === 0) && (activeJob.status === 'RUNNING' || activeJob.status === 'WAITING_REVIEW' || activeJob.status === 'QUEUED') ? (
                     <div style={{
                       background: '#0F1420',
                       border: '1px solid #1E293B',
@@ -4070,7 +3901,7 @@ export function App() {
                         </button>
                       </div>
                     </div>
-                  ) : flowSource === 'job' && activeJob && (activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR') && (!activeJob.flows || activeJob.flows.length === 0) ? (
+                  ) : activeJob && (activeJob.status === 'FAILED' || activeJob.status === 'INFRA_ERROR') && (!activeJob.flows || activeJob.flows.length === 0) ? (
                     <div style={{
                       background: '#12080A',
                       border: '1px solid #EF4444',
@@ -4200,7 +4031,7 @@ export function App() {
                     </div>
                   ) : (
                     <>
-                      {flowSource === 'job' && activeJob?.businessFlowMap ? (
+                      {activeJob?.businessFlowMap ? (
                         <div style={{ marginBottom: 24 }}>
                           <BusinessFlowVisualizer
                             map={activeJob.businessFlowMap}
@@ -4230,7 +4061,7 @@ export function App() {
                         </div>
                       )}
 
-                      {flowSource === 'job' && activeJob && (activeJob.inventory?.featureContractPlan || activeJob.inventory?.crudPlan || activeJob.inventory?.roleActionPlan) && (
+                      {activeJob && (activeJob.inventory?.featureContractPlan || activeJob.inventory?.crudPlan || activeJob.inventory?.roleActionPlan) && (
                         <div style={{ display: 'grid', gap: 18, marginTop: 18 }}>
                           {activeJob.inventory?.featureContractPlan && <FeatureContractPanel plan={activeJob.inventory.featureContractPlan} />}
                           {activeJob.inventory?.crudPlan && <CrudCoveragePanel plan={activeJob.inventory.crudPlan} />}
@@ -4245,9 +4076,7 @@ export function App() {
               {/* TAB 2: URUTAN LANGKAH (STEP EDITOR) */}
               {flowsActiveTab === 'steps' && (
                 <div>
-                  {flowSource === 'zannora' && zannoraEvidence ? (
-                    <ZannoraTestDesign evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
-                  ) : !activeJob?.flows || activeJob.flows.length === 0 ? (
+                  {!activeJob?.flows || activeJob.flows.length === 0 ? (
                     <Empty title="Belum Ada Flow Skenario">
                       Jalankan discovery untuk menghasilkan flow atau buat skenario manual.
                     </Empty>
@@ -4441,9 +4270,7 @@ export function App() {
                 );
               })()}
 
-              {flowSource === 'zannora' && zannoraEvidence ? (
-                <ZannoraRuns evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
-              ) : activeJob?.results && activeJob.results.length > 0 ? (
+              {activeJob?.results && activeJob.results.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                   <Paginated items={activeJob.results}>{(resultsPage, start) => resultsPage.map((res, i) => (
                     <Panel
@@ -4500,7 +4327,7 @@ export function App() {
                   <p>Semua temuan dari milestone audit dikelompokkan berdasarkan jenis masalah dengan prioritas kritis di paling atas.</p>
                 </div>
                 <div className="header-actions">
-                  <button className="quiet" onClick={() => setCurrentView('process')}><Icon name="map" size={15} /> Back to Milestone Flow</button>
+                  <button className="quiet" onClick={() => setCurrentView('overview')}><Icon name="map" size={15} /> Back to Milestone Flow</button>
                   <button className="primary" onClick={() => setEvidenceFocus({ groupId: activeEvidence?.groups.find((group) => group.id === 'target-quality' || group.id === 'quality' || group.id === 'responsive')?.id || 'quality' })}><Icon name="reports" size={15} /> Inspect Evidence Inline</button>
                 </div>
               </div>
@@ -4585,7 +4412,7 @@ export function App() {
                           {expanded ? 'Tutup' : 'Lihat bukti'} <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={13} />
                         </span>
                       </button>
-                      {flowSource === 'job' && (
+                      {activeJob && (
                         <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 0 10px' }}>
                           <select
                             aria-label={`Status finding ${item.name || key}`}
@@ -4930,9 +4757,7 @@ export function App() {
                 </div>
               </div>
 
-              {flowSource === 'zannora' && zannoraEvidence ? (
-                <ZannoraReport evidence={zannoraEvidence} onOpenEvidence={openEvidenceGroup} />
-              ) : !activeJob ? (
+              {!activeJob ? (
                 <div className="inline-empty">Pilih proyek pada menu dropdown di atas untuk melihat laporan kualitas lengkap.</div>
               ) : (() => {
                 const allRawResults = activeJob.results || [];
@@ -5754,7 +5579,7 @@ export function App() {
 
           {/* VIEW: MEDIA */}
           {currentView === 'evidence' && (
-            <div className="zannora-evidence-view">
+            <div className="qc-evidence-view">
               <div className="view-header" style={{ marginBottom: 16 }}>
                 <div>
                   <div className="evidence-title-row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -5808,7 +5633,7 @@ export function App() {
                       <Icon name="database" size={14} /> Dokumen Audit &amp; JSON
                     </button>
                   </div>
-                  <button className="tool-btn" onClick={() => flowSource === 'zannora' ? void refreshZannoraEvidence() : void refreshTargetEvidence(activeJobId)} disabled={evidenceLoading}>
+                  <button className="tool-btn" onClick={() => void refreshTargetEvidence(activeJobId)} disabled={evidenceLoading}>
                     <Icon name="refresh" size={15} /> {evidenceLoading ? 'Memuat...' : 'Refresh'}
                   </button>
                 </div>
@@ -5816,7 +5641,7 @@ export function App() {
 
               {evidenceSubTab === 'gallery' ? (
                 <LiveViewport
-                  job={flowSource === 'job' ? activeJob : null}
+                  job={activeJob}
                   evidence={activeEvidence}
                   hideHeader
                 />
@@ -5889,83 +5714,6 @@ export function App() {
             </div>
           )}
 
-          {/* VIEW: SETTINGS */}
-          {currentView === 'settings' && (
-            <div>
-              <div className="view-header">
-                <div>
-                  <h1>Engine &amp; Settings</h1>
-                  <p>Telemetri prasyarat sistem, kebijakan runtime, dan integrasi.</p>
-                </div>
-                <button className="primary" onClick={refreshSystem}>
-                  <Icon name="refresh" size={16} /> Refresh (force)
-                </button>
-              </div>
-
-              <div className="settings-cards-grid">
-                <div className="settings-probe-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong style={{ fontSize: 14 }}>Playwright Browser Engine</strong>
-                    <Badge value={system?.playwright.available ? 'ready' : 'unavailable'} />
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600 }}>Headless Chromium Runtime</div>
-                  <p style={{ color: 'var(--text-muted)', fontSize: 12.5, margin: 0, lineHeight: 1.5 }}>
-                    {system?.playwright.message || 'Mengecek Playwright engine...'}
-                  </p>
-                </div>
-
-                <div className="settings-probe-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong style={{ fontSize: 14 }}>Docker Daemon</strong>
-                    <Badge value={system?.docker.available ? 'ready' : 'unavailable'} />
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600 }}>Isolated Containers &amp; Databases</div>
-                  <p style={{ color: 'var(--text-muted)', fontSize: 12.5, margin: 0, lineHeight: 1.5 }}>
-                    {system?.docker.message || 'Mengecek Docker daemon...'}
-                  </p>
-                  <small style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 4, display: 'block' }}>
-                    Docker digunakan untuk provisioning isolated MySQL/PostgreSQL/SQLite pada mode managed-local.
-                  </small>
-                </div>
-
-                {ENABLE_MOBILE_SUPPORT && (
-                  <>
-                    <div className="settings-probe-card">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <strong style={{ fontSize: 14 }}>Maestro CLI</strong>
-                        <Badge value={system?.maestro.available ? 'ready' : 'unavailable'} />
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600 }}>Mobile UI Automation</div>
-                      <p style={{ color: 'var(--text-muted)', fontSize: 12.5, margin: 0, lineHeight: 1.5 }}>
-                        {system?.maestro.message || 'Mengecek Maestro CLI...'}
-                      </p>
-                    </div>
-
-                    <div className="settings-probe-card">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <strong style={{ fontSize: 14 }}>Android Debug Bridge (ADB)</strong>
-                        <Badge value={system?.adb.available ? 'ready' : 'unavailable'} />
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600 }}>Connected Devices</div>
-                      <p style={{ color: 'var(--text-muted)', fontSize: 12.5, margin: 0, lineHeight: 1.5 }}>
-                        {system?.adb.message || 'Mengecek ADB...'}
-                      </p>
-                      {system?.adb.devices && system.adb.devices.length > 0 && (
-                        <ul style={{ marginTop: 8, paddingLeft: 18, color: 'var(--cyan)', fontSize: 12 }}>
-                          {system.adb.devices.map(d => <li key={d}><code>{d}</code></li>)}
-                        </ul>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* VIEW: MEDIA & REKAMAN (MEDIA GALLERY) */}
-          {currentView === 'live' && (
-            <LiveViewport job={flowSource === 'job' ? activeJob : null} evidence={flowSource === 'zannora' ? zannoraEvidence : targetEvidence} />
-          )}
         </main>
       </div>
 

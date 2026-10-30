@@ -146,8 +146,9 @@ export type FindingWorkflowStatus = 'OPEN' | 'IN_PROGRESS' | 'READY_FOR_RETEST' 
 export type EvidenceMetadata = { passed?: number; total?: number; failed?: number; notApplicable?: number; routes?: string[]; browsers?: string[]; viewports?: string[]; operations?: string[]; bookingCode?: string; findings?: EvidenceFinding[] };
 export type RunHistoryEntry = { runLabel: string; project: string; status: string; phase?: string; progress?: number; createdAt?: string; updatedAt?: string; quality?: { status?: string; total?: number; passed?: number; failed?: number; notApplicable?: number; visualRegression?: QualityAuditState['visualRegression'] } };
 export type EvidenceGroup = { id: string; title: string; category: string; status: string; summary: string; folder: string; report?: EvidenceAsset; assets: EvidenceAsset[]; screenshots: EvidenceAsset[]; videos: EvidenceAsset[]; metadata?: EvidenceMetadata };
-export type ZannoraEvidence = { project: string; generatedAt: string; groups: EvidenceGroup[]; totals: { groups: number; passed: number; failed: number; reports: number; screenshots: number; videos: number; assets: number } };
-export type View = 'overview' | 'process' | 'projects' | 'discovery' | 'map' | 'flows' | 'runs' | 'findings' | 'reports' | 'evidence' | 'settings' | 'new' | 'live';
+export type QualityEvidence = { project: string; generatedAt: string; groups: EvidenceGroup[]; totals: { groups: number; passed: number; failed: number; reports: number; screenshots: number; videos: number; assets: number } };
+export type ZannoraEvidence = QualityEvidence;
+export type View = 'overview' | 'new' | 'discovery' | 'map' | 'flows' | 'runs' | 'findings' | 'reports' | 'evidence';
 export const initialConfig = (): Config => ({
   name: '',
   sourceType: 'existing-target',
