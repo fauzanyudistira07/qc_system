@@ -10,8 +10,6 @@
     "dev": "concurrently -k \"npm run dev:api\" \"npm run dev:web\"",
     "dev:api": "tsx watch apps/api/src/server.ts",
     "dev:web": "npm run dev --workspace @qc/web",
-    "dev:demo": "node apps/demo-app/server.js",
-    "dev:qc-fixture": "node apps/unique-demo/server.js",
     "check": "tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
     "start": "tsx apps/api/src/server.ts",
     "test": "npm run check",
@@ -28,8 +26,7 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
     "infra:up": "docker compose -f infrastructure/compose/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infrastructure/compose/docker-compose.yml down",
-    "seed:jamaahku": "node scripts/seed-jamaahku.mjs"
+    "infra:down": "docker compose -f infrastructure/compose/docker-compose.yml down"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
