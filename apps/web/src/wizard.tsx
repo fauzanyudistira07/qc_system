@@ -78,29 +78,11 @@ export function Wizard({
   const [beProbeResult, setBeProbeResult] = useState<{ reachable: boolean; message: string; responseTimeMs?: number } | null>(null);
 
   // Dropzone & file input refs
-  const [dragOverApk, setDragOverApk] = useState(false);
   const [dragOverSql, setDragOverSql] = useState(false);
   const [dragOverEnv, setDragOverEnv] = useState(false);
-  const apkInputRef = useRef<HTMLInputElement | null>(null);
   const sqlInputRef = useRef<HTMLInputElement | null>(null);
   const envInputRef = useRef<HTMLInputElement | null>(null);
 
-  // APK info & install status
-  const [apkInfo, setApkInfo] = useState<{ id: string; filename: string; size: number; packageId?: string; appName?: string; versionName?: string } | null>(() => {
-    if (initialJob?.config?.apkFilename || initialJob?.config?.apkUploadId) {
-      return {
-        id: initialJob.config.apkUploadId || '',
-        filename: initialJob.config.apkFilename || 'application.apk',
-        size: 0,
-        packageId: initialJob.config.appId,
-      };
-    }
-    return null;
-  });
-  const [localApkPath, setLocalApkPath] = useState('');
-  const [importingApk, setImportingApk] = useState(false);
-  const [installingApk, setInstallingApk] = useState(false);
-  const [installStatus, setInstallStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<{ success: boolean; message: string } | null>(null);
   const [transitioning, setTransitioning] = useState(false);
@@ -144,14 +126,6 @@ export function Wizard({
         include: (cfg.rules?.includePaths ?? []).join('\n'),
         exclude: (cfg.rules?.excludePaths ?? ['/logout', '/delete']).join('\n'),
       });
-      if (cfg.apkFilename || cfg.apkUploadId) {
-        setApkInfo({
-          id: cfg.apkUploadId || '',
-          filename: cfg.apkFilename || 'application.apk',
-          size: 0,
-          packageId: cfg.appId,
-        });
-      }
     }
   }, [initialJob, system]);
 
@@ -300,8 +274,8 @@ export function Wizard({
           if (!fe?.branch?.trim()) return 'Tentukan branch GitHub frontend yang digunakan (misal: main).';
         }
       }
-      if (config.platform === 'android' && !config.appId?.trim() && !config.apkUploadId) {
-        return 'Unggah file .APK, muat path APK lokal, atau masukkan Android Application ID.';
+      if (config.platform === 'android' && !config.appId?.trim()) {
+        return 'Masukkan Android Application ID / Package Name (misal: com.taskia.digital).';
       }
       const be = config.backendTarget;
       if (be) {
@@ -415,93 +389,6 @@ export function Wizard({
     } catch (e) { setError(errorText(e)); } finally { setUploading(''); }
   }
 
-  async function uploadApk(file: File | undefined) {
-    if (!file) return;
-    setError('');
-    if (!file.name.toLowerCase().endsWith('.apk')) {
-      setError('Pilih file APK berekstensi .apk.');
-      return;
-    }
-    if (file.size > 250 * 1024 * 1024) {
-      setError('Ukuran file APK maksimum 250 MB.');
-      return;
-    }
-    setUploading('apk');
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const res = await fetch(`/api/v1/uploads/apk?filename=${encodeURIComponent(file.name)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: arrayBuffer,
-      });
-      if (!res.ok) {
-        let errMsg = `Gagal mengunggah file APK (${res.status})`;
-        try {
-          const err = await res.json();
-          if (err.error) errMsg = err.error;
-        } catch { /* ignore */ }
-        throw new Error(errMsg);
-      }
-      const data = await res.json() as { id: string; filename: string; size: number; packageId?: string; appName?: string; versionName?: string };
-      setApkInfo(data);
-      patch({
-        platform: 'android',
-        apkUploadId: data.id,
-        apkFilename: data.filename,
-        apkPackageId: data.packageId,
-        appId: data.packageId || config.appId || '',
-        name: config.name || data.appName || data.filename.replace(/\.apk$/i, ''),
-      });
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setUploading('');
-    }
-  }
-
-  async function importLocalApk() {
-    if (!localApkPath.trim()) return;
-    setImportingApk(true);
-    setError('');
-    try {
-      const res = await send<{ id: string; filename: string; size: number; packageId?: string; appName?: string; versionName?: string }>('/api/v1/uploads/apk-local', { localPath: localApkPath.trim() });
-      setApkInfo(res);
-      patch({
-        platform: 'android',
-        apkUploadId: res.id,
-        apkFilename: res.filename,
-        apkPackageId: res.packageId,
-        appId: res.packageId || config.appId || '',
-        name: config.name || res.appName || res.filename.replace(/\.apk$/i, ''),
-      });
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setImportingApk(false);
-    }
-  }
-
-  async function installApk() {
-    if (!config.apkUploadId) return;
-    setInstallingApk(true);
-    setInstallStatus(null);
-    try {
-      const res = await send<{ success: boolean; output: string; device: string }>('/api/v1/android/install-apk', {
-        uploadId: config.apkUploadId,
-        deviceId: config.deviceId || undefined,
-      });
-      if (res.success) {
-        setInstallStatus({ success: true, message: `Berhasil diinstall ke target: ${res.device}!` });
-      } else {
-        setInstallStatus({ success: false, message: res.output || 'Gagal menginstall APK ke device.' });
-      }
-    } catch (e) {
-      setInstallStatus({ success: false, message: errorText(e) });
-    } finally {
-      setInstallingApk(false);
-    }
-  }
-
   async function submit() {
     for (let i = 0; i < 2; i++) {
       const issue = validate(i);
@@ -596,8 +483,6 @@ export function Wizard({
         setStep(0);
         setFilenames({ sql: '', env: '' });
         setPaths({ include: '', exclude: '/logout\n/delete' });
-        setApkInfo(null);
-        setInstallStatus(null);
       }
     } catch (e) {
       setError(errorText(e));
@@ -760,7 +645,7 @@ export function Wizard({
                   </div>
                 )}
 
-                {/* 3. TARGET SECTION: ANDROID APK */}
+                {/* 3. TARGET SECTION: ANDROID MAESTRO RUNNER */}
                 {config.platform === 'android' && ENABLE_MOBILE_SUPPORT && (
                   <div className="wizard-section-card target-card-section">
                     <div className="section-card-header">
@@ -770,150 +655,29 @@ export function Wizard({
                         </div>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <h3 style={{ margin: 0 }}>Target Binary Aplikasi (.APK)</h3>
-                            <span className="section-type-badge select-badge">MAESTRO RUNNER</span>
+                            <h3 style={{ margin: 0 }}>Target Aplikasi Mobile (Maestro)</h3>
+                            <span className="section-type-badge select-badge">SERVER MAESTRO</span>
                           </div>
                           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-                            Upload file build APK (misal dari project Flutter) untuk pengujian Maestro Engine.
+                            Pengujian otomatis berjalan langsung via Maestro CLI pada runtime/emulator server.
                           </p>
                         </div>
                       </div>
-                      <Badge value={apkInfo ? 'APK Ready' : 'Siapkan APK'} />
+                      <Badge value={config.appId ? 'Target Ready' : 'App ID Wajib'} />
                     </div>
-
-                    {!apkInfo ? (
-                      <div
-                        className={`apk-upload-dropzone ${dragOverApk ? 'drag-over' : ''}`}
-                        onDragOver={e => { e.preventDefault(); setDragOverApk(true); }}
-                        onDragLeave={() => setDragOverApk(false)}
-                        onDrop={e => {
-                          e.preventDefault();
-                          setDragOverApk(false);
-                          const file = e.dataTransfer.files?.[0];
-                          if (file) void uploadApk(file);
-                        }}
-                        onClick={() => apkInputRef.current?.click()}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <div className="apk-upload-icon">
-                          <Icon name="android" size={32} />
-                        </div>
-                        <div className="apk-upload-text">
-                          <strong>Tarik & Geser File .APK ke Sini, atau Klik untuk Memilih</strong>
-                          <p>Mendukung APK debug/release dari Flutter. Package ID & nama aplikasi akan terdeteksi otomatis.</p>
-                        </div>
-                        <input
-                          ref={apkInputRef}
-                          type="file"
-                          accept=".apk"
-                          disabled={!!uploading}
-                          onChange={e => {
-                            const file = e.target.files?.[0];
-                            if (file) void uploadApk(file);
-                          }}
-                          style={{ display: 'none' }}
-                        />
-                        <button
-                          type="button"
-                          className="apk-upload-btn"
-                          disabled={!!uploading}
-                          onClick={e => {
-                            e.stopPropagation();
-                            apkInputRef.current?.click();
-                          }}
-                        >
-                          <Icon name="plus" size={15} />
-                          {uploading === 'apk' ? 'Mengunggah APK…' : 'Pilih File .APK'}
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="apk-card">
-                        <div className="apk-card-header">
-                          <div className="apk-card-title">
-                            <span className="apk-icon-badge">
-                              <Icon name="android" size={24} />
-                            </span>
-                            <div>
-                              <strong>{apkInfo.appName || apkInfo.filename}</strong>
-                              <div className="apk-meta-row">
-                                <span className="apk-package-badge mono">{apkInfo.packageId || 'Package ID terdeteksi'}</span>
-                                {apkInfo.versionName && <span className="apk-ver-badge">v{apkInfo.versionName}</span>}
-                                <span className="muted">{(apkInfo.size / (1024 * 1024)).toFixed(1)} MB</span>
-                              </div>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            className="quiet danger-text"
-                            onClick={() => {
-                              setApkInfo(null);
-                              setInstallStatus(null);
-                              patch({ apkUploadId: undefined, apkFilename: undefined, apkPackageId: undefined });
-                            }}
-                          >
-                            Ganti APK
-                          </button>
-                        </div>
-
-                        <div className="apk-install-panel">
-                          <div className="apk-install-meta">
-                            <Icon name="device" size={16} />
-                            <span>
-                              {system?.adb?.devices && system.adb.devices.length > 0
-                                ? `${system.adb.devices.length} Device/Emulator online terdeteksi`
-                                : 'ADB siap menghubungkan ke device / emulator'}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="install-btn"
-                            disabled={installingApk}
-                            onClick={() => void installApk()}
-                          >
-                            {installingApk ? 'Menginstall via ADB…' : 'Install ke Emulator / Device'}
-                          </button>
-                        </div>
-
-                        {installStatus && (
-                          <div className={`install-banner ${installStatus.success ? 'success' : 'error'}`}>
-                            <Icon name={installStatus.success ? 'check' : 'warning'} size={16} />
-                            <span>{installStatus.message}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
 
                     <div className="form-grid" style={{ marginTop: 14 }}>
-                      <Field label="Application ID / Package Name" hint="Otomatis terisi dari file APK atau masukkan ID aplikasi Flutter Anda.">
+                      <Field label="Application ID / Package Name" hint="Package identitas aplikasi Android yang sudah terinstall di target server.">
                         <input
                           value={config.appId || ''}
-                          placeholder="com.example.tasdig"
-                          onChange={e => patch({ appId: e.target.value })}
+                          placeholder="com.taskia.digital atau com.example.app"
+                          onChange={e => patch({ appId: e.target.value, name: config.name || e.target.value })}
                         />
-                      </Field>
-                      <Field label="Path APK Lokal (Instant Disk)" hint="Muat file .apk langsung dari folder disk komputer Anda tanpa proses unggah web.">
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <input
-                            value={localApkPath}
-                            placeholder="/home/qa/builds/app-debug.apk"
-                            onChange={e => setLocalApkPath(e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void importLocalApk(); } }}
-                          />
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={!localApkPath.trim() || importingApk}
-                            onClick={() => void importLocalApk()}
-                            style={{ whiteSpace: 'nowrap', padding: '0 12px' }}
-                          >
-                            {importingApk ? 'Memuat…' : 'Muat Path'}
-                          </button>
-                        </div>
                       </Field>
                     </div>
 
-                    {/* SERVER EMULATOR ZERO-CONFIG BANNER */}
-                    <div className="server-emulator-box">
+                    {/* SERVER RUNNER ACTIVE BADGE */}
+                    <div className="server-emulator-box" style={{ marginTop: 14 }}>
                       <div className="server-emulator-box-left">
                         <div className="server-emulator-glow-dot">
                           <Icon name="android" size={20} />
@@ -921,25 +685,17 @@ export function Wizard({
                         </div>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <strong>Smart Android Device Manager (Just-In-Time)</strong>
-                            <span className="section-type-badge select-badge">ON-DEMAND RUNNER</span>
+                            <strong>Server-Managed Maestro Environment</strong>
+                            <span className="section-type-badge select-badge">PRE-INSTALLED TARGET</span>
                           </div>
                           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-                            {system?.adb?.devices?.length ? (
-                              <>
-                                Perangkat aktif terdeteksi: <code className="mono">{system.adb.devices[0]}</code>. Pengujian akan langsung memakai perangkat ini tanpa membebani memori laptop.
-                              </>
-                            ) : (
-                              <>
-                                Headless Emulator (<code className="mono">qc_worker_headless</code>) akan otomatis menyala saat pengujian dimulai dan langsung mati saat pengujian selesai untuk menghemat RAM & CPU.
-                              </>
-                            )}
+                            Pengujian dieksekusi langsung oleh server menggunakan Maestro CLI. Tidak memerlukan koneksi perangkat fisik lokal atau unggah file APK manual.
                           </p>
                         </div>
                       </div>
                       <div className="server-emulator-tag">
                         <span className="status-dot active" />
-                        <span>{system?.adb?.devices?.length ? 'Perangkat Aktif' : 'On-Demand Siap'}</span>
+                        <span>Server Environment Siap</span>
                       </div>
                     </div>
                   </div>
@@ -1488,65 +1244,7 @@ export function Wizard({
                       borderRadius: 10,
                       border: '1px solid rgba(56, 189, 248, 0.25)'
                     }}>
-                      <div style={{
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 12
-                      }}>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '0.92rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <Icon name="zap" size={16} /> Auto-Seed Dataset Relasional Lengkap
-                          </div>
-                          <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: 3 }}>
-                            Injeksi otomatis data relasional lengkap (tabel master &amp; transaksi) atau jalankan seeder framework backend.
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          className="primary"
-                          disabled={seeding}
-                          onClick={async () => {
-                            setSeeding(true);
-                            setSeedResult(null);
-                            try {
-                              const res = await fetch('/api/v1/fixtures/seed/jamaahku', { method: 'POST' });
-                              const data = await res.json();
-                              if (data.success) {
-                                setSeedResult({
-                                  success: true,
-                                  message: `Database berhasil di-seed! Tabel data siap untuk pengujian end-to-end full CRUD.`
-                                });
-                              } else {
-                                setSeedResult({ success: false, message: data.error || 'Gagal seeding database.' });
-                              }
-                            } catch (err: any) {
-                              setSeedResult({ success: false, message: err?.message || 'Gagal menghubungi server QC.' });
-                            } finally {
-                              setSeeding(false);
-                            }
-                          }}
-                          style={{ whiteSpace: 'nowrap', padding: '8px 18px', fontSize: '0.84rem', fontWeight: 600 }}
-                        >
-                          {seeding ? '⚡ Menyemai Database...' : '⚡ Jalankan Auto-Seed Sekarang'}
-                        </button>
-                      </div>
-                      {seedResult && (
-                        <div style={{
-                          marginTop: 10,
-                          fontSize: '0.82rem',
-                          padding: '8px 12px',
-                          borderRadius: 6,
-                          background: seedResult.success ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                          color: seedResult.success ? '#4ade80' : '#f87171',
-                          border: `1px solid ${seedResult.success ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
-                        }}>
-                          {seedResult.success ? '✓ ' : '✗ '}{seedResult.message}
-                        </div>
-                      )}
-
-                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div>
                         <Field label="Custom Seeder Command (Opsional untuk Proyek / Framework Lain)" hint="Contoh: php artisan db:seed --force, npx prisma db seed, atau python manage.py loaddata">
                           <input
                             value={config.database.seedCommand || ''}
