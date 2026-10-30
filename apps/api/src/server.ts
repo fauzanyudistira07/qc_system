@@ -15,7 +15,7 @@ import { compileMaestroFlow } from './maestro-adapter.ts';
 import { compilePlaywrightFlow } from './playwright-generator.ts';
 import { runManagedProject, type ManagedProject, type ServiceRuntime } from './project-runner.ts';
 import { DiscoveryService } from './discovery/discovery-service.ts';
-import { checkAndroid, executeAndroidFlow, inspectApk, installApkToDevice, captureDeviceScreen, getManagedEmulators, stopAllManagedEmulators, ensureDeviceReady } from './android/index.ts';
+import { checkAndroid, executeAndroidFlow, captureDeviceScreen, getManagedEmulators, stopAllManagedEmulators, ensureDeviceReady } from './android/index.ts';
 import { boundedProcess } from './database/process.ts';
 import { validateDatabase, validateSql } from './database/sql-validation.ts';
 import type { DatabaseConfig, TestAccount } from './database/types.ts';
@@ -242,7 +242,7 @@ function evidenceRelativePath(filePath: string) {
 }
 
 function evidenceAssetUrl(relativePath: string) {
-  return `/api/v1/zannora-evidence/artifacts/${relativePath.split('/').map(encodeURIComponent).join('/')}`;
+  return `/api/v1/evidence/artifacts/${relativePath.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 async function collectEvidenceFiles(directory: string): Promise<string[]> {
@@ -685,141 +685,6 @@ async function buildTargetQualityEvidence(job: { id: string; name: string }) {
       screenshots: totalScreenshots,
       videos: totalVideos,
       assets: totalAssets
-    }
-  };
-}
-
-async function buildZannoraEvidence() {
-  const groups: EvidenceGroup[] = [];
-  const zannoraReports = path.join(artifactRoot, 'zannora', 'runs');
-  const zannoraRuns = path.join(artifactRoot, 'test-runs', 'zannora');
-
-  const apiReportPath = await newestEvidenceFile(zannoraReports, (name) => /^api-e2e-.*\.json$/i.test(name));
-  if (apiReportPath) {
-    const apiReport = JSON.parse(await readFile(apiReportPath, 'utf8')) as Record<string, unknown>;
-    const apiSummary = (apiReport.summary || {}) as { passed?: number; total?: number; failed?: number };
-    groups.push(await makeEvidenceGroup({
-      id: 'api-e2e', title: 'API E2E — seluruh endpoint', category: 'API & CRUD', status: String(apiSummary.failed ?? 0) === '0' ? 'PASSED' : 'FAILED',
-      summary: `${apiSummary.passed ?? 0}/${apiSummary.total ?? 0} assertion API lulus; mencakup auth, passenger, airline, airport, airplane, seat, flight, booking, payment, ticket, dan cancellation.`,
-      folder: evidenceRelativePath(path.dirname(apiReportPath)), reportPath: apiReportPath,
-      metadata: { passed: apiSummary.passed ?? 0, total: apiSummary.total ?? 0, failed: apiSummary.failed ?? 0 }
-    }));
-  }
-
-  const crudReportPath = await newestEvidenceFile(path.join(zannoraReports, 'crud-airline'), (name) => name.endsWith('.json'));
-  const crudDirectory = await newestEvidenceDirectory(path.join(zannoraRuns, 'crud-airline'));
-  if (crudReportPath) {
-    const crudReport = JSON.parse(await readFile(crudReportPath, 'utf8')) as Record<string, unknown>;
-    const operations = ['create', 'read', 'update', 'delete'];
-    const crudPassedCount = operations.filter((key) => crudReport[key] === 'PASSED').length;
-    const crudPassed = crudPassedCount === operations.length;
-    groups.push(await makeEvidenceGroup({
-      id: 'crud', title: 'CRUD browser — Airline', category: 'API & CRUD', status: crudPassed ? 'PASSED' : 'FAILED',
-      summary: 'Bukti UI create, read, update, dan delete data airline.', folder: evidenceRelativePath(path.dirname(crudReportPath)), reportPath: crudReportPath,
-      directories: crudDirectory ? [crudDirectory] : [],
-      metadata: { passed: crudPassedCount, total: operations.length, failed: operations.length - crudPassedCount, operations }
-    }));
-  }
-
-  const rolesReportPath = await newestEvidenceFile(path.join(zannoraReports, 'web-roles'), (name) => name.endsWith('.json'));
-  const roleDirectories: string[] = [];
-  for (const role of ['admin', 'manager', 'staff', 'customer']) {
-    const roleDirectory = await newestEvidenceDirectory(path.join(zannoraRuns, 'web-roles', role));
-    if (roleDirectory) roleDirectories.push(roleDirectory);
-  }
-  if (rolesReportPath) {
-    const rolesReport = JSON.parse(await readFile(rolesReportPath, 'utf8')) as { status?: string; results?: Array<{ passed?: boolean }> };
-    const passed = rolesReport.results?.filter((item) => item.passed).length ?? 0;
-    const total = rolesReport.results?.length ?? 0;
-    groups.push(await makeEvidenceGroup({
-      id: 'roles', title: 'Role access — admin, manager, staff, customer', category: 'Web Flow', status: rolesReport.status ?? 'UNKNOWN',
-      summary: `${passed}/${total} skenario role dan pembatasan akses lulus.`, folder: evidenceRelativePath(path.dirname(rolesReportPath)), reportPath: rolesReportPath,
-      directories: roleDirectories,
-      metadata: { passed, total, failed: total - passed, roles: ['admin', 'manager', 'staff', 'customer'] }
-    }));
-  }
-
-  const fullFlow = await newestEvidenceRunWithReport(path.join(zannoraRuns, 'full-flow'), (status) => status === 'PASSED');
-  if (fullFlow) {
-    const report = fullFlow.report as { checks?: Array<{ passed?: boolean }>; bookingCode?: string; screenshots?: string[] };
-    const passed = report.checks?.filter((item) => item.passed).length ?? 0;
-    const total = report.checks?.length ?? 0;
-    groups.push(await makeEvidenceGroup({
-      id: 'full-flow', title: 'Full flow — booking sampai e-ticket', category: 'Web Flow', status: 'PASSED',
-      summary: `${passed}/${total} langkah lulus: login, passenger, seat, booking, payment handoff, acc admin, ticket, dan e-ticket.`, folder: evidenceRelativePath(fullFlow.directory), reportPath: fullFlow.reportPath,
-      directories: [fullFlow.directory],
-      metadata: { passed, total, failed: total - passed, bookingCode: report.bookingCode, findings: (report.checks ?? []).map((check: any) => ({ name: check.name, detail: check.detail, passed: check.passed })) }
-    }));
-  }
-
-  const navigationDirectory = await newestEvidenceDirectory(path.join(zannoraRuns, 'navigation'));
-  const navigationReportPath = await newestEvidenceFile(path.join(zannoraReports, 'navigation'), (name) => name.endsWith('.json'));
-  if (navigationDirectory) {
-    let navigationMetadata: Record<string, unknown> = { passed: 15, total: 15, failed: 0 };
-    if (navigationReportPath) {
-      try {
-        const report = JSON.parse(await readFile(navigationReportPath, 'utf8')) as any;
-        const checks = Array.isArray(report.checks) ? report.checks : Array.isArray(report.results) ? report.results : [];
-        const passed = checks.length ? checks.filter((check: any) => check.passed || check.status === 'PASSED').length : 15;
-        const total = checks.length || 15;
-        navigationMetadata = { passed, total, failed: total - passed, findings: checks.map((check: any) => ({ name: check.name || check.title, detail: check.detail || check.error, passed: check.passed ?? check.status === 'PASSED' })) };
-      } catch { /* Older reports can be summary-only. */ }
-    }
-    groups.push(await makeEvidenceGroup({
-      id: 'navigation', title: 'Navigation smoke — halaman admin', category: 'Web Flow', status: 'PASSED',
-      summary: `${navigationMetadata.passed ?? 0}/${navigationMetadata.total ?? 0} langkah smoke navigation lulus untuk login, dashboard, airlines, flights, dan reports.`, folder: evidenceRelativePath(navigationDirectory), reportPath: navigationReportPath, directories: [navigationDirectory], metadata: navigationMetadata
-    }));
-  }
-
-  const responsive = await newestEvidenceRunWithReport(path.join(zannoraRuns, 'responsive'));
-  if (responsive) {
-    const report = responsive.report as { status?: string; total?: number; passed?: number; failed?: number; checks?: Array<Record<string, any>>; results?: Array<Record<string, any>>; scope?: { routes?: string[]; browsers?: string[]; viewports?: Array<{ name?: string }> } };
-    const checks = report.checks ?? [];
-    const hasTextQualityGate = checks.some((check) => check.area === 'content-quality') || (report.results ?? []).some((result) => Object.prototype.hasOwnProperty.call(result, 'textQualityIssues'));
-    const evidenceStatus = hasTextQualityGate ? (report.status ?? 'UNKNOWN') : 'RETEST';
-    const evidenceTotal = report.total ?? 0;
-    const evidenceFindings = checks.filter((check) => check.passed === false).map((check) => ({ area: check.area, name: check.name, detail: check.detail, browser: check.browser, viewport: check.viewport, route: check.route, passed: false }));
-    if (!hasTextQualityGate) evidenceFindings.unshift({ area: 'content-quality', name: 'Retest required: text quality rule belum tercakup', detail: 'Report ini dibuat sebelum engine memeriksa merged/camelCase text, clipping, line-height, dan text overlap. Status lama tidak boleh dianggap CLEAR.', browser: undefined, viewport: undefined, route: undefined, passed: false });
-    groups.push(await makeEvidenceGroup({
-      id: 'responsive', title: 'Responsive & layout — desktop, tablet, mobile', category: 'UI Quality', status: evidenceStatus,
-      summary: hasTextQualityGate ? `${report.passed ?? 0}/${evidenceTotal} pemeriksaan viewport lulus; ${report.failed ?? 0} temuan layout perlu perbaikan.` : `RETEST wajib: report lama ${evidenceTotal} pemeriksaan belum mencakup validasi kualitas teks.`, folder: evidenceRelativePath(responsive.directory), reportPath: responsive.reportPath,
-      directories: [responsive.directory],
-      metadata: { passed: hasTextQualityGate ? (report.passed ?? 0) : 0, total: evidenceTotal, failed: hasTextQualityGate ? (report.failed ?? 0) : evidenceTotal, routes: report.scope?.routes ?? [], browsers: report.scope?.browsers ?? [], viewports: report.scope?.viewports?.map((item) => item.name).filter(Boolean) ?? [], findings: evidenceFindings }
-    }));
-  }
-
-  const quality = await newestEvidenceRunWithReport(path.join(zannoraRuns, 'quality'));
-  if (quality) {
-    const report = quality.report as { status?: string; total?: number; passed?: number; failed?: number; checks?: Array<Record<string, any>>; scope?: { browsers?: string[]; routes?: string[]; viewports?: Array<{ name?: string }> } };
-    const checks = report.checks ?? [];
-    const hasTextQualityGate = checks.some((check) => check.area === 'content-quality');
-    const evidenceStatus = hasTextQualityGate ? (report.status ?? 'UNKNOWN') : 'RETEST';
-    const evidenceTotal = report.total ?? 0;
-    const evidenceFindings = checks.filter((check) => check.passed === false).map((check) => ({ area: check.area, name: check.name, detail: check.detail, browser: check.browser, viewport: check.viewport, route: check.route, passed: false }));
-    if (!hasTextQualityGate) evidenceFindings.unshift({ area: 'content-quality', name: 'Retest required: text quality rule belum tercakup', detail: 'Report ini dibuat sebelum engine memeriksa merged/camelCase text, clipping, line-height, dan text overlap. Status lama tidak boleh dianggap CLEAR.', browser: undefined, viewport: undefined, route: undefined, passed: false });
-    const browserNames = report.scope?.browsers?.join(', ') || 'Chromium, Firefox, WebKit';
-    const viewportNames = report.scope?.viewports?.map((viewport) => viewport.name).filter(Boolean).join(', ') || 'desktop, tablet, mobile';
-    groups.push(await makeEvidenceGroup({
-      id: 'quality', title: 'Visual, accessibility & browser quality', category: 'UI Quality', status: evidenceStatus,
-      summary: hasTextQualityGate ? `${report.passed ?? 0}/${evidenceTotal} quality checks lulus; contrast WCAG, typography, state, pixel regression, ARIA, dense data, dan ${browserNames} pada ${viewportNames}.` : `RETEST wajib: report lama ${evidenceTotal} quality checks belum mencakup validasi kualitas teks.`, folder: evidenceRelativePath(quality.directory), reportPath: quality.reportPath,
-      directories: [quality.directory],
-      metadata: { passed: hasTextQualityGate ? (report.passed ?? 0) : 0, total: evidenceTotal, failed: hasTextQualityGate ? (report.failed ?? 0) : evidenceTotal, routes: report.scope?.routes ?? [], browsers: report.scope?.browsers ?? [], viewports: report.scope?.viewports?.map((item) => item.name).filter(Boolean) ?? [], findings: evidenceFindings }
-    }));
-  }
-
-  const passed = groups.filter((group) => group.status === 'PASSED').length;
-  return {
-    project: 'Zannora',
-    generatedAt: new Date().toISOString(),
-    groups,
-    totals: {
-      groups: groups.length,
-      passed,
-      failed: groups.length - passed,
-      reports: groups.filter((group) => group.report).length,
-      screenshots: groups.reduce((total, group) => total + group.screenshots.length, 0),
-      videos: groups.reduce((total, group) => total + group.videos.length, 0),
-      assets: groups.reduce((total, group) => total + group.assets.length, 0)
     }
   };
 }
@@ -1319,89 +1184,6 @@ app.post<{ Body: { filename: string; kind?: 'sql' | 'env'; content: string } }>(
   return reply.code(201).send(result);
 });
 
-// Upload APK Binary Endpoint
-app.post<{ Querystring: { filename?: string } }>('/api/v1/uploads/apk', async (request, reply) => {
-  const filename = request.query?.filename || 'app-upload.apk';
-  const raw = request.body as any;
-  const buffer = Buffer.isBuffer(raw) ? raw : (raw instanceof Uint8Array ? Buffer.from(raw) : Buffer.from(raw || ''));
-  if (!buffer || buffer.length === 0) {
-    return reply.code(400).send({ error: 'File APK tidak valid atau kosong' });
-  }
-
-  const tempDir = path.join(artifactRoot, 'temp');
-  await mkdir(tempDir, { recursive: true });
-  const tempApkPath = path.join(tempDir, `inspect-${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
-  await writeFile(tempApkPath, buffer);
-
-  let metadata: { packageId?: string; appName?: string; versionName?: string } = {};
-  try {
-    metadata = await inspectApk(tempApkPath);
-  } catch { /* ignore */ }
-
-  const saved = await discoveryService.saveApkUpload(filename, buffer, metadata);
-
-  try { await unlink(tempApkPath); } catch { /* ignore */ }
-
-  return reply.code(201).send(saved);
-});
-
-// Load Local APK directly from host disk without browser transfer
-app.post<{ Body: { localPath: string } }>('/api/v1/uploads/apk-local', async (request, reply) => {
-  const localPath = request.body?.localPath?.trim();
-  if (!localPath) return reply.code(400).send({ error: 'localPath wajib diisi' });
-
-  let resolvedPath = path.resolve(localPath);
-  if (!existsSync(resolvedPath)) {
-    return reply.code(404).send({ error: `File atau folder APK tidak ditemukan: ${resolvedPath}` });
-  }
-
-  const fileStat = statSync(resolvedPath);
-  if (fileStat.isDirectory()) {
-    const releaseCandidate = path.join(resolvedPath, 'app-release.apk');
-    const debugCandidate = path.join(resolvedPath, 'app-debug.apk');
-    if (existsSync(releaseCandidate)) {
-      resolvedPath = releaseCandidate;
-    } else if (existsSync(debugCandidate)) {
-      resolvedPath = debugCandidate;
-    } else {
-      return reply.code(400).send({ error: `Tidak ditemukan app-release.apk atau app-debug.apk di: ${resolvedPath}` });
-    }
-  }
-
-  const filename = path.basename(resolvedPath);
-  const buffer = await readFile(resolvedPath);
-
-  let metadata: { packageId?: string; appName?: string; versionName?: string } = {};
-  try {
-    metadata = await inspectApk(resolvedPath);
-  } catch { /* ignore */ }
-
-  // Fallback metadata if aapt dump is not available
-  if (!metadata.packageId && (filename.includes('app-release') || filename.includes('app-debug'))) {
-    if (resolvedPath.toLowerCase().includes('tasdig')) {
-      metadata.packageId = 'com.taskia.digital';
-      metadata.appName = 'Taskia Digital';
-    }
-  }
-
-  const saved = await discoveryService.saveApkUpload(filename, buffer, metadata);
-  return reply.code(201).send(saved);
-});
-
-// Install APK to Device via ADB Endpoint
-app.post<{ Body: { uploadId: string; deviceId?: string } }>('/api/v1/android/install-apk', async (request, reply) => {
-  const uploadId = request.body?.uploadId;
-  if (!uploadId) return reply.code(400).send({ error: 'uploadId wajib diisi' });
-
-  const upload = discoveryService.getUpload(uploadId);
-  if (!upload || !(upload as any).path) {
-    return reply.code(404).send({ error: 'File APK tidak ditemukan pada storage server' });
-  }
-
-  const result = await installApkToDevice((upload as any).path, request.body.deviceId);
-  return result;
-});
-
 // Live Android Device Screen Endpoint
 app.get<{ Querystring: { deviceId?: string } }>('/api/v1/android/screen', async (request, reply) => {
   const res = await captureDeviceScreen(request.query?.deviceId);
@@ -1474,34 +1256,6 @@ app.post<{ Body: { accounts: Array<{ name?: string; email: string; password: str
   });
   return { valid: errors.length === 0, errors };
 });
-
-// Database Auto-Seed Endpoints
-app.get('/api/v1/fixtures/seed/jamaahku', async () => {
-  const sqlPath = path.resolve(root, 'fixtures/sql/jamaahku_lengkap.sql');
-  try {
-    const meta = await stat(sqlPath);
-    return {
-      available: true,
-      sqlPath,
-      sizeBytes: meta.size,
-      sizeKb: (meta.size / 1024).toFixed(1)
-    };
-  } catch {
-    return { available: false, sqlPath };
-  }
-});
-
-app.post('/api/v1/fixtures/seed/jamaahku', async (_request, reply) => {
-  try {
-    const seederUrl = url.pathToFileURL(path.resolve(root, 'scripts/seed-jamaahku.mjs')).href;
-    const seederModule = await import(seederUrl);
-    const result = await seederModule.seedJamaahkuDatabase();
-    return reply.send({ success: true, ...result });
-  } catch (err: any) {
-    return reply.code(500).send({ success: false, error: err?.message || String(err) });
-  }
-});
-
 
 // Discovery Jobs Endpoints
 app.post('/api/v1/discovery/reload', async () => {
@@ -2012,26 +1766,6 @@ app.get<{ Params: { id: string; '*': string } }>('/api/v1/discovery/jobs/:id/art
   return streamFileResponse(filePath, request, reply);
 });
 
-app.get('/api/v1/test-runs/full-flow', async (_, reply) => {
-  const video = await latestFullFlowVideo();
-  if (!video) return { available: false };
-  return {
-    available: true,
-    name: video.name,
-    size: video.size,
-    updatedAt: video.updatedAt,
-    url: '/api/v1/test-runs/full-flow/video'
-  };
-});
-
-app.get('/api/v1/test-runs/full-flow/video', async (request, reply) => {
-  const video = await latestFullFlowVideo();
-  if (!video) return reply.code(404).send({ error: 'Video full flow belum tersedia.' });
-  return streamFileResponse(video.filePath, request, reply);
-});
-
-app.get('/api/v1/zannora-evidence', async () => buildZannoraEvidence());
-
 app.get<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/quality-evidence', async (request, reply) => {
   const job = discoveryService.getJob(request.params.id);
   if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
@@ -2053,7 +1787,7 @@ app.get<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/history', async 
   return { project: job.config.name, entries: await collectDiscoveryRunHistory({ id: job.id, name: job.config.name, workspace: job.workspace }) };
 });
 
-app.get<{ Params: { '*': string } }>('/api/v1/zannora-evidence/artifacts/*', async (request, reply) => {
+app.get<{ Params: { '*': string } }>('/api/v1/evidence/artifacts/*', async (request, reply) => {
   let decodedRelative: string;
   try {
     decodedRelative = request.params['*'].split('/').map((part) => decodeURIComponent(part)).join('/');
@@ -2064,6 +1798,10 @@ app.get<{ Params: { '*': string } }>('/api/v1/zannora-evidence/artifacts/*', asy
   const relativeCheck = path.relative(artifactRoot, filePath);
   if (relativeCheck.startsWith('..') || path.isAbsolute(relativeCheck)) return reply.code(403).send({ error: 'Access denied' });
   return streamFileResponse(filePath, request, reply);
+});
+
+app.get<{ Params: { '*': string } }>('/api/v1/zannora-evidence/artifacts/*', async (request, reply) => {
+  return reply.redirect(`/api/v1/evidence/artifacts/${request.params['*']}`);
 });
 
 // Nextcloud WebDAV Integration endpoints
