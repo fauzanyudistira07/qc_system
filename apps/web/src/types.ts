@@ -53,20 +53,133 @@ export type ServiceTargetConfig = {
   branch: string;
   sameRepoAsFrontend?: boolean;
 };
+export type EnvProvisionEntry = {
+  directory: string;
+  templateFile: string;
+  targetEnvFile: string;
+  keysPopulated: string[];
+  aiInferredKeys: string[];
+  notes: string[];
+};
+export type EnvProvisionResult = {
+  entries: EnvProvisionEntry[];
+  warnings: string[];
+};
+export type ProvisionedRoleAccount = {
+  role: string;
+  name?: string;
+  identifier: string;
+  identifierField: string;
+  source: 'seeder' | 'register-api' | 'db-insert' | 'cli' | 'manual';
+  verified: boolean;
+  verificationNote?: string;
+  loginPath?: string;
+  homePath?: string;
+};
+export type BatchCommandPlan = {
+  version: string;
+  generatedAt: string;
+  platform: 'web' | 'android';
+  longScreenshotPlanPath: string;
+  videoPlanPath: string;
+  screenshotCommands: Array<{ id: string; role: string; pageId: string; pagePath: string; pageTitle: string; outputFilename: string }>;
+  videoCommands: Array<{ role: string; outputFilename: string; steps: Array<{ kind: string; label: string; pagePath?: string }> }>;
+};
+export type LongScreenshotArtifact = {
+  id: string;
+  role: string;
+  pageId: string;
+  pagePath: string;
+  pageTitle: string;
+  filename: string;
+  path: string;
+  url: string;
+  width: number;
+  height: number;
+  segmentCount: number;
+  status: 'CAPTURED' | 'FAILED';
+  error?: string;
+};
+export type RoleVideoArtifact = {
+  role: string;
+  filename: string;
+  path: string;
+  url: string;
+  durationSec: number;
+  sizeBytes: number;
+  chapters: Array<{ startSec: number; page: string; feature?: string }>;
+  status: 'RECORDED' | 'FAILED';
+  error?: string;
+};
+export type CoverageGapItem = {
+  id: string;
+  role: string;
+  pagePath: string;
+  pageTitle: string;
+  phaseFailed: 'ENV' | 'EMULATOR' | 'AUTH' | 'RECON' | 'LONG_SS' | 'VIDEO';
+  category:
+    | 'auth-failed'
+    | 'rbac-forbidden'
+    | 'dynamic-param-unresolved'
+    | 'backend-5xx'
+    | 'ui-crash'
+    | 'timeout'
+    | 'navigation-missing'
+    | 'video-missing'
+    | 'env-misconfigured';
+  httpStatus?: number;
+  redirectedTo?: string;
+  failedApiCalls?: Array<{ method: string; url: string; status: number }>;
+  consoleOrDeviceErrors?: string[];
+  errorScreenshotUrl?: string;
+  technicalReason: string;
+  aiDiagnosis?: {
+    summaryId: string;
+    likelyCause: string;
+    recommendedFix: string;
+    ownerRole: 'frontend' | 'backend' | 'mobile' | 'infra';
+  };
+};
+export type Phase1ReconSummary = {
+  discoveredAt: string;
+  approvedAt?: string;
+  platform: 'web' | 'android';
+  totalRoles: number;
+  totalPages: number;
+  totalInteractiveFeatures: number;
+  roles: Array<{
+    role: string;
+    pagesCount: number;
+    interactiveFeaturesCount: number;
+    accountVerified: boolean;
+  }>;
+  batch1TotalScreenshots?: number;
+  batch1CapturedCount?: number;
+  batch2TotalRoleVideos?: number;
+  batch2RecordedCount?: number;
+  aiExecutiveSummary?: string;
+};
+
 export type Config = {
   name: string; sourceType?: 'existing-target' | 'local-folder' | 'github'; localPath?: string; repositoryUrl: string; ref: string; baseUrl: string;
   backendUrl?: string; backendMode?: 'existing' | 'local' | 'repo';
   runMode: 'managed-local' | 'existing-target' | 'demo'; stack: 'auto' | 'custom' | 'laravel'; services: Service[];
   database: { engine: 'none' | 'mysql' | 'postgres' | 'sqlite'; source: 'empty' | 'sql' | 'migrate' | 'seed'; sqlUploadId?: string; migrationCommand?: string; seedCommand?: string; provisionCommand?: string };
-  envUploadId?: string; accounts: Account[];
+  envUploadId?: string; accounts: Account[]; autoProvisionAccounts?: boolean;
   rules: { maxPages: number; maxDepth: number; includePaths: string[]; excludePaths: string[]; loginPath?: string; emailSelector?: string; passwordSelector?: string; submitSelector?: string; successUrl?: string };
   platform: 'web' | 'android'; appId?: string; deviceId?: string; useServerEmulator?: boolean;
-  frontendTarget?: ServiceTargetConfig; backendTarget?: ServiceTargetConfig;
+  frontendTarget?: ServiceTargetConfig; backendTarget?: ServiceTargetConfig; mobileTarget?: ServiceTargetConfig;
   executeFlows: boolean; businessFlowReview: { mode: 'required' | 'auto' }; qualityAudit: QualityAuditConfig;
   apkUploadId?: string; apkFilename?: string; apkPackageId?: string;
 };
 export type Element = { type: string; name: string; selector?: string; testId?: string; tag?: string; source?: string; confidence?: number };
-export type Page = { id: string; path: string; title: string; url?: string; status?: number; state: 'observed' | 'candidate' | 'blocked' | 'error'; elements: Element[]; screenshot?: string; source?: string; authentication?: string; errors?: string[]; links?: string[]; apiEndpoints?: string[] };
+export type InteractiveFeatureItem = { kind: 'tab' | 'accordion' | 'drawer' | 'filter' | 'modal-trigger' | 'link'; label: string; selector?: string; bounds?: { x: number; y: number } };
+export type Page = {
+  id: string; path: string; title: string; url?: string; status?: number; state: 'observed' | 'candidate' | 'blocked' | 'error';
+  elements: Element[]; screenshot?: string; source?: string; authentication?: string; errors?: string[]; links?: string[]; apiEndpoints?: string[];
+  role?: string; scrollHeight?: number; viewportHeight?: number; isScrollable?: boolean; scrollContainerSelector?: string;
+  interactiveFeatures?: InteractiveFeatureItem[]; resolvedConcretePath?: string;
+};
 export type CapabilityEvidence = { routes: string[]; apiRoutes: string[]; elements: string[]; methods: string[] };
 export type DetectedCapability = { id: string; category: string; label: string; confidence: number; status: 'detected' | 'candidate'; rationale: string; evidence: CapabilityEvidence; recommendedChecks: string[] };
 export type NegativeScenarioPlan = { id: string; capability: string; label: string; execution: 'safe-probe' | 'requires-fixture'; checks: string[] };
@@ -93,7 +206,7 @@ export type BusinessFlowMap = {
   summary: { total: number; approved: number; needsReview: number; blocked: number; critical: number };
   flows: BusinessFlow[]; limitations: string[];
 };
-export type Inventory = { pages: Page[]; routes: unknown[]; api: unknown[]; filesScanned: number; warnings: string[]; generatedAt: string; capabilities?: CapabilityProfile; crudPlan?: CrudPlan; roleActionPlan?: RoleActionPlan; featureContractPlan?: FeatureContractPlan };
+export type Inventory = { pages: Page[]; routes: unknown[]; api: unknown[]; filesScanned: number; warnings: string[]; generatedAt: string; rolesDiscovered?: string[]; capabilities?: CapabilityProfile; crudPlan?: CrudPlan; roleActionPlan?: RoleActionPlan; featureContractPlan?: FeatureContractPlan };
 export type Flow = { id: string; name: string; source: string; platform: string; status: string; reason?: string };
 export type Step = { id?: string; index?: number; action?: string; status: string; durationMs?: number; errorCode?: string; errorMessage?: string; errorOrigin?: 'user_target_application' | 'qc_maestro_engine'; [key: string]: unknown };
 export type Artifact = { type?: string; path?: string; name?: string; url?: string };
@@ -109,6 +222,13 @@ export type Job = {
   finishedAt?: string;
   message?: string;
   logs: { time: string; category: string; message: string }[];
+  envProvisioning?: EnvProvisionResult;
+  provisionedAccounts?: ProvisionedRoleAccount[];
+  reconSummary?: Phase1ReconSummary;
+  commandPlan?: BatchCommandPlan;
+  longScreenshots?: LongScreenshotArtifact[];
+  roleVideos?: RoleVideoArtifact[];
+  coverageGaps?: CoverageGapItem[];
   inventory?: Inventory;
   businessFlowMap?: BusinessFlowMap;
   flows?: Flow[];
@@ -147,23 +267,23 @@ export type EvidenceMetadata = { passed?: number; total?: number; failed?: numbe
 export type RunHistoryEntry = { runLabel: string; project: string; status: string; phase?: string; progress?: number; createdAt?: string; updatedAt?: string; quality?: { status?: string; total?: number; passed?: number; failed?: number; notApplicable?: number; visualRegression?: QualityAuditState['visualRegression'] } };
 export type EvidenceGroup = { id: string; title: string; category: string; status: string; summary: string; folder: string; report?: EvidenceAsset; assets: EvidenceAsset[]; screenshots: EvidenceAsset[]; videos: EvidenceAsset[]; metadata?: EvidenceMetadata };
 export type QualityEvidence = { project: string; generatedAt: string; groups: EvidenceGroup[]; totals: { groups: number; passed: number; failed: number; reports: number; screenshots: number; videos: number; assets: number } };
-export type ZannoraEvidence = QualityEvidence;
 export type View = 'overview' | 'new' | 'discovery' | 'map' | 'flows' | 'runs' | 'findings' | 'reports' | 'evidence';
 export const initialConfig = (): Config => ({
   name: '',
-  sourceType: 'existing-target',
+  sourceType: 'github',
   repositoryUrl: '',
   ref: 'main',
-  baseUrl: 'http://localhost:5174',
-  backendUrl: 'http://10.0.2.2:8000',
-  backendMode: 'existing',
-  runMode: 'existing-target',
+  baseUrl: 'http://127.0.0.1:5000',
+  backendUrl: 'http://127.0.0.1:5001',
+  backendMode: 'repo',
+  runMode: 'managed-local',
   stack: 'auto',
   services: [],
-  database: { engine: 'none', source: 'empty' },
-  accounts: [{ name: 'QA Tester', email: 'tester.qc@example.com', password: 'password123', role: 'user' }],
+  database: { engine: 'mysql', source: 'migrate' },
+  accounts: [],
+  autoProvisionAccounts: true,
   rules: {
-    maxPages: 100,
+    maxPages: 120,
     maxDepth: 8,
     includePaths: [],
     excludePaths: ['/logout', '/delete'],
@@ -173,25 +293,32 @@ export const initialConfig = (): Config => ({
     submitSelector: "button[type='submit'], .btn-primary",
     successUrl: '/dashboard',
   },
-  platform: ENABLE_MOBILE_SUPPORT ? 'android' : 'web',
-  deviceId: 'emulator-5554',
+  platform: 'web',
+  deviceId: 'qc_worker_headless',
   useServerEmulator: true,
   frontendTarget: {
-    mode: 'local',
-    url: 'http://localhost:5173',
+    mode: 'server',
+    url: 'http://127.0.0.1:5000',
     repositoryUrl: '',
     branch: 'main',
   },
   backendTarget: {
-    mode: 'local',
-    url: 'http://127.0.0.1:8000',
+    mode: 'server',
+    url: 'http://127.0.0.1:5001',
     repositoryUrl: '',
     branch: 'main',
+  },
+  mobileTarget: {
+    mode: 'server',
+    url: 'http://10.0.2.2:5001',
+    repositoryUrl: '',
+    branch: 'main',
+    sameRepoAsFrontend: false,
   },
   executeFlows: true,
   businessFlowReview: { mode: 'required' },
   qualityAudit: {
-    enabled: true,
+    enabled: false,
     browsers: ['chromium', 'firefox', 'webkit'],
     viewports: ['desktop', 'tablet', 'mobile'],
     maxRoutes: 0,

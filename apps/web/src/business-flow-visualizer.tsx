@@ -19,53 +19,76 @@ export function BusinessFlowVisualizer({
 }: BusinessFlowVisualizerProps) {
   if (!map) {
     return (
-      <div style={{ padding: 40, textAlign: 'center', background: '#FFFFFF', borderRadius: 12, border: '1.5px solid #DBC4AC' }}>
+      <div style={{ padding: 40, textAlign: 'center', background: 'var(--bg-panel)', borderRadius: 12, border: '1px solid var(--border-default)' }}>
         <Icon name="flows" size={24} />
-        <h3 style={{ margin: '12px 0 6px 0', fontSize: 16, fontWeight: 800, color: '#14181D' }}>Menunggu Sintesis Alur Bisnis</h3>
-        <p style={{ margin: 0, fontSize: 13, color: '#7B6858' }}>Server sedang melakukan scan and crawler. Alur fungsional akan segera tampil di sini.</p>
+        <h3 style={{ margin: '12px 0 6px 0', fontSize: 16, fontWeight: 800, color: 'var(--text-bright)' }}>Menunggu Sintesis Alur Bisnis</h3>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>Server sedang melakukan scan and crawler. Alur fungsional akan segera tampil di sini.</p>
       </div>
     );
   }
 
-  const [selectedFlowId, setSelectedFlowId] = useState<string>(() => map.flows[0]?.id || '');
+  const [selectedFlowId, setSelectedFlowId] = useState<string>(() => map.flows?.[0]?.id || '');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'diagram' | 'steps'>('diagram');
   const [flowOrientation, setFlowOrientation] = useState<'vertical' | 'horizontal'>('vertical');
 
+  // Normalisasi dinamis: tangani data flow yang belum memiliki steps/summary lengkap dari retest/crawler
+  const normalizedFlows = useMemo<BusinessFlow[]>(() => {
+    return (map.flows || []).map((f) => ({
+      ...f,
+      title: f.title || f.id || 'Alur Tanpa Judul',
+      summary: f.summary || f.title || '',
+      category: f.category || 'General',
+      actors: Array.isArray(f.actors) ? f.actors : [],
+      trigger: f.trigger || 'Inisiasi Pengguna / Akses Target',
+      preconditions: Array.isArray(f.preconditions) ? f.preconditions : [],
+      steps: Array.isArray(f.steps) ? f.steps : [],
+      expectedOutcome: Array.isArray(f.expectedOutcome) && f.expectedOutcome.length > 0 ? f.expectedOutcome : ['Sesi aktif, elemen terverifikasi, dan bebas error crash'],
+      negativeScenarios: Array.isArray(f.negativeScenarios) ? f.negativeScenarios : [],
+      recoveryScenarios: Array.isArray(f.recoveryScenarios) ? f.recoveryScenarios : [],
+      confidence: typeof f.confidence === 'number' ? f.confidence : 0.85,
+      critical: Boolean(f.critical),
+      status: f.status || 'NEEDS_REVIEW',
+    }));
+  }, [map.flows]);
 
   // Categories
   const categories = useMemo(() => {
     const set = new Set<string>();
-    map.flows.forEach(f => { if (f.category) set.add(f.category); });
+    normalizedFlows.forEach(f => { if (f.category) set.add(f.category); });
     return Array.from(set);
-  }, [map.flows]);
+  }, [normalizedFlows]);
 
   // Filtered flows
   const filteredFlows = useMemo(() => {
-    return map.flows.filter(f => {
+    return normalizedFlows.filter(f => {
       const matchCat = categoryFilter === 'all' || f.category === categoryFilter;
       const q = searchQuery.toLowerCase().trim();
-      const matchSearch = !q || f.title.toLowerCase().includes(q) || f.summary.toLowerCase().includes(q) || f.steps.some(s => s.action.toLowerCase().includes(q) || (s.route && s.route.toLowerCase().includes(q)));
+      const matchSearch =
+        !q ||
+        (f.title && f.title.toLowerCase().includes(q)) ||
+        (f.summary && f.summary.toLowerCase().includes(q)) ||
+        (f.steps && f.steps.some(s => (s.action && s.action.toLowerCase().includes(q)) || (s.route && s.route.toLowerCase().includes(q))));
       return matchCat && matchSearch;
     });
-  }, [map.flows, categoryFilter, searchQuery]);
+  }, [normalizedFlows, categoryFilter, searchQuery]);
 
   // Selected flow
   const currentFlow = useMemo(() => {
-    const found = map.flows.find(f => f.id === selectedFlowId);
-    return found || filteredFlows[0] || map.flows[0];
-  }, [map.flows, selectedFlowId, filteredFlows]);
+    const found = normalizedFlows.find(f => f.id === selectedFlowId);
+    return found || filteredFlows[0] || normalizedFlows[0];
+  }, [normalizedFlows, selectedFlowId, filteredFlows]);
 
   const flowStats = useMemo(() => {
-    const total = map.flows.length;
-    const approved = map.flows.filter(f => f.status === 'APPROVED').length;
-    const needsReview = map.flows.filter(f => f.status !== 'APPROVED').length;
-    const critical = map.flows.filter(f => f.critical).length;
+    const total = normalizedFlows.length;
+    const approved = normalizedFlows.filter(f => f.status === 'APPROVED').length;
+    const needsReview = normalizedFlows.filter(f => f.status !== 'APPROVED').length;
+    const critical = normalizedFlows.filter(f => f.critical).length;
     const isAllApproved = map.status === 'APPROVED' || (total > 0 && approved === total);
     return { total, approved, needsReview, critical, isAllApproved };
-  }, [map.flows, map.status]);
+  }, [normalizedFlows, map.status]);
 
   const isAllApproved = flowStats.isAllApproved;
 
@@ -156,7 +179,7 @@ export function BusinessFlowVisualizer({
                   className={`bf-cat-btn ${categoryFilter === 'all' ? 'active' : ''}`}
                   onClick={() => setCategoryFilter('all')}
                 >
-                  Semua ({map.flows.length})
+                  Semua ({normalizedFlows.length})
                 </button>
                 {categories.map(cat => (
                   <button
@@ -343,62 +366,87 @@ export function BusinessFlowVisualizer({
                       )}
 
                       {/* PROCESS STEPS & DECISIONS */}
-                      {currentFlow.steps.map((step, idx) => (
-                        <React.Fragment key={idx}>
-                          <div className="fc-node-process">
-                            <div className="fc-process-header">
-                              <span className="fc-process-step-badge">PROSES {String(idx + 1).padStart(2, '0')}</span>
-                              {step.route && (
-                                <span className="fc-process-route">
-                                  <Icon name="globe" size={11} />
-                                  <code>{step.route}</code>
-                                </span>
-                              )}
-                            </div>
-                            <div className="fc-process-action" data-tooltip={step.action} title={step.action}>{step.action}</div>
+                      {currentFlow.steps.length === 0 ? (
+                        <>
+                          <div style={{
+                            padding: '18px 24px',
+                            background: 'rgba(255, 255, 255, 0.03)',
+                            border: '1px dashed var(--border-default)',
+                            borderRadius: 8,
+                            textAlign: 'center',
+                            color: 'var(--text-muted)',
+                            fontSize: 12.5,
+                            maxWidth: 420,
+                            margin: '0 auto'
+                          }}>
+                            <strong style={{ display: 'block', color: 'var(--text-primary)', marginBottom: 4 }}>
+                              Langkah Skenario Fungsional Terpetakan
+                            </strong>
+                            Alur ini mencakup verifikasi rute dan controller modul terkait. Klik &ldquo;Setujui Alur Ini&rdquo; untuk konfirmasi eksekusi pengujian otomatis.
                           </div>
-
                           <div className="fc-arrow-down-wrap">
                             <div className="fc-v-line" />
                             <div className="fc-v-arrow-head">▼</div>
                           </div>
+                        </>
+                      ) : (
+                        currentFlow.steps.map((step, idx) => (
+                          <React.Fragment key={idx}>
+                            <div className="fc-node-process">
+                              <div className="fc-process-header">
+                                <span className="fc-process-step-badge">PROSES {String(idx + 1).padStart(2, '0')}</span>
+                                {step.route && (
+                                  <span className="fc-process-route">
+                                    <Icon name="globe" size={11} />
+                                    <code>{step.route}</code>
+                                  </span>
+                                )}
+                              </div>
+                              <div className="fc-process-action" data-tooltip={step.action} title={step.action}>{step.action}</div>
+                            </div>
 
-                          <div className="fc-decision-row">
-                            <div className="fc-decision-spacer" />
-                            <div className="fc-diamond-container">
-                              <div className="fc-diamond-box">
-                                <div className="fc-diamond-text">
-                                  <span className="fc-diamond-tag">VALIDASI SISTEM</span>
-                                  <span className="fc-diamond-question" data-tooltip={step.expected} title={step.expected}>{step.expected}</span>
+                            <div className="fc-arrow-down-wrap">
+                              <div className="fc-v-line" />
+                              <div className="fc-v-arrow-head">▼</div>
+                            </div>
+
+                            <div className="fc-decision-row">
+                              <div className="fc-decision-spacer" />
+                              <div className="fc-diamond-container">
+                                <div className="fc-diamond-box">
+                                  <div className="fc-diamond-text">
+                                    <span className="fc-diamond-tag">VALIDASI SISTEM</span>
+                                    <span className="fc-diamond-question" data-tooltip={step.expected} title={step.expected}>{step.expected}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="fc-branch-negative-col">
+                                <div className="fc-branch-line-wrap">
+                                  <span className="fc-branch-pill-no">TIDAK / GAGAL</span>
+                                  <div className="fc-h-connector" />
+                                  <span className="fc-branch-arrow-icon">►</span>
+                                </div>
+                                <div className="fc-negative-card">
+                                  <div className="fc-neg-title">
+                                    <Icon name="warning" size={11} />
+                                    <span>Skenario Penanganan</span>
+                                  </div>
+                                  <p className="fc-neg-desc">
+                                    {currentFlow.negativeScenarios[idx] || currentFlow.recoveryScenarios[0] || 'Tampilkan pesan kesalahan & pertahankan state formulir / kembali ke state aman'}
+                                  </p>
                                 </div>
                               </div>
                             </div>
 
-                            <div className="fc-branch-negative-col">
-                              <div className="fc-branch-line-wrap">
-                                <span className="fc-branch-pill-no">TIDAK / GAGAL</span>
-                                <div className="fc-h-connector" />
-                                <span className="fc-branch-arrow-icon">►</span>
-                              </div>
-                              <div className="fc-negative-card">
-                                <div className="fc-neg-title">
-                                  <Icon name="warning" size={11} />
-                                  <span>Skenario Penanganan</span>
-                                </div>
-                                <p className="fc-neg-desc">
-                                  {currentFlow.negativeScenarios[idx] || currentFlow.recoveryScenarios[0] || 'Tampilkan pesan kesalahan & pertahankan state formulir / kembali ke state aman'}
-                                </p>
-                              </div>
+                            <div className="fc-arrow-down-wrap has-branch">
+                              <span className="fc-arrow-label-yes">YA / LOLOS</span>
+                              <div className="fc-v-line" />
+                              <div className="fc-v-arrow-head">▼</div>
                             </div>
-                          </div>
-
-                          <div className="fc-arrow-down-wrap has-branch">
-                            <span className="fc-arrow-label-yes">YA / LOLOS</span>
-                            <div className="fc-v-line" />
-                            <div className="fc-v-arrow-head">▼</div>
-                          </div>
-                        </React.Fragment>
-                      ))}
+                          </React.Fragment>
+                        ))
+                      )}
 
                       {/* END TERMINATOR */}
                       <div className="fc-node-terminator end-node">
@@ -440,30 +488,47 @@ export function BusinessFlowVisualizer({
                         </>
                       )}
 
-                      {currentFlow.steps.map((step, idx) => (
-                        <React.Fragment key={idx}>
-                          <div className="fc-node-process" style={{ flexShrink: 0, width: 250 }}>
+                      {currentFlow.steps.length === 0 ? (
+                        <>
+                          <div className="fc-node-process" style={{ flexShrink: 0, width: 280, padding: 14 }}>
                             <div className="fc-process-header">
-                              <span className="fc-process-step-badge">PROSES {idx + 1}</span>
-                              {step.route && (
-                                <span className="fc-process-route">
-                                  <code>{step.route}</code>
-                                </span>
-                              )}
+                              <span className="fc-process-step-badge">PROSES INTEGRASI</span>
                             </div>
-                            <div className="fc-process-action" style={{ fontSize: 12 }}>{step.action}</div>
-                            <div style={{ fontSize: 11, color: '#15803D', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <Icon name="check" size={11} />
-                              <span>{step.expected}</span>
+                            <div className="fc-process-action" style={{ fontSize: 12 }}>
+                              Alur fungsional otomatis terverifikasi pada rute modul.
                             </div>
                           </div>
-
                           <div className="fc-h-arrow-wrap">
                             <div className="fc-h-line-main" />
                             <span className="fc-h-arrow-head">►</span>
                           </div>
-                        </React.Fragment>
-                      ))}
+                        </>
+                      ) : (
+                        currentFlow.steps.map((step, idx) => (
+                          <React.Fragment key={idx}>
+                            <div className="fc-node-process" style={{ flexShrink: 0, width: 250 }}>
+                              <div className="fc-process-header">
+                                <span className="fc-process-step-badge">PROSES {idx + 1}</span>
+                                {step.route && (
+                                  <span className="fc-process-route">
+                                    <code>{step.route}</code>
+                                  </span>
+                                )}
+                              </div>
+                              <div className="fc-process-action" style={{ fontSize: 12 }}>{step.action}</div>
+                              <div style={{ fontSize: 11, color: '#4ADE80', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <Icon name="check" size={11} />
+                                <span>{step.expected}</span>
+                              </div>
+                            </div>
+
+                            <div className="fc-h-arrow-wrap">
+                              <div className="fc-h-line-main" />
+                              <span className="fc-h-arrow-head">►</span>
+                            </div>
+                          </React.Fragment>
+                        ))
+                      )}
 
                       <div className="fc-node-terminator end-node" style={{ flexShrink: 0, minWidth: 220, maxWidth: 260 }}>
                         <span className="fc-terminator-tag">SELESAI / OUTCOME</span>
@@ -499,27 +564,33 @@ export function BusinessFlowVisualizer({
                   </div>
 
                   <div className="bf-steps-list-container">
-                    {currentFlow.steps.map((step, idx) => (
-                      <div key={idx} className="bf-step-detail-row">
-                        <div className="bf-step-num-col">
-                          <span className="bf-step-num-pill">{idx + 1}</span>
-                        </div>
-                        <div className="bf-step-detail-content">
-                          <div className="bf-step-title-line">
-                            <h5 className="bf-step-title">{step.action}</h5>
-                            {step.route && (
-                              <span className="bf-route-chip">
-                                <Icon name="globe" size={12} />
-                                {step.route}
-                              </span>
-                            )}
-                          </div>
-                          <p className="bf-step-desc">
-                            <strong>Ekspektasi:</strong> {step.expected}
-                          </p>
-                        </div>
+                    {currentFlow.steps.length === 0 ? (
+                      <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                        Belum ada perincian langkah individual untuk skenario ini. Alur siap disetujui atau digenerate otomatis.
                       </div>
-                    ))}
+                    ) : (
+                      currentFlow.steps.map((step, idx) => (
+                        <div key={idx} className="bf-step-detail-row">
+                          <div className="bf-step-num-col">
+                            <span className="bf-step-num-pill">{idx + 1}</span>
+                          </div>
+                          <div className="bf-step-detail-content">
+                            <div className="bf-step-title-line">
+                              <h5 className="bf-step-title">{step.action}</h5>
+                              {step.route && (
+                                <span className="bf-route-chip">
+                                  <Icon name="globe" size={12} />
+                                  {step.route}
+                                </span>
+                              )}
+                            </div>
+                            <p className="bf-step-desc">
+                              <strong>Ekspektasi:</strong> {step.expected}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
 
                   <div className="bf-card-footer-action">

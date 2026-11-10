@@ -73,19 +73,24 @@ export function analyzeCommitImpact(
       }
     }
 
-    // Keyword pencarian berbasis path
-    if (lower.includes('flight')) { keywordSet.add('flight'); keywordSet.add('flights'); impactedModulesSet.add('Penerbangan'); }
-    if (lower.includes('airport')) { keywordSet.add('airport'); keywordSet.add('airports'); impactedModulesSet.add('Bandara'); }
-    if (lower.includes('airplane')) { keywordSet.add('airplane'); keywordSet.add('airplanes'); impactedModulesSet.add('Pesawat'); }
-    if (lower.includes('airline')) { keywordSet.add('airline'); keywordSet.add('airlines'); impactedModulesSet.add('Maskapai'); }
-    if (lower.includes('seat')) { keywordSet.add('seat'); keywordSet.add('seats'); impactedModulesSet.add('Kursi'); }
-    if (lower.includes('booking')) { keywordSet.add('booking'); keywordSet.add('bookings'); impactedModulesSet.add('Pemesanan'); }
-    if (lower.includes('payment')) { keywordSet.add('payment'); keywordSet.add('payments'); impactedModulesSet.add('Pembayaran'); }
-    if (lower.includes('ticket')) { keywordSet.add('ticket'); keywordSet.add('tickets'); impactedModulesSet.add('Tiket'); }
-    if (lower.includes('user')) { keywordSet.add('user'); keywordSet.add('users'); impactedModulesSet.add('Pengguna'); }
-    if (lower.includes('contact')) { keywordSet.add('contact'); keywordSet.add('contact-message'); impactedModulesSet.add('Kontak & Pesan'); }
-    if (lower.includes('report')) { keywordSet.add('report'); keywordSet.add('reports'); impactedModulesSet.add('Laporan'); }
-    if (lower.includes('passenger')) { keywordSet.add('passenger'); keywordSet.add('passengers'); impactedModulesSet.add('Penumpang'); }
+    // Ekstrak kata kunci secara dinamis dari segmen path file tanpa kamus domain statis
+    const pathSegments = lower
+      .replace(/\\/g, '/')
+      .split('/')
+      .flatMap((seg) => seg.replace(/\.[a-z0-9]+$/i, '').split(/[-_.]+/));
+    const stopWords = new Set([
+      'src', 'app', 'apps', 'api', 'web', 'mobile', 'lib', 'pages', 'routes', 'route',
+      'controllers', 'controller', 'models', 'model', 'views', 'view', 'services', 'service',
+      'components', 'component', 'utils', 'helpers', 'index', 'main', 'test', 'tests', 'spec',
+      'ts', 'tsx', 'js', 'jsx', 'php', 'dart', 'kt', 'java', 'json', 'css', 'scss'
+    ]);
+    for (const seg of pathSegments) {
+      if (seg.length >= 3 && !stopWords.has(seg)) {
+        keywordSet.add(seg);
+        if (!seg.endsWith('s')) keywordSet.add(`${seg}s`);
+        else if (seg.length > 4) keywordSet.add(seg.slice(0, -1));
+      }
+    }
   }
 
   const impactedKeywords = Array.from(keywordSet);

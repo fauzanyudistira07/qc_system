@@ -154,7 +154,7 @@ export function GeminiModal({
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 9999,
+        zIndex: 1200,
         background: 'rgba(5, 10, 20, 0.78)',
         backdropFilter: 'blur(8px)',
         display: 'flex',
@@ -274,7 +274,7 @@ export function GeminiModal({
             />
             <span style={{ color: 'var(--text-primary, #F8FAFC)', fontWeight: 550 }}>
               {isConfigured
-                ? `Gemini API Aktif (${status?.model || 'gemini-1.5-flash'})`
+                ? `Gemini API Aktif (${status?.model || 'gemini-3.5-flash'})`
                 : 'GEMINI_API_KEY belum dikonfigurasi di file .env'}
             </span>
             {status?.keyMasked && (
@@ -301,7 +301,7 @@ export function GeminiModal({
                   fontVariantNumeric: 'tabular-nums'
                 }}
               >
-                {testResult.success ? `â ${testResult.message} (${testResult.latencyMs}ms)` : `â ${testResult.message}`}
+                {testResult.success ? `✓ ${testResult.message} (${testResult.latencyMs}ms)` : `✗ ${testResult.message}`}
               </span>
             )}
             {isConfigured && (

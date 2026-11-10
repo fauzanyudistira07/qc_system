@@ -1,10 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { errorText, send } from './api';
+import { errorText, send, uploadApkFile } from './api';
 import { Config, initialConfig, Job, SystemStatus, ENABLE_MOBILE_SUPPORT, ServiceTargetConfig } from './types';
 import { Badge, Field, Icon, Notice, Panel } from './ui';
 
-const steps = ['Target & Backend', 'Akun & Data Uji', 'Review & Jalankan'];
+const steps = ['Target & Backend', 'Env, Akun & DB', 'Review & Jalankan'];
 const lines = (text: string) => text.split('\n').map(s => s.trim()).filter(Boolean);
+
+function pickHeadlessEmulatorId(system?: SystemStatus | null, preferred?: string): string {
+  if (preferred && (preferred.startsWith('emulator-') || preferred === 'qc_worker_headless')) {
+    return preferred;
+  }
+  const emu = system?.adb?.devices?.find((d) => d.startsWith('emulator-'));
+  return emu || 'qc_worker_headless';
+}
 
 export function Wizard({
   onCreated,
@@ -20,32 +28,42 @@ export function Wizard({
   const [config, setConfig] = useState<Config>(() => {
     if (initialJob?.config) {
       const cfg = initialJob.config;
+      const useSrvEmu = cfg.useServerEmulator !== false;
       return {
         ...initialConfig(),
         ...cfg,
         name: initialJob.name || cfg.name || '',
         sourceType: cfg.sourceType ?? (cfg.runMode === 'managed-local' ? (cfg.backendMode === 'local' ? 'local-folder' : 'github') : 'existing-target'),
         platform: ENABLE_MOBILE_SUPPORT ? (cfg.platform ?? 'web') : 'web',
-        baseUrl: cfg.baseUrl ?? '',
-        backendUrl: cfg.backendUrl || (cfg.platform === 'android' ? cfg.baseUrl : '') || '',
+        baseUrl: cfg.baseUrl ?? 'http://127.0.0.1:5000',
+        backendUrl: cfg.backendUrl || (cfg.platform === 'android' ? cfg.baseUrl : 'http://127.0.0.1:5001') || '',
         appId: cfg.appId || '',
         apkUploadId: cfg.apkUploadId || '',
         apkFilename: cfg.apkFilename || '',
-        deviceId: cfg.deviceId || system?.adb?.devices?.[0] || 'emulator-5554',
-        useServerEmulator: cfg.useServerEmulator !== false,
+        apkPackageId: cfg.apkPackageId || '',
+        deviceId: useSrvEmu ? pickHeadlessEmulatorId(system, cfg.deviceId) : (cfg.deviceId || 'qc_worker_headless'),
+        useServerEmulator: useSrvEmu,
+        autoProvisionAccounts: cfg.autoProvisionAccounts !== false,
         frontendTarget: cfg.frontendTarget || {
           mode: (cfg.sourceType === 'github' || cfg.runMode === 'managed-local') ? 'server' : (cfg.baseUrl?.includes('localhost') || cfg.baseUrl?.includes('127.0.0.1') || cfg.baseUrl?.includes('192.168.')) ? 'local' : 'internet',
-          url: cfg.baseUrl || 'http://localhost:5173',
+          url: cfg.baseUrl || 'http://127.0.0.1:5000',
           repositoryUrl: cfg.repositoryUrl || '',
           branch: cfg.ref || 'main',
         },
         backendTarget: cfg.backendTarget || {
           mode: cfg.backendMode === 'repo' ? 'server' : (cfg.backendUrl?.includes('localhost') || cfg.backendUrl?.includes('127.0.0.1') || cfg.backendUrl?.includes('10.0.2.2') || cfg.backendUrl?.includes('192.168.')) ? 'local' : 'internet',
-          url: cfg.backendUrl || (cfg.platform === 'android' ? 'http://10.0.2.2:8000' : 'http://127.0.0.1:8000'),
+          url: cfg.backendUrl || (cfg.platform === 'android' ? 'http://10.0.2.2:5001' : 'http://127.0.0.1:5001'),
           repositoryUrl: cfg.backendMode === 'repo' ? (cfg.repositoryUrl || '') : '',
           branch: cfg.ref || 'main',
         },
-        runMode: cfg.runMode || 'existing-target',
+        mobileTarget: cfg.mobileTarget || {
+          mode: 'server',
+          url: cfg.backendUrl || 'http://10.0.2.2:5001',
+          repositoryUrl: cfg.platform === 'android' ? (cfg.repositoryUrl || '') : '',
+          branch: cfg.ref || 'main',
+          sameRepoAsFrontend: false,
+        },
+        runMode: cfg.runMode || 'managed-local',
         accounts: (cfg.accounts && cfg.accounts.length > 0) ? cfg.accounts : initialConfig().accounts,
         database: cfg.database || initialConfig().database,
         rules: cfg.rules || initialConfig().rules,
@@ -55,20 +73,20 @@ export function Wizard({
     }
     return {
       ...initialConfig(),
-      deviceId: system?.adb?.devices?.[0] || 'emulator-5554',
+      deviceId: pickHeadlessEmulatorId(system),
+      useServerEmulator: true,
+      autoProvisionAccounts: true,
     };
   });
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState('');
-  const [filenames, setFilenames] = useState({ sql: '', env: '' });
+  const [filenames, setFilenames] = useState({ sql: '', env: '', apk: initialJob?.config?.apkFilename || '' });
   const [paths, setPaths] = useState(() => ({
     include: (initialJob?.config?.rules?.includePaths ?? []).join('\n'),
     exclude: (initialJob?.config?.rules?.excludePaths ?? ['/logout', '/delete']).join('\n'),
   }));
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showQualityExpert, setShowQualityExpert] = useState(false);
   const [showManualAccounts, setShowManualAccounts] = useState(false);
 
   // Connectivity Probe States (Realtime Reachability Check)
@@ -80,48 +98,59 @@ export function Wizard({
   // Dropzone & file input refs
   const [dragOverSql, setDragOverSql] = useState(false);
   const [dragOverEnv, setDragOverEnv] = useState(false);
+  const [dragOverApk, setDragOverApk] = useState(false);
   const sqlInputRef = useRef<HTMLInputElement | null>(null);
   const envInputRef = useRef<HTMLInputElement | null>(null);
+  const apkInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [seeding, setSeeding] = useState(false);
-  const [seedResult, setSeedResult] = useState<{ success: boolean; message: string } | null>(null);
   const [transitioning, setTransitioning] = useState(false);
 
   useEffect(() => {
     if (initialJob?.config) {
       const cfg = initialJob.config;
+      const useSrvEmu = cfg.useServerEmulator !== false;
       setConfig({
         ...initialConfig(),
         ...cfg,
         name: initialJob.name || cfg.name || '',
         sourceType: cfg.sourceType ?? (cfg.runMode === 'managed-local' ? (cfg.backendMode === 'local' ? 'local-folder' : 'github') : 'existing-target'),
         platform: ENABLE_MOBILE_SUPPORT ? (cfg.platform ?? 'web') : 'web',
-        baseUrl: cfg.baseUrl ?? '',
-        backendUrl: cfg.backendUrl || (cfg.platform === 'android' ? cfg.baseUrl : '') || '',
+        baseUrl: cfg.baseUrl ?? 'http://127.0.0.1:5000',
+        backendUrl: cfg.backendUrl || (cfg.platform === 'android' ? cfg.baseUrl : 'http://127.0.0.1:5001') || '',
         appId: cfg.appId || '',
         apkUploadId: cfg.apkUploadId || '',
         apkFilename: cfg.apkFilename || '',
-        deviceId: cfg.deviceId || system?.adb?.devices?.[0] || 'emulator-5554',
-        useServerEmulator: cfg.useServerEmulator !== false,
+        apkPackageId: cfg.apkPackageId || '',
+        deviceId: useSrvEmu ? pickHeadlessEmulatorId(system, cfg.deviceId) : (cfg.deviceId || 'qc_worker_headless'),
+        useServerEmulator: useSrvEmu,
+        autoProvisionAccounts: cfg.autoProvisionAccounts !== false,
         frontendTarget: cfg.frontendTarget || {
           mode: (cfg.sourceType === 'github' || cfg.runMode === 'managed-local') ? 'server' : (cfg.baseUrl?.includes('localhost') || cfg.baseUrl?.includes('127.0.0.1') || cfg.baseUrl?.includes('192.168.')) ? 'local' : 'internet',
-          url: cfg.baseUrl || 'http://localhost:5173',
+          url: cfg.baseUrl || 'http://127.0.0.1:5000',
           repositoryUrl: cfg.repositoryUrl || '',
           branch: cfg.ref || 'main',
         },
         backendTarget: cfg.backendTarget || {
           mode: cfg.backendMode === 'repo' ? 'server' : (cfg.backendUrl?.includes('localhost') || cfg.backendUrl?.includes('127.0.0.1') || cfg.backendUrl?.includes('10.0.2.2') || cfg.backendUrl?.includes('192.168.')) ? 'local' : 'internet',
-          url: cfg.backendUrl || (cfg.platform === 'android' ? 'http://10.0.2.2:8000' : 'http://127.0.0.1:8000'),
+          url: cfg.backendUrl || (cfg.platform === 'android' ? 'http://10.0.2.2:5001' : 'http://127.0.0.1:5001'),
           repositoryUrl: cfg.backendMode === 'repo' ? (cfg.repositoryUrl || '') : '',
           branch: cfg.ref || 'main',
         },
-        runMode: cfg.runMode || 'existing-target',
+        mobileTarget: cfg.mobileTarget || {
+          mode: 'server',
+          url: cfg.backendUrl || 'http://10.0.2.2:5001',
+          repositoryUrl: cfg.platform === 'android' ? (cfg.repositoryUrl || '') : '',
+          branch: cfg.ref || 'main',
+          sameRepoAsFrontend: false,
+        },
+        runMode: cfg.runMode || 'managed-local',
         accounts: (cfg.accounts && cfg.accounts.length > 0) ? cfg.accounts : initialConfig().accounts,
         database: cfg.database || initialConfig().database,
         rules: cfg.rules || initialConfig().rules,
         businessFlowReview: { ...initialConfig().businessFlowReview, ...(cfg.businessFlowReview || {}) },
         qualityAudit: { ...initialConfig().qualityAudit, ...(cfg.qualityAudit || {}) },
       });
+      setFilenames((prev) => ({ ...prev, apk: cfg.apkFilename || '' }));
       setPaths({
         include: (cfg.rules?.includePaths ?? []).join('\n'),
         exclude: (cfg.rules?.excludePaths ?? ['/logout', '/delete']).join('\n'),
@@ -189,6 +218,28 @@ export function Wizard({
     setFeProbeResult(null);
   };
 
+  const updateMobileTarget = (patchVal: Partial<ServiceTargetConfig>) => {
+    setConfig(c => {
+      const prev = c.mobileTarget || {
+        mode: 'server',
+        url: c.backendUrl || 'http://10.0.2.2:5001',
+        repositoryUrl: '',
+        branch: 'main',
+        sameRepoAsFrontend: false,
+      };
+      const next = { ...prev, ...patchVal };
+      if (next.sameRepoAsFrontend) {
+        next.repositoryUrl = c.frontendTarget?.repositoryUrl || c.repositoryUrl || '';
+        next.branch = c.frontendTarget?.branch || c.ref || 'main';
+        next.mode = c.frontendTarget?.mode || next.mode;
+      }
+      return {
+        ...c,
+        mobileTarget: next,
+      };
+    });
+  };
+
   const updateBackendTarget = (patchVal: Partial<ServiceTargetConfig>) => {
     setConfig(c => {
       const prev = c.backendTarget || {
@@ -202,16 +253,16 @@ export function Wizard({
         try {
           const currentPort = Number(new URL(next.url).port);
           if (currentPort && (currentPort < 5000 || currentPort > 6000)) {
-            next.url = next.url.replace(`:${currentPort}`, ':5000');
+            next.url = next.url.replace(`:${currentPort}`, ':5001');
           }
         } catch {
-          if (!next.url) next.url = 'http://127.0.0.1:5000';
+          if (!next.url) next.url = 'http://127.0.0.1:5001';
         }
       } else if (patchVal.mode === 'local' && prev.mode === 'server') {
         try {
           const currentPort = Number(new URL(next.url).port);
-          if (currentPort === 5000) {
-            next.url = next.url.replace(':5000', ':8000');
+          if (currentPort === 5001 || currentPort === 5000) {
+            next.url = next.url.replace(`:${currentPort}`, ':8000');
           }
         } catch {
           if (!next.url) next.url = 'http://127.0.0.1:8000';
@@ -262,56 +313,64 @@ export function Wizard({
       if (!config.name.trim()) return 'Beri nama project / pengujian terlebih dahulu.';
       if (config.platform === 'web') {
         const fe = config.frontendTarget;
-        if (!fe?.url?.trim()) return 'Masukkan URL Website target beserta port-nya (misal: http://localhost:5173).';
+        if (!fe?.url?.trim()) return 'Masukkan URL Website target beserta port-nya (misal: http://127.0.0.1:5000).';
         if (fe.mode === 'server') {
           try {
             const p = Number(new URL(fe.url).port);
             if (p && (p < 5000 || p > 6000)) {
-              return `Pada mode server runner, port frontend harus berada dalam rentang 5000 - 6000 (port saat ini: ${p}). Ubah port ke 5000 - 6000 (contoh: 5000 atau 5173).`;
+              return `Pada mode server runner, port frontend harus berada dalam rentang 5000 - 6000 (port saat ini: ${p}). Ubah port ke 5000 - 6000.`;
             }
           } catch {}
           if (!fe?.repositoryUrl?.trim()) return 'Masukkan link repository GitHub frontend untuk mode Jalankan di Server.';
           if (!fe?.branch?.trim()) return 'Tentukan branch GitHub frontend yang digunakan (misal: main).';
         }
       }
-      if (config.platform === 'android' && !config.appId?.trim()) {
-        return 'Masukkan Android Application ID / Package Name (misal: com.taskia.digital).';
+      if (config.platform === 'android') {
+        const mobRepo = config.mobileTarget?.sameRepoAsFrontend
+          ? (config.frontendTarget?.repositoryUrl || config.repositoryUrl)
+          : config.mobileTarget?.repositoryUrl;
+        if (!config.appId?.trim() && !config.apkUploadId && !mobRepo?.trim()) {
+          return 'Isi Android Application ID / Package Name, unggah file .APK, atau masukkan Repository GitHub Mobile.';
+        }
       }
       const be = config.backendTarget;
       if (be) {
-        if (!be.url?.trim()) return 'Masukkan URL endpoint Backend API beserta port-nya (misal: http://127.0.0.1:8000).';
+        if (!be.url?.trim()) return 'Masukkan URL endpoint Backend API beserta port-nya (misal: http://127.0.0.1:5001).';
         if (be.mode === 'server') {
           try {
             const p = Number(new URL(be.url).port);
             if (p && (p < 5000 || p > 6000)) {
-              return `Pada mode server runner, port backend harus berada dalam rentang 5000 - 6000 (port saat ini: ${p}). Ubah port ke 5000 - 6000 (contoh: 5000 atau 5001).`;
+              return `Pada mode server runner, port backend harus berada dalam rentang 5000 - 6000 (port saat ini: ${p}). Ubah port ke 5000 - 6000 (contoh: 5001).`;
             }
           } catch {}
           const beRepo = be.sameRepoAsFrontend ? (config.frontendTarget?.repositoryUrl || be.repositoryUrl) : be.repositoryUrl;
           const beBranch = be.sameRepoAsFrontend ? (config.frontendTarget?.branch || be.branch) : be.branch;
-          if (!beRepo?.trim()) return 'Masukkan link repository GitHub backend untuk mode Jalankan di Server.';
-          if (!beBranch?.trim()) return 'Tentukan branch GitHub backend yang digunakan (misal: main).';
+          if (!beRepo?.trim() && config.platform === 'web') {
+            return 'Masukkan link repository GitHub backend untuk mode Jalankan di Server (atau centang Same Repo).';
+          }
+          if (beRepo?.trim() && !beBranch?.trim()) {
+            return 'Tentukan branch GitHub backend yang digunakan (misal: main).';
+          }
         }
       }
     }
     if (index === 1) {
-      if (config.database.source === 'seed' || config.database.source === 'migrate') {
-        const hasPw = config.accounts?.[0]?.password?.trim();
-        if (!hasPw) return 'Masukkan kata sandi default seeder (misal: password atau admin123).';
-      } else {
-        if (!config.accounts.length) return 'Tambahkan minimal satu akun pengujian.';
-        if (config.accounts.some(a => !a.email.trim() || !a.password.trim())) {
-          return 'Setiap akun pengujian wajib memiliki email dan kata sandi.';
+      if (config.autoProvisionAccounts === false) {
+        if (config.database.source === 'seed' || config.database.source === 'migrate') {
+          const hasPw = config.accounts?.[0]?.password?.trim();
+          if (!hasPw) return 'Masukkan kata sandi default seeder pada mode manual atau aktifkan Auto-Provision Role Accounts.';
+        } else {
+          if (!config.accounts.length) return 'Tambahkan minimal satu akun pengujian atau aktifkan Auto-Provision Role Accounts.';
+          if (config.accounts.some(a => !a.email.trim() || !a.password.trim())) {
+            return 'Setiap akun pengujian manual wajib memiliki email/username dan kata sandi.';
+          }
         }
       }
       if (config.database.engine !== 'none' && config.database.source === 'sql' && !config.database.sqlUploadId) {
         return 'Pilih file .SQL dump atau ubah pilihan ke "Database Backend Aktif".';
       }
-      if (config.database.engine !== 'none' && config.database.source === 'migrate' && !config.database.migrationCommand?.trim()) {
-        return 'Isi migration command atau pilih sumber database lain.';
-      }
-      if (config.database.engine !== 'none' && config.database.source === 'seed' && !config.database.seedCommand?.trim() && !seedResult?.success) {
-        return 'Isi seed command atau klik 1-Click Auto-Seed.';
+      if (config.database.engine !== 'none' && config.database.source === 'migrate' && config.database.migrationCommand === undefined) {
+        // migrationCommand is optional for auto-detected stack
       }
     }
     return '';
@@ -367,25 +426,39 @@ export function Wizard({
     }
   }
 
-  async function upload(file: File | undefined, kind: 'sql' | 'env') {
+  async function upload(file: File | undefined, kind: 'sql' | 'env' | 'apk') {
     if (!file) return;
     setError('');
     if (kind === 'sql' && !file.name.toLowerCase().endsWith('.sql')) { setError('Pilih file SQL berekstensi .sql.'); return; }
-    if (file.size > 50 * 1024 * 1024) { setError('Ukuran file maksimum 50 MB.'); return; }
+    if (kind === 'apk' && !file.name.toLowerCase().endsWith('.apk')) { setError('Pilih file aplikasi Android berekstensi .apk.'); return; }
+    if (kind !== 'apk' && file.size > 50 * 1024 * 1024) { setError('Ukuran file maksimum 50 MB.'); return; }
+    if (kind === 'apk' && file.size > 250 * 1024 * 1024) { setError('Ukuran file APK maksimum 250 MB.'); return; }
     setUploading(kind);
     try {
-      const content = await file.text();
-      const result = await send<{ id: string; filename: string; size: number }>('/api/v1/uploads', { filename: file.name, kind, content });
-      if (kind === 'sql') {
-        db({
-          sqlUploadId: result.id,
-          source: 'sql',
-          engine: config.database.engine === 'none' ? 'mysql' : config.database.engine
+      if (kind === 'apk') {
+        const result = await uploadApkFile(file);
+        patch({
+          apkUploadId: result.id,
+          apkFilename: result.filename,
+          apkPackageId: result.packageId,
+          appId: config.appId?.trim() || result.packageId || config.appId,
+          name: config.name?.trim() || result.appName || config.name,
         });
+        setFilenames(f => ({ ...f, apk: result.filename }));
       } else {
-        patch({ envUploadId: result.id });
+        const content = await file.text();
+        const result = await send<{ id: string; filename: string; size: number }>('/api/v1/uploads', { filename: file.name, kind, content });
+        if (kind === 'sql') {
+          db({
+            sqlUploadId: result.id,
+            source: 'sql',
+            engine: config.database.engine === 'none' ? 'mysql' : config.database.engine
+          });
+        } else {
+          patch({ envUploadId: result.id });
+        }
+        setFilenames(f => ({ ...f, [kind]: result.filename }));
       }
-      setFilenames(f => ({ ...f, [kind]: result.filename }));
     } catch (e) { setError(errorText(e)); } finally { setUploading(''); }
   }
 
@@ -402,29 +475,59 @@ export function Wizard({
     setError('');
     try {
       const fe = config.frontendTarget || {
-        mode: 'local',
-        url: config.baseUrl || 'http://localhost:5173',
+        mode: 'server' as const,
+        url: config.baseUrl || 'http://127.0.0.1:5000',
         repositoryUrl: config.repositoryUrl || '',
         branch: config.ref || 'main',
       };
       const be = config.backendTarget || {
-        mode: 'local',
-        url: config.backendUrl || (config.platform === 'android' ? 'http://10.0.2.2:8000' : 'http://127.0.0.1:8000'),
+        mode: 'server' as const,
+        url: config.backendUrl || (config.platform === 'android' ? 'http://10.0.2.2:5001' : 'http://127.0.0.1:5001'),
         repositoryUrl: '',
         branch: 'main',
       };
+      const mob = config.mobileTarget || {
+        mode: 'server' as const,
+        url: be.url || 'http://10.0.2.2:5001',
+        repositoryUrl: '',
+        branch: 'main',
+        sameRepoAsFrontend: false,
+      };
+      const syncedMob = mob.sameRepoAsFrontend
+        ? {
+            ...mob,
+            repositoryUrl: fe.repositoryUrl || be.repositoryUrl || mob.repositoryUrl,
+            branch: fe.branch || be.branch || mob.branch || 'main',
+            mode: fe.mode || mob.mode,
+          }
+        : mob;
 
       const finalBaseUrl = (config.platform === 'android'
-        ? (be.url || config.backendUrl || config.baseUrl || 'http://10.0.2.2:8000')
-        : (fe.url || config.baseUrl || 'http://localhost:5173')).trim();
-      const finalBackendUrl = (be.url || config.backendUrl || (config.platform === 'android' ? finalBaseUrl : 'http://127.0.0.1:8000')).trim();
-      const finalRepoUrl = (fe.repositoryUrl || be.repositoryUrl || config.repositoryUrl || '').trim();
-      const finalRef = (fe.branch || be.branch || config.ref || 'main').trim();
+        ? (be.url || config.backendUrl || config.baseUrl || 'http://10.0.2.2:5001')
+        : (fe.url || config.baseUrl || 'http://127.0.0.1:5000')).trim();
+      const finalBackendUrl = (be.url || config.backendUrl || (config.platform === 'android' ? finalBaseUrl : 'http://127.0.0.1:5001')).trim();
+      const finalRepoUrl = (
+        (config.platform === 'android' ? syncedMob.repositoryUrl : fe.repositoryUrl) ||
+        be.repositoryUrl ||
+        fe.repositoryUrl ||
+        config.repositoryUrl ||
+        ''
+      ).trim();
+      const finalRef = (
+        (config.platform === 'android' ? syncedMob.branch : fe.branch) ||
+        be.branch ||
+        fe.branch ||
+        config.ref ||
+        'main'
+      ).trim();
 
-      const isServerRun = fe.mode === 'server' || be.mode === 'server';
+      const isServerRun = fe.mode === 'server' || be.mode === 'server' || syncedMob.mode === 'server';
       const finalRunMode = isServerRun ? 'managed-local' : (config.runMode || 'existing-target');
       const finalSourceType = isServerRun ? 'github' : 'existing-target';
-      const finalDeviceId = config.platform === 'android' ? (system?.adb?.devices?.[0] || 'emulator-5554') : undefined;
+      const useSrvEmu = config.useServerEmulator !== false;
+      const finalDeviceId = config.platform === 'android'
+        ? (useSrvEmu ? pickHeadlessEmulatorId(system, config.deviceId) : (config.deviceId || 'qc_worker_headless'))
+        : undefined;
 
       const payload: Config = {
         ...config,
@@ -436,9 +539,11 @@ export function Wizard({
         runMode: finalRunMode,
         sourceType: finalSourceType,
         deviceId: finalDeviceId,
-        useServerEmulator: true,
+        useServerEmulator: useSrvEmu,
+        autoProvisionAccounts: config.autoProvisionAccounts !== false,
         frontendTarget: fe,
         backendTarget: be,
+        mobileTarget: syncedMob,
         executeFlows: true,
         businessFlowReview: { mode: 'required' },
         rules: {
@@ -450,7 +555,7 @@ export function Wizard({
         },
         qualityAudit: {
           ...config.qualityAudit,
-          enabled: true,
+          enabled: Boolean(config.qualityAudit?.enabled),
           browsers: ['chromium', 'firefox', 'webkit'],
           viewports: ['desktop', 'tablet', 'mobile'],
           maxRoutes: 0,
@@ -481,7 +586,7 @@ export function Wizard({
         onCreated(created);
         setConfig(initialConfig());
         setStep(0);
-        setFilenames({ sql: '', env: '' });
+        setFilenames({ sql: '', env: '', apk: '' });
         setPaths({ include: '', exclude: '/logout\n/delete' });
       }
     } catch (e) {
@@ -578,7 +683,7 @@ export function Wizard({
                     <input
                       value={config.name}
                       onChange={e => patch({ name: e.target.value })}
-                      placeholder={ENABLE_MOBILE_SUPPORT ? "Contoh: Tasdig Flutter Mobile QC atau Portal Sarpras Web" : "Contoh: Jamaahku Travel Agent atau Portal Sarpras Web"}
+                      placeholder="Contoh: Portal Akademik Web atau Aplikasi Mobile QC"
                       maxLength={120}
                       autoFocus
                     />
@@ -611,7 +716,9 @@ export function Wizard({
                         className={`choice-card ${config.platform === 'android' ? 'selected' : ''}`}
                         onClick={() => patch({
                           platform: 'android',
-                          baseUrl: config.backendUrl || 'http://10.0.2.2:8000',
+                          baseUrl: config.backendUrl || 'http://10.0.2.2:5001',
+                          useServerEmulator: true,
+                          deviceId: pickHeadlessEmulatorId(system, config.deviceId),
                         })}
                       >
                         <div className="choice-card-icon">
@@ -619,7 +726,7 @@ export function Wizard({
                         </div>
                         <div className="choice-card-content">
                           <strong>Mobile App (Flutter / Android APK)</strong>
-                          <p>Pengujian aplikasi mobile native pada Emulator atau Device fisik menggunakan Maestro Engine.</p>
+                          <p>Pengujian otomatis pada Server Headless Emulator (qc_worker_headless) via Maestro &amp; ADB.</p>
                         </div>
                         {config.platform === 'android' && <span className="choice-check"><Icon name="check" size={14} /></span>}
                       </button>
@@ -645,7 +752,7 @@ export function Wizard({
                   </div>
                 )}
 
-                {/* 3. TARGET SECTION: ANDROID MAESTRO RUNNER */}
+                {/* 3. TARGET SECTION: ANDROID MAESTRO & SERVER HEADLESS EMULATOR */}
                 {config.platform === 'android' && ENABLE_MOBILE_SUPPORT && (
                   <div className="wizard-section-card target-card-section">
                     <div className="section-card-header">
@@ -655,47 +762,157 @@ export function Wizard({
                         </div>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <h3 style={{ margin: 0 }}>Target Aplikasi Mobile (Maestro)</h3>
-                            <span className="section-type-badge select-badge">SERVER MAESTRO</span>
+                            <h3 style={{ margin: 0 }}>Target Aplikasi Mobile (Repo / APK &amp; Headless Emulator)</h3>
+                            <span className="section-type-badge select-badge">SERVER EMULATOR</span>
                           </div>
                           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-                            Pengujian otomatis berjalan langsung via Maestro CLI pada runtime/emulator server.
+                            Build APK otomatis dari Repository GitHub Mobile atau unggah file .apk, lalu jalankan di emulator background server (tanpa HP fisik).
                           </p>
                         </div>
                       </div>
-                      <Badge value={config.appId ? 'Target Ready' : 'App ID Wajib'} />
+                      <Badge value={config.appId || config.apkUploadId || config.mobileTarget?.repositoryUrl ? 'Target Ready' : 'Repo / APK / App ID'} />
                     </div>
 
                     <div className="form-grid" style={{ marginTop: 14 }}>
-                      <Field label="Application ID / Package Name" hint="Package identitas aplikasi Android yang sudah terinstall di target server.">
+                      <Field label="Application ID / Package Name" hint="Opsional jika mengunggah .apk atau repo mobile (otomatis diekstrak oleh engine).">
                         <input
                           value={config.appId || ''}
-                          placeholder="com.taskia.digital atau com.example.app"
+                          placeholder="com.example.app"
                           onChange={e => patch({ appId: e.target.value, name: config.name || e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Headless Emulator Server ID" hint="Default memakai AVD headless di background server, mengabaikan device USB fisik.">
+                        <input
+                          value={config.deviceId || 'qc_worker_headless'}
+                          onChange={e => patch({ deviceId: e.target.value })}
+                          disabled={config.useServerEmulator !== false}
                         />
                       </Field>
                     </div>
 
-                    {/* SERVER RUNNER ACTIVE BADGE */}
-                    <div className="server-emulator-box" style={{ marginTop: 14 }}>
-                      <div className="server-emulator-box-left">
-                        <div className="server-emulator-glow-dot">
-                          <Icon name="android" size={20} />
-                          <span className="live-pulse-dot" />
-                        </div>
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <strong>Server-Managed Maestro Environment</strong>
-                            <span className="section-type-badge select-badge">PRE-INSTALLED TARGET</span>
+                    {/* UPLOAD FILE .APK DROPZONE */}
+                    <div style={{ marginTop: 14 }}>
+                      {!config.apkUploadId ? (
+                        <div
+                          className={`file-dropzone ${dragOverApk ? 'drag-over' : ''}`}
+                          onDragOver={e => { e.preventDefault(); setDragOverApk(true); }}
+                          onDragLeave={() => setDragOverApk(false)}
+                          onDrop={e => {
+                            e.preventDefault();
+                            setDragOverApk(false);
+                            const f = e.dataTransfer.files?.[0];
+                            if (f) void upload(f, 'apk');
+                          }}
+                          onClick={() => apkInputRef.current?.click()}
+                          style={{ cursor: 'pointer', padding: '14px 16px' }}
+                        >
+                          <div className="file-dropzone-icon">
+                            <Icon name="android" size={22} />
                           </div>
-                          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-                            Pengujian dieksekusi langsung oleh server menggunakan Maestro CLI. Tidak memerlukan koneksi perangkat fisik lokal atau unggah file APK manual.
-                          </p>
+                          <div className="file-dropzone-text">
+                            <strong>Upload File .APK (Opsional — atau Build dari GitHub Mobile)</strong>
+                            <p>Tarik file <code>.apk</code> ke sini untuk inspeksi otomatis packageId (<code>aapt</code>) dan instalasi ke emulator server.</p>
+                          </div>
+                          <input
+                            ref={apkInputRef}
+                            type="file"
+                            accept=".apk"
+                            disabled={!!uploading}
+                            onChange={e => {
+                              const f = e.target.files?.[0];
+                              if (f) void upload(f, 'apk');
+                            }}
+                            style={{ display: 'none' }}
+                          />
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={!!uploading}
+                            onClick={e => {
+                              e.stopPropagation();
+                              apkInputRef.current?.click();
+                            }}
+                          >
+                            <Icon name="plus" size={14} />
+                            {uploading === 'apk' ? 'Mengunggah APK…' : 'Pilih File .APK'}
+                          </button>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="upload-ready">
+                          <Icon name="check" />
+                          <div>
+                            <strong>{filenames.apk || config.apkFilename || 'APK terunggah'}</strong>
+                            <small>{config.apkPackageId ? `Package: ${config.apkPackageId}` : 'Siap diinstal ke Server Headless Emulator.'}</small>
+                          </div>
+                          <button
+                            type="button"
+                            className="quiet danger-text"
+                            onClick={() => {
+                              patch({ apkUploadId: undefined, apkFilename: undefined, apkPackageId: undefined });
+                              setFilenames(f => ({ ...f, apk: '' }));
+                            }}
+                          >
+                            Lepaskan
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* MOBILE REPO INPUTS */}
+                    <div className="form-grid" style={{ marginTop: 14 }}>
+                      <Field label="Link Repository GitHub Mobile (Flutter / Android)" hint="Repo mobile untuk deteksi role, layar, dan auto-build APK jika tidak upload manual.">
+                        <input
+                          type="url"
+                          value={config.mobileTarget?.sameRepoAsFrontend ? (config.frontendTarget?.repositoryUrl || config.repositoryUrl || '') : (config.mobileTarget?.repositoryUrl ?? '')}
+                          onChange={e => updateMobileTarget({ repositoryUrl: e.target.value })}
+                          disabled={Boolean(config.mobileTarget?.sameRepoAsFrontend)}
+                          placeholder="https://github.com/organization/mobile-app"
+                        />
+                      </Field>
+                      <Field label="Branch GitHub Mobile" hint="Branch repository mobile yang akan di-checkout di sandbox server.">
+                        <input
+                          value={config.mobileTarget?.sameRepoAsFrontend ? (config.frontendTarget?.branch || config.ref || 'main') : (config.mobileTarget?.branch ?? 'main')}
+                          onChange={e => updateMobileTarget({ branch: e.target.value })}
+                          disabled={Boolean(config.mobileTarget?.sameRepoAsFrontend)}
+                          placeholder="main"
+                        />
+                      </Field>
+                    </div>
+
+                    {/* SERVER HEADLESS EMULATOR TOGGLE */}
+                    <div className="server-emulator-box" style={{ marginTop: 14 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', flex: 1 }}>
+                        <input
+                          type="checkbox"
+                          checked={config.useServerEmulator !== false}
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            patch({
+                              useServerEmulator: checked,
+                              deviceId: checked ? pickHeadlessEmulatorId(system) : (system?.adb?.devices?.[0] || 'qc_worker_headless'),
+                            });
+                          }}
+                          style={{ width: 18, height: 18, accentColor: '#35D0BA', cursor: 'pointer' }}
+                        />
+                        <div className="server-emulator-box-left" style={{ flex: 1 }}>
+                          <div className="server-emulator-glow-dot">
+                            <Icon name="android" size={20} />
+                            <span className="live-pulse-dot" />
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <strong>Gunakan Server Headless Emulator (Direkomendasikan)</strong>
+                              <span className="section-type-badge select-badge">AVD BACKGROUND · TANPA HP FISIK</span>
+                            </div>
+                            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
+                              Otomatis menyalakan emulator headless server (<code>qc_worker_headless</code>), mengabaikan kabel/USB HP fisik, dan menjaganya tetap hidup selama review ACC.
+                            </p>
+                          </div>
+                        </div>
+                      </label>
                       <div className="server-emulator-tag">
                         <span className="status-dot active" />
-                        <span>Server Environment Siap</span>
+                        <span>Headless AVD Siap</span>
                       </div>
                     </div>
                   </div>
@@ -1129,10 +1346,95 @@ export function Wizard({
               </>
             )}
 
-            {/* ================= STEP 1: TEST DATA & ACCOUNTS ================= */}
+            {/* ================= STEP 1: ENV DEMO, AKUN AUTO-PROVISION & DATABASE ================= */}
             {step === 1 && (
               <>
-                {/* 1. DATABASE & DATA INITIALIZATION (PINDAH PALING ATAS) */}
+                {/* 0. AUTO-DEMO .ENV PROVISIONING */}
+                <div className="wizard-section-card config-section-card">
+                  <div className="section-card-header">
+                    <div className="section-header-left">
+                      <div className="section-header-icon config-icon-glow">
+                        <Icon name="terminal" size={18} />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <h3 style={{ margin: 0 }}>Konfigurasi Environment (.env Demo Otomatis)</h3>
+                          <span className="section-type-badge select-badge">AUTO .ENV SANDBOX</span>
+                        </div>
+                        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
+                          Engine otomatis membaca <code>.env.example</code> / <code>example.env</code> dari repo Frontend, Backend, dan Mobile lalu mengisi nilai demo siap eksekusi. Unggah file <code>.env</code> kustom hanya jika dibutuhkan.
+                        </p>
+                      </div>
+                    </div>
+                    <Badge value={config.envUploadId ? 'Custom .env Terunggah' : 'Auto Demo .env Aktif'} />
+                  </div>
+
+                  {!config.envUploadId ? (
+                    <div
+                      className={`file-dropzone ${dragOverEnv ? 'drag-over' : ''}`}
+                      onDragOver={e => { e.preventDefault(); setDragOverEnv(true); }}
+                      onDragLeave={() => setDragOverEnv(false)}
+                      onDrop={e => {
+                        e.preventDefault();
+                        setDragOverEnv(false);
+                        const f = e.dataTransfer.files?.[0];
+                        if (f) void upload(f, 'env');
+                      }}
+                      onClick={() => envInputRef.current?.click()}
+                      style={{ cursor: 'pointer', marginTop: 12, padding: '12px 16px' }}
+                    >
+                      <div className="file-dropzone-icon">
+                        <Icon name="terminal" size={22} />
+                      </div>
+                      <div className="file-dropzone-text">
+                        <strong>Unggah File .env Kustom (Opsional)</strong>
+                        <p>Kosongkan untuk menggunakan generator <code>.env</code> demo otomatis + bantuan Gemini inference untuk kunci tak dikenal (secret otomatis disensor dari laporan).</p>
+                      </div>
+                      <input
+                        ref={envInputRef}
+                        type="file"
+                        accept=".env,.txt"
+                        disabled={!!uploading}
+                        onChange={e => {
+                          const f = e.target.files?.[0];
+                          if (f) void upload(f, 'env');
+                        }}
+                        style={{ display: 'none' }}
+                      />
+                      <button
+                        type="button"
+                        className="quiet"
+                        disabled={!!uploading}
+                        onClick={e => {
+                          e.stopPropagation();
+                          envInputRef.current?.click();
+                        }}
+                      >
+                        <Icon name="plus" size={14} /> {uploading === 'env' ? 'Mengunggah .env…' : 'Pilih File .env'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="upload-ready" style={{ marginTop: 12 }}>
+                      <Icon name="check" />
+                      <div>
+                        <strong>{filenames.env || 'File .env kustom terlampir'}</strong>
+                        <small>Secret di dalam file otomatis disensor dari log, report, dan Gemini prompt.</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="quiet danger-text"
+                        onClick={() => {
+                          patch({ envUploadId: undefined });
+                          setFilenames(f => ({ ...f, env: '' }));
+                        }}
+                      >
+                        Lepaskan
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 1. DATABASE & DATA INITIALIZATION */}
                 <div className="wizard-section-card config-section-card">
                   <div className="section-card-header">
                     <div className="section-header-left">
@@ -1177,7 +1479,7 @@ export function Wizard({
                       onClick={() => db({
                         engine: config.database.engine === 'none' ? 'mysql' : config.database.engine,
                         source: 'seed',
-                        seedCommand: config.database.seedCommand || 'npm run seed:jamaahku'
+                        seedCommand: config.database.seedCommand || ''
                       })}
                     >
                       <div className="choice-card-icon">
@@ -1347,7 +1649,7 @@ export function Wizard({
                   )}
                 </div>
 
-                {/* 2. KREDENSIAL AKUN & KATA SANDI PENGUJIAN (FORM KEDUA) */}
+                {/* 2. AUTO-PROVISIONING PERAN & AKUN DEMO SANDBOX */}
                 <div className="wizard-section-card form-section-card">
                   <div className="section-card-header">
                     <div className="section-header-left">
@@ -1356,36 +1658,40 @@ export function Wizard({
                       </div>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <h3 style={{ margin: 0 }}>Kredensial Akun &amp; Kata Sandi Pengujian</h3>
+                          <h3 style={{ margin: 0 }}>Deteksi Role &amp; Provisioning Akun Pengujian</h3>
                           <span className="section-type-badge form-badge">
-                            {config.database.source === 'seed' || config.database.source === 'migrate'
-                              ? '⚡ SEEDER KREDENSIAL'
-                              : '🔑 FORM LOGIN WAJIB (HASH DB)'}
+                            {config.autoProvisionAccounts !== false ? '⚡ AUTO-PROVISION ROLE' : '🔑 INPUT MANUAL'}
                           </span>
                         </div>
                         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-                          {config.database.source === 'seed' || config.database.source === 'migrate'
-                            ? 'Akun pengujian akan dipindai dari file seeder backend. Anda cukup mengisi kata sandi default seeder (biasanya seragam).'
-                            : 'Karena data di database tersimpan dalam bentuk hash (bcrypt), masukkan akun pengujian dengan kata sandi asli (plain text) agar robot tester dapat login.'}
+                          {config.autoProvisionAccounts !== false
+                            ? 'Engine membaca seluruh role login dari repository dan membuat akun uji di runtime memory agar setiap halaman & tab dapat direkam otomatis (password tidak pernah disimpan/ditampilkan).'
+                            : 'Mode manual: masukkan akun pengujian & kata sandi untuk role yang ingin diuji.'}
                         </p>
                       </div>
                     </div>
-                    {config.database.source !== 'seed' && config.database.source !== 'migrate' && (
-                      <button
-                        type="button"
-                        className="quiet"
-                        onClick={() => patch({
-                          accounts: [...config.accounts, { name: '', email: '', password: '', role: 'user' }]
-                        })}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '8px 14px' }}
-                      >
-                        <Icon name="plus" size={14} /> Tambah Akun
-                      </button>
-                    )}
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 600 }}>
+                      <input
+                        type="checkbox"
+                        checked={config.autoProvisionAccounts !== false}
+                        onChange={e => patch({ autoProvisionAccounts: e.target.checked })}
+                        style={{ width: 16, height: 16, accentColor: '#35D0BA' }}
+                      />
+                      <span>Auto-Provision Semua Role</span>
+                    </label>
                   </div>
 
-                  {/* KONDISI 1: JIKA SUMBER DATA SEEDER */}
-                  {(config.database.source === 'seed' || config.database.source === 'migrate') ? (
+                  {config.autoProvisionAccounts !== false && (
+                    <div className="probe-status-banner success" style={{ marginTop: 12 }}>
+                      <Icon name="check" size={15} />
+                      <div className="probe-status-text">
+                        <strong>Zero-Input Credential Aktif: Engine Otomatis Menyiapkan Akun Tiap Role</strong>
+                        <span>Tidak perlu mengisi password manual. Engine memakai endpoint register/seeder/DB sandbox pada memori runtime dan mengonfirmasi setiap role dapat login saat tahap Reconnaissance.</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {config.autoProvisionAccounts === false && (config.database.source === 'seed' || config.database.source === 'migrate') ? (
                     <div style={{ marginTop: 12 }}>
                       <div className="probe-status-banner success" style={{ marginBottom: 14 }}>
                         <Icon name="check" size={15} />
@@ -1518,7 +1824,7 @@ export function Wizard({
                         </div>
                       )}
                     </div>
-                  ) : (
+                  ) : config.autoProvisionAccounts === false ? (
                     /* KONDISI 2: JIKA SUMBER DATA SQL DUMP ATAU DB AKTIF (HASH DB) */
                     <div style={{ marginTop: 12 }}>
                       <div className="probe-status-banner warning" style={{ marginBottom: 14 }}>
@@ -1583,9 +1889,19 @@ export function Wizard({
                             </div>
                           </div>
                         ))}
+                        <button
+                          type="button"
+                          className="quiet"
+                          onClick={() => patch({
+                            accounts: [...config.accounts, { name: '', email: '', password: '', role: 'user' }]
+                          })}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '8px 14px', marginTop: 10 }}
+                        >
+                          <Icon name="plus" size={14} /> Tambah Akun Manual
+                        </button>
                       </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </>
             )}
@@ -1753,16 +2069,16 @@ export function Wizard({
                           {config.database.source === 'sql'
                             ? (filenames.sql ? `File: ${filenames.sql}` : (config.database.sqlUploadId ? 'File .sql terlampir' : 'File SQL dump kustom'))
                             : (config.database.source === 'seed' || config.database.source === 'migrate')
-                            ? (config.database.seedCommand || 'npm run seed:jamaahku (Auto-Scan Seeder)')
+                            ? (config.database.seedCommand || 'Auto-Scan Migration & Seeder dari Repo')
                             : 'Menggunakan data live database backend'}
                         </span>
                       </div>
-                      {seedResult?.success && (
-                        <div className="review-kv-row">
-                          <span className="review-k">Status Seeding</span>
-                          <span className="review-v" style={{ color: '#22c55e', fontSize: 11, fontWeight: 600 }}>✓ Database Telah Terisi</span>
-                        </div>
-                      )}
+                      <div className="review-kv-row">
+                        <span className="review-k">Environment (.env)</span>
+                        <span className="review-v mono" style={{ fontSize: 11 }}>
+                          {config.envUploadId ? `Custom: ${filenames.env || '.env terunggah'}` : 'Auto Demo dari .env.example'}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -1775,17 +2091,28 @@ export function Wizard({
                       <div>
                         <strong>Kredensial Akun &amp; Hak Akses</strong>
                         <span className="review-card-category">
-                          {(config.database.source === 'seed' || config.database.source === 'migrate') ? 'Auto-Detect Source' : 'Manual Hash DB'}
+                          {config.autoProvisionAccounts !== false ? 'Auto-Provision per Role (Runtime Memory)' : 'Mode Akun Manual'}
                         </span>
                       </div>
                     </div>
                     <div className="review-card-body">
-                      {(config.database.source === 'seed' || config.database.source === 'migrate') ? (
+                      {config.autoProvisionAccounts !== false ? (
+                        <>
+                          <div className="review-kv-row">
+                            <span className="review-k">Penyediaan Akun</span>
+                            <span className="review-v" style={{ fontWeight: 600 }}>Otomatis untuk seluruh role terdeteksi</span>
+                          </div>
+                          <div className="review-kv-row">
+                            <span className="review-k">Kebijakan Secret</span>
+                            <span className="review-v mono" style={{ fontSize: 11 }}>•••••••• (Disimpan di Memori Saja, Secretless)</span>
+                          </div>
+                        </>
+                      ) : (config.database.source === 'seed' || config.database.source === 'migrate') ? (
                         <>
                           <div className="review-kv-row">
                             <span className="review-k">Kata Sandi Default</span>
                             <span className="review-v mono" style={{ fontWeight: 600 }}>
-                              {config.accounts[0]?.password || 'password'}
+                              •••••••• (Terlindung di Memori Runtime)
                             </span>
                           </div>
                           <div className="review-kv-row">
@@ -1819,40 +2146,20 @@ export function Wizard({
                   </div>
                 </div>
 
-                {/* CARD 5: FULL DEEP QA & TEST ENGINE MATRIX (SEMUA AKTIF) */}
+                {/* CARD 5: CAKUPAN FASE 1 (1 LONG SS PER HALAMAN + 1 VIDEO PER ROLE) */}
                 <div className="review-deep-qa-box">
                   <div className="review-deep-qa-header">
                     <div className="review-deep-qa-icon">
                       <Icon name="runs" size={18} />
                     </div>
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <strong style={{ fontSize: 15 }}>Kapabilitas Deep QA &amp; Matriks Multi-Device (Aktif Penuh)</strong>
-                        <span className="review-active-pill">100% COVERAGE AKTIF</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: 15 }}>Fase 1: Full Coverage Visual, Video Role &amp; Diagnostik Kendala</strong>
+                        <span className="review-active-pill">ZERO-HARDCODE · READ-ONLY FASE 1</span>
                       </div>
                       <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                        Seluruh parameter pengujian mendalam, semua ukuran layar, dan seluruh mesin browser dieksekusi menyeluruh tanpa pembatasan rute.
+                        Urutan otomatis: Environment &amp; Role Provisioning → Reconnaissance &amp; Jeda ACC → Command Plan → Batch 1 (1 Long SS/halaman) → Batch 2 (1 Video/role klik semua tab + scroll) → Laporan + Gemini Diagnosis.
                       </p>
-                    </div>
-                  </div>
-
-                  <div className="review-deep-qa-grid">
-                    <div className="review-qa-badge-col">
-                      <span className="review-qa-label">📱 PERANGKAT LAYAR (3/3 AKTIF)</span>
-                      <div className="review-pill-row">
-                        <span className="review-spec-pill active">✓ 🖥️ Desktop (1440px)</span>
-                        <span className="review-spec-pill active">✓ 📱 Tablet (768px)</span>
-                        <span className="review-spec-pill active">✓ 📲 Mobile (375px)</span>
-                      </div>
-                    </div>
-
-                    <div className="review-qa-badge-col">
-                      <span className="review-qa-label">🌐 MESIN BROWSER (3/3 AKTIF)</span>
-                      <div className="review-pill-row">
-                        <span className="review-spec-pill active">✓ Chromium (Chrome/Edge)</span>
-                        <span className="review-spec-pill active">✓ Firefox</span>
-                        <span className="review-spec-pill active">✓ WebKit (Safari)</span>
-                      </div>
                     </div>
                   </div>
 
@@ -1860,30 +2167,37 @@ export function Wizard({
                     <div className="review-feature-item">
                       <span className="feature-check-icon">✓</span>
                       <div>
-                        <strong>Autonomous Negative Testing</strong>
-                        <small>Validasi form kosong, double-click protection, handling network failure &amp; error boundary.</small>
+                        <strong>Batch 1: 1 Long Screenshot Utuh per Halaman</strong>
+                        <small>Full page top-to-bottom per halaman accessible di tiap role (termasuk stitching jika pakai scroll container).</small>
                       </div>
                     </div>
                     <div className="review-feature-item">
                       <span className="feature-check-icon">✓</span>
                       <div>
-                        <strong>Boundary Form Data Exploration</strong>
-                        <small>Input batas ekstrem: 240+ karakter, text-overflow check, simbol sanitasi &amp; regex.</small>
+                        <strong>Batch 2: 1 Video Berkelanjutan per Role</strong>
+                        <small>Klik semua tab/menu interaktif dan scroll vertikal menyeluruh setelah Batch 1 selesai 100%.</small>
                       </div>
                     </div>
                     <div className="review-feature-item">
                       <span className="feature-check-icon">✓</span>
                       <div>
-                        <strong>Dynamic State &amp; UI Accessibility</strong>
-                        <small>Hover/focus efek, tombol disabled, modal transition, loading skeleton, &amp; WCAG compliance.</small>
+                        <strong>Daftar Halaman Gagal / Tidak Bisa Dicek</strong>
+                        <small>Catat HTTP status, redirect auth, API gagal, screenshot error, serta diagnosis teknis Gemini.</small>
                       </div>
                     </div>
                     <div className="review-feature-item">
-                      <span className="feature-check-icon">✓</span>
-                      <div>
-                        <strong>Multi-Role RBAC Privilege Isolation</strong>
-                        <small>Verifikasi isolasi rute &amp; tombol aksi sensitif antara User/Siswa vs Admin.</small>
-                      </div>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(config.qualityAudit?.enabled)}
+                          onChange={e => quality({ enabled: e.target.checked })}
+                          style={{ width: 15, height: 15, marginTop: 2, accentColor: '#35D0BA' }}
+                        />
+                        <div>
+                          <strong>Opsional: Tambah Legacy DOM Quality Audit</strong>
+                          <small>Aktifkan hanya jika ingin audit DOM tambahan setelah Batch 1 &amp; Batch 2 selesai.</small>
+                        </div>
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -1895,13 +2209,13 @@ export function Wizard({
                   </div>
                   <div className="gate-banner-content">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <strong style={{ fontSize: 14.5 }}>Tahapan Eksekusi: Jeda Review Alur Wajib (Approval Gate)</strong>
+                      <strong style={{ fontSize: 14.5 }}>Tahapan Eksekusi: Jeda ACC Wajib Setelah Reconnaissance</strong>
                       <span className="badge" style={{ background: 'rgba(255, 179, 0, 0.2)', color: '#ffb300', fontWeight: 700 }}>
                         ⏸️ WAITING_REVIEW
                       </span>
                     </div>
                     <p style={{ margin: '5px 0 0', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                      Saat tombol <strong>Mulai Pengujian Otomatis</strong> ditekan, engine terlebih dahulu memindai kode dan merangkai peta alur bisnis lengkap pada halaman <strong>Flow</strong>. Eksekusi pengujian di terminal hanya akan dimulai setelah Anda memeriksa dan menyetujui (Acc) alur tersebut.
+                      Engine memetakan role, jumlah halaman, dan seluruh fitur interaktif terlebih dahulu lalu menjeda status di <strong>WAITING_REVIEW</strong>. Tidak ada Long SS atau Video yang diambil sebelum Anda menekan tombol <strong>ACC</strong>.
                     </p>
                   </div>
                 </div>

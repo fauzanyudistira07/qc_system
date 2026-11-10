@@ -15,7 +15,7 @@ import { compileMaestroFlow } from './maestro-adapter.ts';
 import { compilePlaywrightFlow } from './playwright-generator.ts';
 import { runManagedProject, type ManagedProject, type ServiceRuntime } from './project-runner.ts';
 import { DiscoveryService } from './discovery/discovery-service.ts';
-import { checkAndroid, executeAndroidFlow, captureDeviceScreen, getManagedEmulators, stopAllManagedEmulators, ensureDeviceReady } from './android/index.ts';
+import { checkAndroid, executeAndroidFlow, captureDeviceScreen, getManagedEmulators, stopAllManagedEmulators, ensureDeviceReady, inspectApk } from './android/index.ts';
 import { boundedProcess } from './database/process.ts';
 import { validateDatabase, validateSql } from './database/sql-validation.ts';
 import type { DatabaseConfig, TestAccount } from './database/types.ts';
@@ -161,55 +161,6 @@ let persistQueue = Promise.resolve();
 let persistTimer: NodeJS.Timeout | undefined;
 
 const webDist = path.join(root, 'apps/web/dist');
-
-async function latestFullFlowVideo() {
-  const candidates: Array<{ filePath: string; name: string; size: number; updatedAt: string }> = [];
-  const addCandidate = async (filePath: string, reportPath: string, name: string) => {
-    try {
-      const report = JSON.parse(await readFile(reportPath, 'utf8')) as { status?: string };
-      if (report.status !== 'PASSED') return;
-      const metadata = await stat(filePath);
-      if (metadata.isFile()) candidates.push({ filePath, name, size: metadata.size, updatedAt: metadata.mtime.toISOString() });
-    } catch { /* Ignore incomplete test-run directories. */ }
-  };
-
-  const structuredRoot = path.join(artifactRoot, 'test-runs', 'zannora', 'full-flow');
-  try {
-    const entries = await readdir(structuredRoot, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const runRoot = path.join(structuredRoot, entry.name);
-      await addCandidate(path.join(runRoot, 'full-flow.webm'), path.join(runRoot, 'report.json'), `zannora/full-flow/${entry.name}`);
-    }
-  } catch { /* Structured history may not exist yet. */ }
-
-  const legacyRoot = path.join(artifactRoot, 'test-runs');
-  try {
-    const entries = await readdir(legacyRoot, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.startsWith('run-full-flow-')) continue;
-      const suffix = entry.name.replace(/^run-full-flow-/, '');
-      await addCandidate(path.join(legacyRoot, entry.name, 'full-flow.webm'), path.join(artifactRoot, 'zannora', 'runs', `full-flow-${suffix}.json`), entry.name);
-    }
-  } catch { /* Legacy history may not exist. */ }
-
-  const jobsRoot = path.join(artifactRoot, 'jobs');
-  try {
-    const jobEntries = await readdir(jobsRoot, { withFileTypes: true });
-    for (const entry of jobEntries) {
-      if (!entry.isDirectory()) continue;
-      const videoPath = path.join(jobsRoot, entry.name, 'full-flow.webm');
-      try {
-        const metadata = await stat(videoPath);
-        if (metadata.isFile() && metadata.size > 0) {
-          candidates.push({ filePath: videoPath, name: `job-${entry.name}`, size: metadata.size, updatedAt: metadata.mtime.toISOString() });
-        }
-      } catch {}
-    }
-  } catch { /* Jobs history may not exist yet. */ }
-
-  return candidates.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-}
 
 type EvidenceKind = 'report' | 'screenshot' | 'video' | 'other';
 type EvidenceAsset = {
@@ -965,12 +916,11 @@ app.get('/api/v1/generation/status', async () => {
       status: 'configured'
     };
   }
-  const soluEnabled = process.env.SOLU_AI_ENABLED === 'true' && Boolean(process.env.SOLU_AI_API_KEY);
   return {
-    enabled: soluEnabled,
-    provider: soluEnabled ? 'solu-ai' : 'gemini',
-    model: soluEnabled ? process.env.SOLU_AI_MODEL || 'default' : geminiConfig.model,
-    status: soluEnabled ? 'configured' : 'waiting-for-key'
+    enabled: false,
+    provider: 'gemini',
+    model: geminiConfig.model,
+    status: 'waiting-for-key'
   };
 });
 
@@ -997,14 +947,10 @@ app.post<{ Body: { prompt?: string; platform?: 'web' | 'android'; baseUrl?: stri
     }
   }
 
-  const soluEnabled = process.env.SOLU_AI_ENABLED === 'true' && Boolean(process.env.SOLU_AI_API_KEY);
-  if (!soluEnabled) {
-    return reply.code(503).send({
-      status: 'NEEDS_CONFIGURATION',
-      message: 'Gemini AI belum dikonfigurasi. Masukkan GEMINI_API_KEY pada .env untuk mengaktifkan AI generation.'
-    });
-  }
-  return reply.code(202).send({ id: randomUUID(), status: 'QUEUED', promptReceived: true });
+  return reply.code(503).send({
+    status: 'NEEDS_CONFIGURATION',
+    message: 'Gemini AI belum dikonfigurasi. Masukkan GEMINI_API_KEY pada .env untuk mengaktifkan AI generation.'
+  });
 });
 
 app.get('/api/v1/ai/test-connection', async (request, reply) => {
@@ -1084,7 +1030,7 @@ app.get<{ Params: { id: string } }>('/api/v1/runs/:id/events', async (request, r
 // System Status Endpoint
 app.get<{ Querystring: { force?: string } }>('/api/v1/system/status', async (request) => {
   const force = request.query?.force === 'true';
-  const android = await checkAndroid(force);
+  const android = await checkAndroid(force, true);
   let dockerAvailable = false;
   let dockerMessage = 'Docker tidak terdeteksi atau daemon mati.';
   try {
@@ -1184,6 +1130,42 @@ app.post<{ Body: { filename: string; kind?: 'sql' | 'env'; content: string } }>(
   return reply.code(201).send(result);
 });
 
+app.post<{
+  Querystring: { filename?: string };
+  Body: Buffer | { filename?: string; contentBase64?: string };
+}>('/api/v1/uploads/apk', async (request, reply) => {
+  let filename = '';
+  let buffer: Buffer | null = null;
+
+  if (Buffer.isBuffer(request.body)) {
+    const rawHeaderName = request.headers['x-filename'];
+    const headerName = typeof rawHeaderName === 'string' ? decodeURIComponent(rawHeaderName) : '';
+    filename = request.query?.filename || headerName || 'uploaded-app.apk';
+    buffer = request.body;
+  } else if (request.body && typeof request.body === 'object' && typeof (request.body as any).contentBase64 === 'string') {
+    filename = String((request.body as any).filename || request.query?.filename || 'uploaded-app.apk');
+    buffer = Buffer.from((request.body as any).contentBase64, 'base64');
+  }
+
+  if (!buffer || buffer.length === 0) {
+    return reply.code(400).send({ error: 'File APK kosong atau tidak valid.' });
+  }
+  if (!filename.toLowerCase().endsWith('.apk')) {
+    filename = `${filename}.apk`;
+  }
+
+  const saved = await discoveryService.saveApkUpload(filename, buffer);
+  const meta = await inspectApk(saved.path).catch(() => ({} as { packageId?: string; appName?: string; versionName?: string }));
+  discoveryService.updateUploadMetadata(saved.id, meta);
+
+  return reply.code(201).send({
+    ...saved,
+    packageId: meta.packageId ?? saved.packageId,
+    appName: meta.appName ?? saved.appName,
+    versionName: meta.versionName ?? saved.versionName,
+  });
+});
+
 // Live Android Device Screen Endpoint
 app.get<{ Querystring: { deviceId?: string } }>('/api/v1/android/screen', async (request, reply) => {
   const res = await captureDeviceScreen(request.query?.deviceId);
@@ -1267,66 +1249,130 @@ app.get('/api/v1/discovery/jobs', async () => {
   return discoveryService.listJobs();
 });
 
-app.post<{ Body: DiscoveryConfig }>('/api/v1/discovery/jobs', async (request, reply) => {
-  const body = request.body;
-  if (!body?.name?.trim()) return reply.code(400).send({ error: 'Nama project / job wajib diisi.' });
+async function harmonizeAndValidateDiscoveryPayload(body: DiscoveryConfig): Promise<
+  | { ok: true; payload: DiscoveryConfig & { sourceType: 'existing-target' | 'local-folder' | 'github' } }
+  | { ok: false; status: number; error: string }
+> {
+  if (!body?.name?.trim()) {
+    return { ok: false, status: 400, error: 'Nama project / job wajib diisi.' };
+  }
 
-  // Harmonize tri-mode runtime targets
   const fe = body.frontendTarget;
   const be = body.backendTarget;
+  const mob = body.mobileTarget;
 
   if (be?.sameRepoAsFrontend && fe) {
     be.repositoryUrl = fe.repositoryUrl;
     be.branch = fe.branch;
     be.mode = fe.mode;
   }
-
-  if (fe?.url?.trim()) {
-    body.baseUrl = fe.url.trim();
-  }
-  if (be?.url?.trim()) {
-    body.backendUrl = be.url.trim();
-  }
-  if (fe?.repositoryUrl?.trim()) {
-    body.repositoryUrl = fe.repositoryUrl.trim();
-    if (fe.branch?.trim()) body.ref = fe.branch.trim();
-  } else if (be?.repositoryUrl?.trim()) {
-    body.repositoryUrl = be.repositoryUrl.trim();
-    if (be.branch?.trim()) body.ref = be.branch.trim();
+  if (mob?.sameRepoAsFrontend && (fe?.repositoryUrl?.trim() || be?.repositoryUrl?.trim())) {
+    mob.repositoryUrl = fe?.repositoryUrl?.trim() || be?.repositoryUrl?.trim() || '';
+    mob.branch = fe?.branch?.trim() || be?.branch?.trim() || 'main';
+    mob.mode = fe?.mode || be?.mode || 'server';
   }
 
-  if (fe?.mode === 'server' || be?.mode === 'server') {
+  if (fe?.url?.trim()) body.baseUrl = fe.url.trim();
+  if (be?.url?.trim()) body.backendUrl = be.url.trim();
+
+  // Preserve distinct frontendTarget, backendTarget, and mobileTarget while computing primary repositoryUrl
+  const primaryRepo =
+    (body.platform === 'android' ? mob?.repositoryUrl?.trim() : fe?.repositoryUrl?.trim()) ||
+    be?.repositoryUrl?.trim() ||
+    fe?.repositoryUrl?.trim() ||
+    mob?.repositoryUrl?.trim() ||
+    body.repositoryUrl?.trim() ||
+    '';
+  body.repositoryUrl = primaryRepo;
+
+  const primaryRef =
+    (body.platform === 'android' ? mob?.branch?.trim() : fe?.branch?.trim()) ||
+    be?.branch?.trim() ||
+    fe?.branch?.trim() ||
+    mob?.branch?.trim() ||
+    body.ref?.trim() ||
+    'main';
+  body.ref = primaryRef;
+
+  if (fe?.mode === 'server' || be?.mode === 'server' || mob?.mode === 'server') {
     body.runMode = 'managed-local';
     body.sourceType = 'github';
   }
 
+  if (body.autoProvisionAccounts === undefined) {
+    body.autoProvisionAccounts = true;
+  }
+
   if (body.platform === 'android') {
-    if (body.useServerEmulator !== false || !body.deviceId?.trim()) {
-      const androidStatus = await checkAndroid(false);
-      body.deviceId = androidStatus.adb.devices?.[0] || 'emulator-5554';
+    body.useServerEmulator = body.useServerEmulator !== false;
+    if (body.useServerEmulator) {
+      const androidStatus = await checkAndroid(false, true);
+      const emulators = androidStatus.adb.devices.filter((d) => d.startsWith('emulator-'));
+      const preferred = body.deviceId?.trim();
+      body.deviceId =
+        preferred && (preferred.startsWith('emulator-') || preferred === 'qc_worker_headless')
+          ? preferred
+          : emulators[0] || 'qc_worker_headless';
+    } else if (!body.deviceId?.trim()) {
+      const androidStatus = await checkAndroid(false, false);
+      body.deviceId = androidStatus.adb.devices?.[0] || 'qc_worker_headless';
     }
     if (!body.baseUrl?.trim()) {
-      body.baseUrl = body.backendUrl || 'http://10.0.2.2:8000';
+      body.baseUrl = body.backendUrl || be?.url?.trim() || 'http://10.0.2.2:8000';
     }
   }
 
   const sourceType = body.sourceType ?? (body.runMode === 'managed-local' ? (body.localPath?.trim() ? 'local-folder' : 'github') : 'existing-target');
-  if (body.runMode === 'managed-local' && sourceType === 'local-folder' && !body.localPath?.trim() && !body.repositoryUrl?.trim()) {
-    return reply.code(400).send({ error: 'Folder lokal wajib diisi untuk mode folder kerja.' });
+  const anyRepoUrl = Boolean(primaryRepo || fe?.repositoryUrl?.trim() || be?.repositoryUrl?.trim() || mob?.repositoryUrl?.trim());
+  const hasApkUpload = Boolean(body.platform === 'android' && body.apkUploadId?.trim());
+
+  if (body.runMode === 'managed-local' && sourceType === 'local-folder' && !body.localPath?.trim() && !anyRepoUrl && !hasApkUpload) {
+    return { ok: false, status: 400, error: 'Folder lokal atau repositori wajib diisi untuk mode folder kerja.' };
   }
-  if (body.runMode === 'managed-local' && sourceType === 'github' && !body.repositoryUrl?.trim()) {
-    return reply.code(400).send({ error: 'Repository GitHub wajib diisi untuk mode GitHub / Jalankan di Server.' });
+  if (body.runMode === 'managed-local' && sourceType === 'github' && !anyRepoUrl && !hasApkUpload) {
+    return { ok: false, status: 400, error: 'Repository GitHub (Frontend/Backend/Mobile) wajib diisi untuk mode server Docker.' };
   }
-  if (!body.baseUrl?.trim() && body.runMode !== 'demo') {
-    return reply.code(400).send({ error: 'baseUrl wajib diisi.' });
+  if (!body.baseUrl?.trim() && body.runMode !== 'demo' && body.platform !== 'android') {
+    return { ok: false, status: 400, error: 'baseUrl wajib diisi.' };
   }
+
+  const repoCandidates = [
+    { label: 'Frontend', url: fe?.repositoryUrl?.trim() },
+    { label: 'Backend', url: be?.repositoryUrl?.trim() },
+    { label: 'Mobile', url: mob?.repositoryUrl?.trim() },
+    { label: 'Repository', url: body.repositoryUrl?.trim() },
+  ].filter((c) => Boolean(c.url));
+
   if (sourceType === 'github') {
-    try {
-      const repository = new URL(body.repositoryUrl);
-      if (!['http:', 'https:'].includes(repository.protocol) || repository.username || repository.password) return reply.code(400).send({ error: 'Repository GitHub harus berupa URL HTTP(S) tanpa credential.' });
-    } catch { return reply.code(400).send({ error: 'repositoryUrl GitHub tidak valid.' }); }
+    for (const candidate of repoCandidates) {
+      try {
+        const parsed = new URL(candidate.url!);
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+          return { ok: false, status: 400, error: `Repository GitHub ${candidate.label} harus berupa URL HTTP(S) tanpa credential.` };
+        }
+      } catch {
+        return { ok: false, status: 400, error: `URL Repository GitHub ${candidate.label} tidak valid.` };
+      }
+    }
   }
-  const job = await discoveryService.createJob({ ...body, sourceType, localPath: body.localPath?.trim(), repositoryUrl: body.repositoryUrl?.trim() ?? '' });
+
+  return {
+    ok: true,
+    payload: {
+      ...body,
+      sourceType,
+      localPath: body.localPath?.trim(),
+      repositoryUrl: body.repositoryUrl?.trim() ?? '',
+    },
+  };
+}
+
+app.post<{ Body: DiscoveryConfig }>('/api/v1/discovery/jobs', async (request, reply) => {
+  const normalized = await harmonizeAndValidateDiscoveryPayload(request.body);
+  if ('error' in normalized) {
+    return reply.code(normalized.status).send({ error: normalized.error });
+  }
+  const job = await discoveryService.createJob(normalized.payload);
   return reply.code(201).send(job);
 });
 
@@ -1360,53 +1406,12 @@ app.post<{ Params: { id: string }; Body: { status?: any; progress?: number; phas
 });
 
 app.put<{ Params: { id: string }; Body: DiscoveryConfig & { restart?: boolean } }>('/api/v1/discovery/jobs/:id', async (request, reply) => {
-  const body = request.body;
-  if (!body?.name?.trim()) return reply.code(400).send({ error: 'Nama project / job wajib diisi.' });
-
-  // Harmonize tri-mode runtime targets
-  const fe = body.frontendTarget;
-  const be = body.backendTarget;
-
-  if (be?.sameRepoAsFrontend && fe) {
-    be.repositoryUrl = fe.repositoryUrl;
-    be.branch = fe.branch;
-    be.mode = fe.mode;
+  const normalized = await harmonizeAndValidateDiscoveryPayload(request.body);
+  if ('error' in normalized) {
+    return reply.code(normalized.status).send({ error: normalized.error });
   }
-
-  if (fe?.url?.trim()) {
-    body.baseUrl = fe.url.trim();
-  }
-  if (be?.url?.trim()) {
-    body.backendUrl = be.url.trim();
-  }
-  if (fe?.repositoryUrl?.trim()) {
-    body.repositoryUrl = fe.repositoryUrl.trim();
-    if (fe.branch?.trim()) body.ref = fe.branch.trim();
-  } else if (be?.repositoryUrl?.trim()) {
-    body.repositoryUrl = be.repositoryUrl.trim();
-    if (be.branch?.trim()) body.ref = be.branch.trim();
-  }
-
-  if (fe?.mode === 'server' || be?.mode === 'server') {
-    body.runMode = 'managed-local';
-    body.sourceType = 'github';
-  }
-
-  if (body.platform === 'android') {
-    if (body.useServerEmulator !== false || !body.deviceId?.trim()) {
-      const androidStatus = await checkAndroid(false);
-      body.deviceId = androidStatus.adb.devices?.[0] || 'emulator-5554';
-    }
-    if (!body.baseUrl?.trim()) {
-      body.baseUrl = body.backendUrl || 'http://10.0.2.2:8000';
-    }
-  }
-
-  const sourceType = body.sourceType ?? (body.runMode === 'managed-local' ? (body.localPath?.trim() ? 'local-folder' : 'github') : 'existing-target');
-  if (body.runMode === 'managed-local' && sourceType === 'local-folder' && !body.localPath?.trim() && !body.repositoryUrl?.trim()) return reply.code(400).send({ error: 'Folder lokal wajib diisi untuk mode folder kerja.' });
-  if (body.runMode === 'managed-local' && sourceType === 'github' && !body.repositoryUrl?.trim()) return reply.code(400).send({ error: 'Repository GitHub wajib diisi untuk mode GitHub.' });
   try {
-    const job = await discoveryService.updateJob(request.params.id, { ...body, sourceType, localPath: body.localPath?.trim(), repositoryUrl: body.repositoryUrl?.trim() ?? '' }, body.restart !== false);
+    const job = await discoveryService.updateJob(request.params.id, normalized.payload, request.body.restart !== false);
     return job;
   } catch (err) {
     return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -1435,8 +1440,12 @@ app.post<{ Params: { id: string }; Body?: { url?: string; username?: string; pas
   const job = discoveryService.getJob(request.params.id);
   if (!job) return reply.code(404).send({ error: 'Job tidak ditemukan' });
   const targetUrl = request.body?.url || job.config.baseUrl;
-  const username = request.body?.username || job.config.accounts?.find((a) => Boolean(a.email))?.email || 'admin@qcmaestro.com';
-  const password = request.body?.password || (job.config.accounts?.find((a: any) => Boolean(a.password)) as any)?.password || 'password123';
+  const fallbackCred = discoveryService.getPrimaryRuntimeCredential(job.id);
+  const username = request.body?.username || job.config.accounts?.find((a) => Boolean(a.email))?.email || fallbackCred?.identifier || '';
+  const password = request.body?.password || (job.config.accounts?.find((a: any) => Boolean(a.password)) as any)?.password || fallbackCred?.password || '';
+  if (!targetUrl || !username || !password) {
+    return reply.code(400).send({ error: 'URL target serta kredensial runtime (username/password) wajib tersedia.' });
+  }
   const phases = request.body?.phases || 'all';
 
   const scriptPath = path.join(root, 'scripts', 'run-autonomous-e2e.mjs');
@@ -1476,9 +1485,12 @@ app.post<{ Params: { id: string }; Body?: { url?: string; username?: string; pas
 app.post<{ Body?: { projectName?: string; url?: string; username?: string; password?: string; phases?: string; headless?: boolean } }>('/api/v1/e2e/trigger', async (request, reply) => {
   const body = request.body || {};
   const projectName = body.projectName || 'target-web-app';
-  const targetUrl = body.url || 'http://localhost:5174';
-  const username = body.username || 'QC_PATCH_TA';
-  const password = body.password || 'password123';
+  const targetUrl = body.url?.trim();
+  const username = body.username?.trim();
+  const password = body.password?.trim();
+  if (!targetUrl || !username || !password) {
+    return reply.code(400).send({ error: 'url, username, dan password wajib dikirim saat trigger manual E2E.' });
+  }
   const phases = body.phases || 'all';
 
   const scriptPath = path.join(root, 'scripts', 'run-autonomous-e2e.mjs');
@@ -1529,6 +1541,14 @@ app.post<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/generate-flow',
 app.put<{ Params: { id: string; flowId: string }; Body: Record<string, unknown> }>('/api/v1/discovery/jobs/:id/business-flows/:flowId', async (request, reply) => {
   try {
     return discoveryService.updateBusinessFlow(request.params.id, request.params.flowId, request.body as any);
+  } catch (err) {
+    return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post<{ Params: { id: string } }>('/api/v1/discovery/jobs/:id/approve', async (request, reply) => {
+  try {
+    return discoveryService.approvePhase1Job(request.params.id);
   } catch (err) {
     return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
   }
@@ -1798,10 +1818,6 @@ app.get<{ Params: { '*': string } }>('/api/v1/evidence/artifacts/*', async (requ
   const relativeCheck = path.relative(artifactRoot, filePath);
   if (relativeCheck.startsWith('..') || path.isAbsolute(relativeCheck)) return reply.code(403).send({ error: 'Access denied' });
   return streamFileResponse(filePath, request, reply);
-});
-
-app.get<{ Params: { '*': string } }>('/api/v1/zannora-evidence/artifacts/*', async (request, reply) => {
-  return reply.redirect(`/api/v1/evidence/artifacts/${request.params['*']}`);
 });
 
 // Nextcloud WebDAV Integration endpoints

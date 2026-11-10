@@ -1,6 +1,53 @@
-import type { DiscoveryJob } from '../discovery/types.ts';
+import type {
+  CoverageGapItem,
+  DiscoveryJob,
+  EnvProvisionEntry,
+  LongScreenshotArtifact,
+  Phase1ReconSummary,
+  ProvisionedRoleAccount,
+  RoleVideoArtifact,
+} from '../discovery/types.ts';
 import { groupResultsIntoAttempts, type TestAttempt } from './attempt-grouper.ts';
 import type { BusinessFlowMap } from '../discovery/business-flow.ts';
+
+function normalizeJobArtifactRef(
+  jobId: string,
+  rawPathOrUrl: string | undefined,
+  artifactPrefix: string
+): { cleanRel: string; resolvedUrl: string } {
+  const value = (rawPathOrUrl || '').trim();
+  if (!value) return { cleanRel: '', resolvedUrl: '' };
+
+  const apiPrefix = `/api/v1/discovery/jobs/${jobId}/artifacts/`;
+  if (value.startsWith(apiPrefix)) {
+    const cleanRel = value
+      .slice(apiPrefix.length)
+      .split('/')
+      .map((seg) => {
+        try { return decodeURIComponent(seg); } catch { return seg; }
+      })
+      .join('/');
+    return {
+      cleanRel,
+      resolvedUrl: artifactPrefix ? `${artifactPrefix}${cleanRel.split('/').map(encodeURIComponent).join('/')}` : value,
+    };
+  }
+
+  const jobMarker = `/jobs/${jobId}/`;
+  const normalized = value.replace(/\\/g, '/');
+  const markerIdx = normalized.indexOf(jobMarker);
+  const cleanRel = (
+    markerIdx !== -1
+      ? normalized.slice(markerIdx + jobMarker.length)
+      : normalized.replace(/^\/+/, '')
+  ).replace(/^\/+/, '');
+
+  const encodedRel = cleanRel.split('/').map(encodeURIComponent).join('/');
+  return {
+    cleanRel,
+    resolvedUrl: artifactPrefix ? `${artifactPrefix}${encodedRel}` : value.startsWith('/') ? value : cleanRel,
+  };
+}
 
 export interface StructuredJsonReport {
   reportVersion: string;
@@ -11,8 +58,13 @@ export interface StructuredJsonReport {
     platform: string;
     appId?: string;
     deviceId?: string;
+    useServerEmulator?: boolean;
     baseUrl?: string;
+    backendUrl?: string;
     repositoryUrl?: string;
+    frontendRepositoryUrl?: string;
+    backendRepositoryUrl?: string;
+    mobileRepositoryUrl?: string;
     status: string;
     createdAt: string;
     finishedAt?: string;
@@ -30,6 +82,20 @@ export interface StructuredJsonReport {
       finishedAt: string;
     };
     overallHealthScore: number;
+    phase1?: {
+      platform: 'web' | 'android';
+      totalRoles: number;
+      totalPages: number;
+      totalInteractiveFeatures: number;
+      longScreenshotsCaptured: number;
+      longScreenshotsTotal: number;
+      roleVideosRecorded: number;
+      roleVideosTotal: number;
+      coverageGapsCount: number;
+      discoveredAt: string;
+      approvedAt?: string;
+      aiExecutiveSummary?: string;
+    };
     crud?: {
       resources: number;
       available: number;
@@ -57,6 +123,25 @@ export interface StructuredJsonReport {
     };
     businessFlows?: Pick<BusinessFlowMap, 'version' | 'generatedAt' | 'status' | 'productProfile' | 'summary' | 'limitations'> & { flows: BusinessFlowMap['flows'] };
   };
+  envProvisioning?: {
+    entries: EnvProvisionEntry[];
+    warnings: string[];
+    redactedSecretsCount: number;
+  };
+  provisionedAccounts?: ProvisionedRoleAccount[];
+  reconSummary?: Phase1ReconSummary;
+  commandPlanSummary?: {
+    version: string;
+    generatedAt: string;
+    platform: 'web' | 'android';
+    longScreenshotPlanPath: string;
+    videoPlanPath: string;
+    screenshotCommandCount: number;
+    videoRoleCount: number;
+  };
+  longScreenshots?: LongScreenshotArtifact[];
+  roleVideos?: RoleVideoArtifact[];
+  coverageGaps?: CoverageGapItem[];
   filterApplied?: {
     attempt?: string;
     status?: string;
@@ -265,8 +350,60 @@ export function buildJsonReport(
     finishedAt: new Date().toISOString()
   };
 
+  const longScreenshots = job.longScreenshots?.map((ss) => {
+    const ref = normalizeJobArtifactRef(job.id, ss.path || ss.url, artifactPrefix);
+    return {
+      ...ss,
+      path: ref.cleanRel || ss.path,
+      url: ref.resolvedUrl || ss.url,
+    };
+  });
+
+  const roleVideos = job.roleVideos?.map((vid) => {
+    const ref = normalizeJobArtifactRef(job.id, vid.path || vid.url, artifactPrefix);
+    return {
+      ...vid,
+      path: ref.cleanRel || vid.path,
+      url: ref.resolvedUrl || vid.url,
+    };
+  });
+
+  const coverageGaps = job.coverageGaps?.map((gap) => {
+    if (!gap.errorScreenshotUrl) return gap;
+    const ref = normalizeJobArtifactRef(job.id, gap.errorScreenshotUrl, artifactPrefix);
+    return {
+      ...gap,
+      errorScreenshotUrl: ref.resolvedUrl || gap.errorScreenshotUrl,
+    };
+  });
+
+  const provisionedAccounts = job.provisionedAccounts?.map((acc) => ({
+    role: acc.role,
+    name: acc.name,
+    identifier: acc.identifier,
+    identifierField: acc.identifierField,
+    source: acc.source,
+    verified: acc.verified,
+    verificationNote: acc.verificationNote,
+    loginPath: acc.loginPath,
+    homePath: acc.homePath,
+  }));
+
+  const envProvisioning = job.envProvisioning
+    ? {
+        entries: job.envProvisioning.entries,
+        warnings: job.envProvisioning.warnings,
+        redactedSecretsCount: job.envProvisioning.secretsToRedact?.length ?? 0,
+      }
+    : undefined;
+
+  const ssCaptured = longScreenshots?.filter((s) => s.status === 'CAPTURED').length ?? job.reconSummary?.batch1CapturedCount ?? 0;
+  const ssTotal = longScreenshots?.length ?? job.reconSummary?.batch1TotalScreenshots ?? 0;
+  const vidRecorded = roleVideos?.filter((v) => v.status === 'RECORDED').length ?? job.reconSummary?.batch2RecordedCount ?? 0;
+  const vidTotal = roleVideos?.length ?? job.reconSummary?.batch2TotalRoleVideos ?? 0;
+
   return {
-    reportVersion: '2.0.0',
+    reportVersion: '2.1.0',
     generatedAt: new Date().toISOString(),
     target: {
       jobId: job.id,
@@ -274,8 +411,13 @@ export function buildJsonReport(
       platform: job.config.platform,
       appId: job.config.appId,
       deviceId: job.config.deviceId,
+      useServerEmulator: job.config.useServerEmulator,
       baseUrl: job.config.baseUrl,
+      backendUrl: job.config.backendUrl,
       repositoryUrl: job.config.repositoryUrl,
+      frontendRepositoryUrl: job.config.frontendTarget?.repositoryUrl,
+      backendRepositoryUrl: job.config.backendTarget?.repositoryUrl,
+      mobileRepositoryUrl: job.config.mobileTarget?.repositoryUrl,
       status: job.status,
       createdAt: job.createdAt,
       finishedAt: job.finishedAt
@@ -283,7 +425,21 @@ export function buildJsonReport(
     summary: {
       totalAttempts: attempts.length,
       latestAttempt: latestStats,
-      overallHealthScore: latest ? latest.metrics.passRate : 0,
+      overallHealthScore: latest ? latest.metrics.passRate : (ssTotal > 0 ? Math.round((ssCaptured / ssTotal) * 100) : 0),
+      phase1: job.reconSummary ? {
+        platform: job.reconSummary.platform,
+        totalRoles: job.reconSummary.totalRoles,
+        totalPages: job.reconSummary.totalPages,
+        totalInteractiveFeatures: job.reconSummary.totalInteractiveFeatures,
+        longScreenshotsCaptured: ssCaptured,
+        longScreenshotsTotal: ssTotal,
+        roleVideosRecorded: vidRecorded,
+        roleVideosTotal: vidTotal,
+        coverageGapsCount: coverageGaps?.length ?? 0,
+        discoveredAt: job.reconSummary.discoveredAt,
+        approvedAt: job.reconSummary.approvedAt,
+        aiExecutiveSummary: job.reconSummary.aiExecutiveSummary,
+      } : undefined,
       crud: job.inventory?.crudPlan ? {
         ...job.inventory.crudPlan.totals,
         matrix: job.inventory.crudPlan.resources.map((resource) => ({
@@ -320,6 +476,21 @@ export function buildJsonReport(
       } : undefined,
       businessFlows: job.businessFlowMap,
     },
+    envProvisioning,
+    provisionedAccounts,
+    reconSummary: job.reconSummary,
+    commandPlanSummary: job.commandPlan ? {
+      version: job.commandPlan.version,
+      generatedAt: job.commandPlan.generatedAt,
+      platform: job.commandPlan.platform,
+      longScreenshotPlanPath: job.commandPlan.longScreenshotPlanPath,
+      videoPlanPath: job.commandPlan.videoPlanPath,
+      screenshotCommandCount: job.commandPlan.screenshotCommands.length,
+      videoRoleCount: job.commandPlan.videoCommands.length,
+    } : undefined,
+    longScreenshots,
+    roleVideos,
+    coverageGaps,
     filterApplied: {
       attempt: options?.attempt || 'all',
       status: options?.status || 'all'

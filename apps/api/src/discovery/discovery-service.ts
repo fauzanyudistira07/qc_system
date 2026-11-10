@@ -7,15 +7,43 @@ import type { NormalizedFlow } from '@qc/flow-schema';
 import { validateFlow } from '@qc/flow-schema';
 import { scanSource, type InventoryPage } from './source-scanner.ts';
 import { crawlUI } from './ui-crawler.ts';
-import type { DiscoveryConfig, DiscoveryJob, GeneratedFlow, Inventory, QualityAuditConfig, QualityAuditBrowser, QualityAuditViewport, FindingWorkflowStatus } from './types.ts';
+import type {
+  CoverageGapItem,
+  DiscoveryConfig,
+  DiscoveryJob,
+  EnvProvisionResult,
+  GeneratedFlow,
+  Inventory,
+  Phase1ReconSummary,
+  QualityAuditConfig,
+  QualityAuditBrowser,
+  QualityAuditViewport,
+  FindingWorkflowStatus,
+} from './types.ts';
 import { prepareDatabase, type PreparedDatabase } from '../database/database-manager.ts';
 import { buildFlows } from '../flow-builder/inventory-to-flow.ts';
+import { generatePostAccCommandPlan } from '../flow-builder/command-generator.ts';
 import { buildReport } from '../report/report-builder.ts';
+import { buildJsonReport } from '../report/report-json.ts';
 import { generatePdfReport } from '../report/report-pdf.ts';
 import { executeWebFlow, createWebRecordingSession, finishWebRecordingSession, type WebRunResult, type WebRecordingSession } from '../playwright-adapter.ts';
 import { runManagedProject, type ManagedProject } from '../project-runner.ts';
 import { compilePlaywrightFlow } from '../playwright-generator.ts';
-import { checkAndroid, executeAndroidFlow, executeAndroidRawFlow, stopAllManagedEmulators, notifyAndroidJobStarted, notifyAndroidJobFinished } from '../android/index.ts';
+import {
+  buildApkFromMobileRepo,
+  checkAndroid,
+  ensureDeviceReady,
+  executeAndroidFlow,
+  executeAndroidRawFlow,
+  inspectApk,
+  installApkToDevice,
+  notifyAndroidJobFinished,
+  notifyAndroidJobStarted,
+  setEmulatorReviewHold,
+  setupAdbReverse,
+  stopAllManagedEmulators,
+} from '../android/index.ts';
+import { exploreAndroidScreensForRecon } from '../android/mobile-explorer.ts';
 import { detectCapabilities } from './capability-model.ts';
 import { buildCrudPlan } from './crud-planner.ts';
 import { buildRoleActionPlan } from './role-planner.ts';
@@ -23,23 +51,68 @@ import { buildFeatureContractPlan } from './feature-contract.ts';
 import { buildBusinessFlowMap, refreshBusinessFlowSummary, type BusinessFlowMap } from './business-flow.ts';
 import { runtimePolicy } from '../runtime-policy.ts';
 import { analyzeCommitImpact } from './impact-analyzer.ts';
+import { GeminiService } from '../gemini-service.ts';
+import { provisionEnvFiles } from '../env-provisioner.ts';
+import { provisionRoleAccounts, type RuntimeRoleCredential } from '../auth-role-provisioner.ts';
+import { captureAndroidLongScreenshots, captureWebLongScreenshots } from '../media/long-screenshot.ts';
+import { recordAndroidRoleVideos, recordWebRoleVideos } from '../media/video-recorder.ts';
 
 
 export class DiscoveryService {
   private jobs = new Map<string, DiscoveryJob>();
   private abortControllers = new Map<string, AbortController>();
-  private uploads = new Map<string, { id: string; filename: string; kind: 'sql' | 'env'; content: string; size: number }>();
+  private uploads = new Map<
+    string,
+    {
+      id: string;
+      filename: string;
+      kind: 'sql' | 'env' | 'apk';
+      content: string;
+      size: number;
+      path?: string;
+      packageId?: string;
+      appName?: string;
+      versionName?: string;
+    }
+  >();
   private artifactRoot: string;
   private projectRoot: string;
   private demoServerProcess: any = null;
   private workspaceSnapshotTimers = new Map<string, NodeJS.Timeout>();
   private businessFlowWaiters = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
-  // Credentials remain in memory for the active run and are never persisted with the job.
-  private runtimeAuditPasswords = new Map<string, string>();
+  // Runtime role credentials & secrets stay purely in memory per active job and are never persisted to disk.
+  private runtimeRoleCredentials = new Map<string, Map<string, RuntimeRoleCredential>>();
+  private jobSecrets = new Map<string, Set<string>>();
 
   constructor(artifactRoot: string, projectRoot: string) {
     this.artifactRoot = artifactRoot;
     this.projectRoot = projectRoot;
+  }
+
+  public getPrimaryRuntimeCredential(jobId: string): { identifier: string; password: string; role: string } | undefined {
+    const roleMap = this.runtimeRoleCredentials.get(jobId);
+    if (!roleMap) return undefined;
+    for (const cred of roleMap.values()) {
+      if (cred.identifier && cred.password) {
+        return { identifier: cred.identifier, password: cred.password, role: cred.role };
+      }
+    }
+    return undefined;
+  }
+
+  private registerSecret(jobId: string, secret?: string): void {
+    if (!secret || secret.length < 4) return;
+    let set = this.jobSecrets.get(jobId);
+    if (!set) {
+      set = new Set<string>();
+      this.jobSecrets.set(jobId, set);
+    }
+    set.add(secret);
+  }
+
+  private scrubForJob(jobId: string, text: string): string {
+    const extra = [...(this.jobSecrets.get(jobId) ?? [])];
+    return GeminiService.scrubSecrets(text, extra);
   }
 
   public async init(): Promise<void> {
@@ -213,6 +286,60 @@ export class DiscoveryService {
     return job;
   }
 
+  public approvePhase1Job(id: string): DiscoveryJob {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error('Job tidak ditemukan.');
+    const now = new Date().toISOString();
+    if (job.reconSummary) {
+      job.reconSummary.approvedAt = now;
+    }
+    if (job.businessFlowMap) {
+      job.businessFlowMap.flows.forEach((flow) => {
+        flow.status = 'APPROVED';
+        flow.approvedAt = now;
+      });
+      refreshBusinessFlowSummary(job.businessFlowMap);
+    }
+    job.config.executeFlows = true;
+    job.flows.forEach((flow) => {
+      flow.status = 'READY';
+    });
+
+    const waiter = this.businessFlowWaiters.get(id);
+    if (waiter) {
+      if (job.config.platform === 'android') {
+        setEmulatorReviewHold(false);
+      }
+      job.status = 'RUNNING';
+      job.phase = 'GENERATING_COMMANDS';
+      job.progress = 88;
+      job.message = 'Discovery Fase 1 di-ACC oleh user. Membuat rencana command, Batch 1 Long Screenshot, lalu Batch 2 Video.';
+      this.addLog(job, 'flow-builder', `✅ ${job.message}`);
+      void this.persist();
+      void this.writeWorkspaceSnapshot(job);
+      waiter.resolve();
+      this.businessFlowWaiters.delete(id);
+      return job;
+    }
+
+    if (job.status === 'WAITING_REVIEW' || job.phase === 'RECON_REVIEW_WAITING_ACC') {
+      if (job.config.platform === 'android') {
+        setEmulatorReviewHold(false);
+      }
+      job.status = 'RUNNING';
+      job.phase = 'GENERATING_COMMANDS';
+      job.progress = 88;
+      job.message = 'Discovery Fase 1 di-ACC oleh user. Membuat rencana command, Batch 1 Long Screenshot, lalu Batch 2 Video.';
+      this.addLog(job, 'flow-builder', `✅ ${job.message}`);
+      void this.persist();
+      void this.writeWorkspaceSnapshot(job);
+      return job;
+    }
+
+    void this.persist();
+    return job;
+  }
+
   public approveBusinessFlows(id: string, flowIds?: string[]): DiscoveryJob {
     const job = this.jobs.get(id);
     if (!job || !job.businessFlowMap) throw new Error('Business Flow Map belum tersedia.');
@@ -229,19 +356,27 @@ export class DiscoveryService {
     void this.persist();
     void this.writeWorkspaceSnapshot(job);
     if (job.businessFlowMap.status === 'APPROVED') {
+      if (job.reconSummary) {
+        job.reconSummary.approvedAt = now;
+      }
       job.config.executeFlows = true;
       job.flows.forEach((flow) => {
         flow.status = 'READY';
       });
       const waiter = this.businessFlowWaiters.get(id);
       if (waiter) {
+        if (job.config.platform === 'android') {
+          setEmulatorReviewHold(false);
+        }
+        job.status = 'RUNNING';
+        job.phase = 'GENERATING_COMMANDS';
         waiter.resolve();
         this.businessFlowWaiters.delete(id);
-      } else if (job.status === 'WAITING_REVIEW' || job.phase === 'BUSINESS_FLOW_REVIEW' || job.status === 'COMPLETED') {
+      } else if (job.status === 'WAITING_REVIEW' || job.phase === 'BUSINESS_FLOW_REVIEW' || job.phase === 'RECON_REVIEW_WAITING_ACC' || job.status === 'COMPLETED') {
         job.status = 'RUNNING';
         job.phase = 'EXECUTING_TESTS';
         job.progress = 90;
-        job.message = 'Seluruh Business Flow disetujui. Memulai eksekusi Playwright.';
+        job.message = 'Seluruh Business Flow disetujui. Memulai eksekusi flow.';
         this.addLog(job, 'flow-builder', job.message);
         void this.persist();
         this.runFlows(job.id).catch((err) => {
@@ -254,31 +389,56 @@ export class DiscoveryService {
   }
 
   private async waitForBusinessFlowApproval(job: DiscoveryJob, signal: AbortSignal): Promise<void> {
-    if (job.businessFlowMap?.status === 'APPROVED') return;
+    if (job.reconSummary?.approvedAt || (job.businessFlowMap?.status as string) === 'APPROVED') return;
     job.status = 'WAITING_REVIEW';
-    job.phase = 'BUSINESS_FLOW_REVIEW';
-    job.progress = 88;
-    job.message = 'Business Flow Map siap direview. Eksekusi menunggu persetujuan reviewer.';
-    this.addLog(job, 'flow-builder', job.message);
-    void this.persist();
-    void this.writeWorkspaceSnapshot(job);
-    await new Promise<void>((resolve, reject) => {
-      const abort = () => {
-        signal.removeEventListener('abort', abort);
-        this.businessFlowWaiters.delete(job.id);
-        reject(new Error('Discovery dibatalkan saat menunggu review Business Flow.'));
-      };
-      signal.addEventListener('abort', abort, { once: true });
-      this.businessFlowWaiters.set(job.id, {
-        resolve: () => {
-          signal.removeEventListener('abort', abort);
-          resolve();
-        },
-        reject,
-      });
+    job.phase = 'RECON_REVIEW_WAITING_ACC';
+    job.progress = 84;
+    const summaryLabel = job.reconSummary
+      ? `${job.reconSummary.totalRoles} role, ${job.reconSummary.totalPages} halaman/layar, ${job.reconSummary.totalInteractiveFeatures} fitur/tab`
+      : 'Peta halaman & fitur';
+    job.message = `Reconnaissance selesai (${summaryLabel}). Menunggu ACC user sebelum membuat command & mengambil Long SS / Video.`;
+    this.addLog(job, 'flow-builder', `⏸️ ${job.message}`);
+
+    let resolveWaiter: (() => void) | null = null;
+    let approvedEarly = false;
+    this.businessFlowWaiters.set(job.id, {
+      resolve: () => {
+        if (resolveWaiter) {
+          resolveWaiter();
+        } else {
+          approvedEarly = true;
+        }
+      },
+      reject: (err: Error) => {
+        // no-op on manual reject
+      },
     });
+
+    try {
+      await this.persist();
+      await this.writeWorkspaceSnapshot(job);
+
+      if (!approvedEarly && !job.reconSummary?.approvedAt && (job.businessFlowMap?.status as string) !== 'APPROVED') {
+        await new Promise<void>((resolve, reject) => {
+          resolveWaiter = resolve;
+          const abort = () => {
+            signal.removeEventListener('abort', abort);
+            this.businessFlowWaiters.delete(job.id);
+            reject(new Error('Discovery dibatalkan saat menunggu ACC Reconnaissance / Business Flow.'));
+          };
+          signal.addEventListener('abort', abort, { once: true });
+          if (approvedEarly || job.reconSummary?.approvedAt || (job.businessFlowMap?.status as string) === 'APPROVED') {
+            signal.removeEventListener('abort', abort);
+            resolve();
+          }
+        });
+      }
+    } finally {
+      this.businessFlowWaiters.delete(job.id);
+    }
+
     job.status = 'RUNNING';
-    job.message = 'Business Flow Map disetujui. Melanjutkan eksekusi.';
+    job.message = 'ACC diterima. Memulai pembuatan command plan dan Batch 1 Long Screenshot.';
     this.addLog(job, 'flow-builder', job.message);
   }
 
@@ -313,7 +473,7 @@ export class DiscoveryService {
       appName: metadata?.appName,
       versionName: metadata?.versionName
     };
-    this.uploads.set(id, item as any);
+    this.uploads.set(id, item);
     void this.persist();
     return {
       id,
@@ -324,6 +484,15 @@ export class DiscoveryService {
       appName: metadata?.appName,
       versionName: metadata?.versionName
     };
+  }
+
+  public updateUploadMetadata(id: string, metadata: { packageId?: string; appName?: string; versionName?: string }): void {
+    const existing = this.uploads.get(id);
+    if (!existing) return;
+    if (metadata.packageId) existing.packageId = metadata.packageId;
+    if (metadata.appName) existing.appName = metadata.appName;
+    if (metadata.versionName) existing.versionName = metadata.versionName;
+    void this.persist();
   }
 
   public getUpload(id: string) {
@@ -370,8 +539,10 @@ export class DiscoveryService {
     const phase = job.phase || '';
     const hasInventory = Boolean(job.inventory);
     const hasFlows = (job.flows?.length ?? 0) > 0;
-    const hasResults = (job.results?.length ?? 0) > 0;
+    const hasPhase1Media = (job.longScreenshots?.length ?? 0) > 0 || (job.roleVideos?.length ?? 0) > 0;
+    const hasResults = (job.results?.length ?? 0) > 0 || hasPhase1Media;
     const hasFailedResults = job.results.some((result) => result.status !== 'PASSED');
+    const hasCoverageGaps = (job.coverageGaps?.length ?? 0) > 0;
     const isFailed = job.status === 'FAILED' || hasFailedResults;
     const qualityRunning = active && /QUALITY/i.test(phase);
     const qualityFailed = job.qualityAudit?.status === 'FAILED' || job.qualityAudit?.status === 'ERROR';
@@ -379,19 +550,20 @@ export class DiscoveryService {
     const hasQualityReport = Boolean(job.qualityAudit?.reportPath);
     const statuses = [
       { folder: '01-start-analysis', title: 'Start & Analysis', status: active && /INITIALIZING/i.test(phase) ? 'RUNNING' : job.status === 'FAILED' ? 'ATTENTION' : 'CLEAR', output: ['project.json', 'input/config.json'] },
-      { folder: '02-setup-environment', title: 'Setup Environment', status: active && /PREPAR|DATABASE|RUNTIME|BOOT|ENV|STARTING_DEMO/i.test(phase) ? 'RUNNING' : 'CLEAR', output: ['run.json'] },
-      { folder: '03-discovery-inventory', title: 'Discovery & Inventory', status: active && /DISCOVER|SCAN|CRAWL|INVENTORY/i.test(phase) ? 'RUNNING' : hasInventory ? 'CLEAR' : 'READY', output: hasInventory ? ['application-inventory.json', 'capability-profile.json', 'crud-plan.json', 'role-action-plan.json', 'feature-contract-plan.json'] : [] },
-      { folder: '04-test-design', title: 'Test Design', status: active && /FLOW|DESIGN|REVIEW/i.test(phase) ? 'RUNNING' : hasFlows ? 'CLEAR' : 'READY', output: hasFlows ? ['generated flows', ...(job.businessFlowMap ? ['business-flow-map.json'] : [])] : [] },
-      { folder: '05-execution', title: 'Execution', status: active && /RUN|EXECUTE|PLAYWRIGHT|MAESTRO/i.test(phase) ? 'RUNNING' : hasResults ? (isFailed ? 'ATTENTION' : 'CLEAR') : 'READY', output: hasResults ? ['runtime-artifacts', 'results'] : [] },
+      { folder: '02-setup-environment', title: 'Setup Environment', status: active && /PREPAR|DATABASE|RUNTIME|BOOT|ENV|PROVISION|STARTING_DEMO/i.test(phase) ? 'RUNNING' : 'CLEAR', output: ['run.json'] },
+      { folder: '03-discovery-inventory', title: 'Discovery & Inventory', status: active && /DISCOVER|SCAN|CRAWL|INVENTORY/i.test(phase) && !/WAITING_ACC/i.test(phase) ? 'RUNNING' : hasInventory ? 'CLEAR' : 'READY', output: hasInventory ? ['application-inventory.json', 'capability-profile.json', 'crud-plan.json', 'role-action-plan.json', 'feature-contract-plan.json'] : [] },
+      { folder: '04-test-design', title: 'Test Design & Recon Gate', status: active && /FLOW|DESIGN|REVIEW|WAITING_ACC|GENERATING_COMMANDS/i.test(phase) ? 'RUNNING' : (hasFlows || job.reconSummary?.approvedAt) ? 'CLEAR' : 'READY', output: hasFlows ? ['generated flows', ...(job.businessFlowMap ? ['business-flow-map.json'] : []), ...(job.reconSummary ? ['recon-summary.json'] : [])] : [] },
+      { folder: '05-execution', title: 'Capture Execution (Long SS & Video)', status: active && /RUN|EXECUTE|PLAYWRIGHT|MAESTRO|CAPTURING_LONG_SCREENSHOTS|RECORDING_ROLE_VIDEOS|DIAGNOSING_GAPS/i.test(phase) ? 'RUNNING' : hasResults ? (isFailed ? 'ATTENTION' : 'CLEAR') : 'READY', output: hasResults ? ['runtime-artifacts', 'results'] : [] },
       { folder: '06-responsive-ui', title: 'Responsive & UI Quality', status: qualityRunning ? 'RUNNING' : qualityFailed || qualityLimited ? 'ATTENTION' : job.qualityAudit?.status === 'PASSED' ? 'CLEAR' : 'READY', output: hasQualityReport ? ['quality/report.json', 'quality/screenshots'] : [] },
-      { folder: '07-evidence-retest', title: 'Evidence & Retest', status: hasQualityReport || hasResults ? (isFailed || qualityFailed || qualityLimited ? 'RETEST' : 'CLEAR') : 'READY', output: ['evidence/screenshots', 'evidence/videos', 'evidence/reports'] },
-      { folder: '08-final-report', title: 'Defect & Final Report', status: job.finishedAt ? (isFailed || qualityFailed || qualityLimited ? 'ATTENTION' : 'CLEAR') : 'READY', output: ['final-report'] }
+      { folder: '07-evidence-retest', title: 'Evidence & Coverage Gaps', status: hasQualityReport || hasResults ? (isFailed || hasCoverageGaps || qualityFailed || qualityLimited ? 'RETEST' : 'CLEAR') : 'READY', output: ['evidence/screenshots', 'evidence/videos', 'evidence/reports'] },
+      { folder: '08-final-report', title: 'Defect & Final Report', status: job.finishedAt ? (isFailed || hasCoverageGaps || qualityFailed || qualityLimited ? 'ATTENTION' : 'CLEAR') : 'READY', output: ['final-report', ...(hasCoverageGaps ? ['coverage-gaps.json'] : [])] }
     ];
     await mkdir(runRoot, { recursive: true });
     await writeFile(path.join(runRoot, 'timeline.json'), JSON.stringify(job.logs, null, 2), 'utf8');
     await writeFile(path.join(runRoot, 'progress.json'), JSON.stringify({ jobId: job.id, status: job.status, phase: job.phase, progress: job.progress, updatedAt: new Date().toISOString() }, null, 2), 'utf8');
     await writeFile(path.join(runRoot, 'manifest.json'), JSON.stringify({ project: job.name, workspace: job.workspace, generatedAt: new Date().toISOString(), milestones: statuses, branches: job.message ? [{ status: job.status, message: job.message }] : [] }, null, 2), 'utf8');
     for (const milestone of statuses) {
+      await mkdir(path.join(milestoneRoot, milestone.folder), { recursive: true });
       await writeFile(path.join(milestoneRoot, milestone.folder, 'status.json'), JSON.stringify({ id: milestone.folder, title: milestone.title, status: milestone.status, output: milestone.output, updatedAt: new Date().toISOString() }, null, 2), 'utf8');
     }
     await writeFile(path.join(milestoneRoot, '03-discovery-inventory', 'job.json'), JSON.stringify({ inventory: job.inventory ?? null }, null, 2), 'utf8');
@@ -405,19 +577,52 @@ export class DiscoveryService {
     if (job.businessFlowMap) {
       await writeFile(path.join(milestoneRoot, '04-test-design', 'business-flow-map.json'), JSON.stringify(job.businessFlowMap, null, 2), 'utf8');
     }
+    if (job.reconSummary) {
+      await writeFile(path.join(milestoneRoot, '04-test-design', 'recon-summary.json'), JSON.stringify(job.reconSummary, null, 2), 'utf8');
+    }
     await writeFile(path.join(milestoneRoot, '04-test-design', 'flows.json'), JSON.stringify(job.flows ?? [], null, 2), 'utf8');
     await writeFile(path.join(milestoneRoot, '05-execution', 'results.json'), JSON.stringify(job.results ?? [], null, 2), 'utf8');
+    if (job.coverageGaps) {
+      await mkdir(path.join(runRoot, 'findings'), { recursive: true });
+      await writeFile(path.join(runRoot, 'findings', 'coverage-gaps.json'), JSON.stringify(job.coverageGaps, null, 2), 'utf8');
+      await writeFile(path.join(milestoneRoot, '08-final-report', 'coverage-gaps.json'), JSON.stringify(job.coverageGaps, null, 2), 'utf8');
+    }
     if (job.status === 'COMPLETED' || job.status === 'FAILED' || job.status === 'CANCELLED' || hasResults) {
       const runtimeSource = path.join(this.artifactRoot, 'jobs', job.id);
       const runtimeTarget = path.join(runRoot, 'runtime-artifacts');
       try { await this.copyTree(runtimeSource, runtimeTarget); } catch { /* Runtime artifacts are optional. */ }
 
-      // Sinkronkan semua screenshot dan video eksekusi flow ke folder evidence proyek
+      const evidenceScreenshotsTarget = path.join(runRoot, 'evidence', 'screenshots');
+      const evidenceVideosTarget = path.join(runRoot, 'evidence', 'videos');
+      const evidenceReportsTarget = path.join(runRoot, 'evidence', 'reports');
+      const finalReportTarget = path.join(runRoot, 'final-report');
+      await mkdir(evidenceScreenshotsTarget, { recursive: true });
+      await mkdir(evidenceVideosTarget, { recursive: true });
+      await mkdir(evidenceReportsTarget, { recursive: true });
+      await mkdir(finalReportTarget, { recursive: true });
+
+      // Sync Phase-1 Batch 1 long screenshots
+      for (const ss of job.longScreenshots || []) {
+        if (ss.status === 'CAPTURED' && ss.path && existsSync(ss.path)) {
+          await copyFile(ss.path, path.join(evidenceScreenshotsTarget, ss.filename)).catch(() => {});
+        }
+      }
+      // Sync Phase-1 Batch 2 per-role videos
+      for (const vid of job.roleVideos || []) {
+        if (vid.status === 'RECORDED' && vid.path && existsSync(vid.path)) {
+          await copyFile(vid.path, path.join(evidenceVideosTarget, vid.filename)).catch(() => {});
+        }
+      }
+      // Copy generated reports into workspace final-report & evidence/reports
+      for (const reportFile of ['application-report.json', 'application-report.html', 'application-report.pdf']) {
+        const srcReport = path.join(runtimeSource, reportFile);
+        if (existsSync(srcReport)) {
+          await copyFile(srcReport, path.join(finalReportTarget, reportFile)).catch(() => {});
+          await copyFile(srcReport, path.join(evidenceReportsTarget, reportFile)).catch(() => {});
+        }
+      }
+
       if (job.results && job.results.length > 0) {
-        const evidenceScreenshotsTarget = path.join(runRoot, 'evidence', 'screenshots');
-        const evidenceVideosTarget = path.join(runRoot, 'evidence', 'videos');
-        await mkdir(evidenceScreenshotsTarget, { recursive: true });
-        await mkdir(evidenceVideosTarget, { recursive: true });
         for (const res of job.results) {
           for (const art of res.artifacts || []) {
             if (art.type === 'screenshot' && art.path && existsSync(art.path)) {
@@ -484,6 +689,11 @@ export class DiscoveryService {
       controller.abort();
       this.abortControllers.delete(id);
     }
+    const pendingWaiter = this.businessFlowWaiters.get(id);
+    if (pendingWaiter) {
+      this.businessFlowWaiters.delete(id);
+      pendingWaiter.reject(new Error('Discovery job dibatalkan oleh pengguna.'));
+    }
     if (job.status === 'RUNNING' || job.status === 'QUEUED' || job.status === 'WAITING_REVIEW') {
       job.status = 'CANCELLED';
       job.finishedAt = new Date().toISOString();
@@ -492,6 +702,7 @@ export class DiscoveryService {
       this.addLog(job, 'system', 'Job dibatalkan oleh user');
     }
     if (job.config.platform === 'android') {
+      setEmulatorReviewHold(false);
       notifyAndroidJobFinished();
       const hasOther = Array.from(this.jobs.values()).some(
         (j) => j.id !== id && ['RUNNING', 'QUEUED'].includes(j.status) && j.config.platform === 'android'
@@ -500,6 +711,7 @@ export class DiscoveryService {
         stopAllManagedEmulators().catch(() => {});
       }
     }
+    void this.persist();
     return true;
   }
 
@@ -638,7 +850,7 @@ export class DiscoveryService {
             const runResult = await executeAndroidRawFlow(
               flowItem.source,
               flowItem.name,
-              job.config.appId || 'com.sopan.digital',
+              job.config.appId || job.config.apkPackageId || '',
               runId,
               jobArtifactDir,
               job.config.deviceId,
@@ -653,7 +865,7 @@ export class DiscoveryService {
               finishedAt: new Date().toISOString()
             });
 
-            // Sinkronkan screenshot Android flow ke inventory pages & screenshot directory
+            // Sinkronkan screenshot Android flow secara generik (tanpa hardcode ID aplikasi tertentu)
             if (job.inventory?.pages && runResult.artifacts) {
               const jobScreenshotsDir = path.join(jobArtifactDir, 'screenshots');
               await mkdir(jobScreenshotsDir, { recursive: true });
@@ -665,17 +877,8 @@ export class DiscoveryService {
 
                   const low = baseName.toLowerCase();
                   for (const page of job.inventory.pages) {
-                    if (
-                      (low.includes('launch') && page.id === 'android-login') ||
-                      ((low.includes('beranda') || low.includes('dashboard') || low.includes('home')) && page.id === 'android-beranda') ||
-                      (low.includes('absensi') && !low.includes('izin') && page.id === 'android-absensi') ||
-                      (low.includes('izin') && page.id === 'android-izin-form') ||
-                      ((low.includes('keuangan-loaded') || low.includes('tab-keuangan') || low.includes('keuangan-restored')) && page.id === 'android-keuangan') ||
-                      ((low.includes('struk') || low.includes('pembayaran') || low.includes('tagihan')) && page.id === 'android-pembayaran') ||
-                      ((low.includes('informasi') || low.includes('berita') || low.includes('kedisiplinan')) && page.id === 'android-informasi') ||
-                      (low.includes('t2q') && page.id === 'android-t2q') ||
-                      (low.includes('amal') && page.id === 'android-amal-harian')
-                    ) {
+                    const slug = page.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+                    if (slug && low.includes(slug) && !page.screenshot) {
                       page.screenshot = `screenshots/${baseName}`;
                       page.state = 'observed';
                     }
@@ -710,9 +913,11 @@ export class DiscoveryService {
           continue;
         }
         const normalized = validation.normalized;
+        const runtimeCred = this.getPrimaryRuntimeCredential(id);
         const runtimeAccount = job.config.accounts?.[0];
-        const effectivePassword = runtimePassword || this.runtimeAuditPasswords.get(id) || (runtimeAccount as any)?.password || 'password';
-        const effectiveEmail = runtimeAccount?.email || 'admin@zannora.com';
+        if (runtimePassword) this.registerSecret(id, runtimePassword);
+        const effectivePassword = runtimePassword || runtimeCred?.password || '';
+        const effectiveEmail = runtimeCred?.identifier || runtimeAccount?.email || '';
         const executableFlow = {
           ...normalized,
           ...(normalized.target.platform === 'web' ? {
@@ -808,8 +1013,10 @@ export class DiscoveryService {
       }
     }
 
-    // Update and save application-report.html & application-report.pdf
+    // Update and save application-report.json, application-report.html & application-report.pdf
     try {
+      const jsonReport = buildJsonReport(job);
+      await writeFile(path.join(jobArtifactDir, 'application-report.json'), JSON.stringify(jsonReport, null, 2), 'utf8');
       const reportHtml = buildReport(job, `/api/v1/discovery/jobs/${job.id}/artifacts/`);
       await writeFile(path.join(jobArtifactDir, 'application-report.html'), reportHtml, 'utf8');
       const pdfBuffer = await generatePdfReport(job, this.artifactRoot);
@@ -831,6 +1038,29 @@ export class DiscoveryService {
     return job;
   }
 
+  private seedRuntimeAccounts(
+    jobId: string,
+    accounts: Array<{ name?: string; email: string; password?: string; role?: string }> = []
+  ): void {
+    const roleMap = new Map<string, RuntimeRoleCredential>();
+    for (const acc of accounts) {
+      if (!acc.email?.trim() || !acc.password?.trim()) continue;
+      const role = (acc.role || 'user').trim().toLowerCase();
+      this.registerSecret(jobId, acc.password);
+      roleMap.set(role, {
+        role,
+        name: acc.name?.trim() || `Account ${role}`,
+        identifier: acc.email.trim(),
+        identifierField: 'email',
+        password: acc.password,
+        loginPath: '/login',
+        source: 'manual',
+        verified: false,
+      });
+    }
+    this.runtimeRoleCredentials.set(jobId, roleMap);
+  }
+
   public async createJob(config: DiscoveryConfig): Promise<DiscoveryJob> {
     const activeProjects = Array.from(this.jobs.values()).filter((job) => ['QUEUED', 'RUNNING', 'WAITING_REVIEW'].includes(job.status));
     const policy = runtimePolicy();
@@ -846,7 +1076,6 @@ export class DiscoveryService {
       email: a.email,
       role: a.role
     }));
-    const auditPassword = (config.accounts ?? []).find((account) => account.password?.trim())?.password;
 
     const job: DiscoveryJob = {
       id,
@@ -866,7 +1095,7 @@ export class DiscoveryService {
 
     await this.prepareWorkspace(job, config);
     this.jobs.set(id, job);
-    if (auditPassword) this.runtimeAuditPasswords.set(id, auditPassword);
+    this.seedRuntimeAccounts(id, config.accounts);
     void this.persist();
     this.addLog(job, 'system', `Job ${config.name} (${config.runMode}) dibuat.`);
 
@@ -902,14 +1131,21 @@ export class DiscoveryService {
       oldController.abort();
       this.abortControllers.delete(id);
     }
+    const staleWaiter = this.businessFlowWaiters.get(id);
+    if (staleWaiter) {
+      this.businessFlowWaiters.delete(id);
+      staleWaiter.reject(new Error('Job diperbarui sebelum disetujui.'));
+    }
+    if (job.config.platform === 'android' && job.status === 'WAITING_REVIEW') {
+      setEmulatorReviewHold(false);
+    }
 
     const safeAccounts = (newConfig.accounts ?? []).map(a => ({
       name: a.name,
       email: a.email,
       role: a.role
     }));
-    const auditPassword = (newConfig.accounts ?? []).find((account) => account.password?.trim())?.password;
-    if (auditPassword) this.runtimeAuditPasswords.set(id, auditPassword);
+    this.seedRuntimeAccounts(id, newConfig.accounts);
 
     const defaultRules = {
       maxPages: 40,
@@ -941,6 +1177,13 @@ export class DiscoveryService {
       job.finishedAt = undefined;
       job.flows = [];
       job.results = [];
+      job.envProvisioning = undefined;
+      job.provisionedAccounts = undefined;
+      job.reconSummary = undefined;
+      job.commandPlan = undefined;
+      job.longScreenshots = undefined;
+      job.roleVideos = undefined;
+      job.coverageGaps = undefined;
       job.inventory = {
         pages: [],
         routes: [],
@@ -982,6 +1225,14 @@ export class DiscoveryService {
       oldController.abort();
       this.abortControllers.delete(id);
     }
+    const staleWaiter = this.businessFlowWaiters.get(id);
+    if (staleWaiter) {
+      this.businessFlowWaiters.delete(id);
+      staleWaiter.reject(new Error('Job di-restart ulang.'));
+    }
+    if (job.config.platform === 'android' && job.status === 'WAITING_REVIEW') {
+      setEmulatorReviewHold(false);
+    }
 
     job.status = 'QUEUED';
     job.phase = 'PREPARING';
@@ -990,6 +1241,13 @@ export class DiscoveryService {
     job.finishedAt = undefined;
     job.flows = [];
     job.results = [];
+    job.envProvisioning = undefined;
+    job.provisionedAccounts = undefined;
+    job.reconSummary = undefined;
+    job.commandPlan = undefined;
+    job.longScreenshots = undefined;
+    job.roleVideos = undefined;
+    job.coverageGaps = undefined;
     job.inventory = {
       pages: [],
       routes: [],
@@ -1020,7 +1278,14 @@ export class DiscoveryService {
     this.abortControllers.set(id, abortController);
 
     setImmediate(() => {
-      this.executeDiscovery(job, job.config as any, abortController.signal).catch((err) => {
+      const runtimeAccounts: DiscoveryConfig['accounts'] = [];
+      const existingRoleMap = this.runtimeRoleCredentials.get(id);
+      for (const acc of job.config.accounts ?? []) {
+        const runtime = existingRoleMap?.get((acc.role || 'user').trim().toLowerCase());
+        runtimeAccounts.push({ ...acc, password: runtime?.password || '' });
+      }
+      const fullConfig = { ...job.config, accounts: runtimeAccounts } as DiscoveryConfig;
+      this.executeDiscovery(job, fullConfig, abortController.signal).catch((err) => {
         if (abortController.signal.aborted) return;
         job.status = 'FAILED';
         job.phase = 'FAILED';
@@ -1043,13 +1308,34 @@ export class DiscoveryService {
     if (!job) throw new Error('Job tidak ditemukan.');
     if (job.status === 'RUNNING' || job.status === 'QUEUED' || job.status === 'WAITING_REVIEW') throw new Error('Job masih berjalan. Tunggu sampai selesai sebelum memulai Quality Audit.');
     if (!password?.trim()) throw new Error('Password akun audit wajib diisi.');
-    this.runtimeAuditPasswords.set(id, password);
+    this.registerSecret(id, password);
+    const existingRoles = this.runtimeRoleCredentials.get(id) ?? new Map<string, RuntimeRoleCredential>();
+    if (existingRoles.size === 0) {
+      const fallbackEmail = job.config.accounts?.[0]?.email || job.provisionedAccounts?.[0]?.identifier || '';
+      const fallbackRole = (job.config.accounts?.[0]?.role || job.provisionedAccounts?.[0]?.role || 'admin').toLowerCase();
+      existingRoles.set(fallbackRole, {
+        role: fallbackRole,
+        name: `Audit ${fallbackRole}`,
+        identifier: fallbackEmail,
+        identifierField: 'email',
+        password,
+        loginPath: job.config.rules?.loginPath || '/login',
+        source: 'manual',
+        verified: false,
+      });
+    } else {
+      for (const cred of existingRoles.values()) {
+        cred.password = password;
+      }
+    }
+    this.runtimeRoleCredentials.set(id, existingRoles);
     if (job.config.platform !== 'web') throw new Error('Quality Audit DOM hanya tersedia untuk target web.');
 
     const controller = new AbortController();
     this.abortControllers.set(id, controller);
     const config = {
       ...job.config,
+      qualityAudit: { ...(job.config.qualityAudit ?? {}), enabled: true },
       accounts: (job.config.accounts ?? []).map((account) => ({ ...account, password })),
     } as unknown as DiscoveryConfig;
     job.status = 'RUNNING';
@@ -1082,7 +1368,7 @@ export class DiscoveryService {
     const entry = {
       time: new Date().toISOString(),
       category,
-      message
+      message: this.scrubForJob(job.id, message)
     };
     job.logs.push(entry);
     if (job.logs.length > 2000) job.logs.shift();
@@ -1117,7 +1403,7 @@ export class DiscoveryService {
     const browsers = (source.browsers ?? ['chromium', 'firefox', 'webkit']).filter((item): item is QualityAuditBrowser => ['chromium', 'firefox', 'webkit'].includes(item));
     const viewports = (source.viewports ?? ['desktop', 'tablet', 'mobile']).filter((item): item is QualityAuditViewport => ['desktop', 'tablet', 'mobile'].includes(item));
     return {
-      enabled: source.enabled !== false,
+      enabled: source.enabled === true,
       browsers: browsers.length ? browsers : ['chromium'],
       viewports: viewports.length ? viewports : ['desktop'],
       maxRoutes: Math.min(1000, Math.max(0, Number(source.maxRoutes) || 0)),
@@ -1189,10 +1475,12 @@ export class DiscoveryService {
       return;
     }
 
-    const password = config.accounts.find((account) => Boolean(account.password?.trim()))?.password || this.runtimeAuditPasswords.get(job.id) || 'password123';
+    const password = config.accounts.find((account) => Boolean(account.password?.trim()))?.password
+      || this.getPrimaryRuntimeCredential(job.id)?.password
+      || '';
     if (!password) {
       job.qualityAudit.status = 'ERROR';
-      job.qualityAudit.message = 'Password akun audit belum tersedia. Isi ulang akun tester lalu jalankan ulang.';
+      job.qualityAudit.message = 'Password akun audit belum tersedia di sesi runtime. Isi akun tester atau jalankan ulang provisioning.';
       job.qualityAudit.finishedAt = new Date().toISOString();
       this.addLog(job, 'quality', `Quality Audit berhenti: ${job.qualityAudit.message}`);
       return;
@@ -1390,9 +1678,117 @@ export class DiscoveryService {
     }
   }
 
+  private buildPhase1ReconSummary(
+    platform: 'web' | 'android',
+    observedPages: InventoryPage[],
+    credentials: RuntimeRoleCredential[]
+  ): Phase1ReconSummary {
+    const roleMap = new Map<string, {
+      pages: Set<string>;
+      features: number;
+      verified: boolean;
+    }>();
+
+    for (const cred of credentials) {
+      const r = cred.role || 'user';
+      if (!roleMap.has(r)) {
+        roleMap.set(r, { pages: new Set<string>(), features: 0, verified: cred.verified });
+      }
+    }
+
+    for (const page of observedPages) {
+      if (/\/api(?:\/|$)/i.test(page.path)) continue;
+      if (page.state === 'blocked' || page.state === 'error') continue;
+      const role = page.role || (credentials[0]?.role || 'public');
+      let entry = roleMap.get(role);
+      if (!entry) {
+        const cred = credentials.find((c) => c.role === role);
+        entry = { pages: new Set<string>(), features: 0, verified: cred ? cred.verified : role === 'public' };
+        roleMap.set(role, entry);
+      }
+      const key = (page.resolvedConcretePath || page.path).toLowerCase();
+      if (!entry.pages.has(key)) {
+        entry.pages.add(key);
+        entry.features += page.interactiveFeatures?.length ?? 0;
+      }
+    }
+
+    const roles = Array.from(roleMap.entries()).map(([role, info]) => ({
+      role,
+      pagesCount: info.pages.size,
+      interactiveFeaturesCount: info.features,
+      accountVerified: info.verified,
+    }));
+
+    return {
+      discoveredAt: new Date().toISOString(),
+      platform,
+      totalRoles: roles.length,
+      totalPages: roles.reduce((sum, r) => sum + r.pagesCount, 0),
+      totalInteractiveFeatures: roles.reduce((sum, r) => sum + r.interactiveFeaturesCount, 0),
+      roles,
+    };
+  }
+
+  private async deduplicateAndDiagnoseGaps(rawGaps: CoverageGapItem[]): Promise<CoverageGapItem[]> {
+    const byKey = new Map<string, CoverageGapItem>();
+    for (const gap of rawGaps) {
+      const key = `${gap.role}::${gap.pagePath}::${gap.phaseFailed}`;
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, {
+          ...gap,
+          failedApiCalls: gap.failedApiCalls ? [...gap.failedApiCalls] : undefined,
+          consoleOrDeviceErrors: gap.consoleOrDeviceErrors ? [...gap.consoleOrDeviceErrors] : undefined,
+        });
+      } else {
+        if (gap.errorScreenshotUrl && !existing.errorScreenshotUrl) {
+          existing.errorScreenshotUrl = gap.errorScreenshotUrl;
+        }
+        if (gap.failedApiCalls?.length) {
+          existing.failedApiCalls = [...(existing.failedApiCalls || []), ...gap.failedApiCalls].slice(0, 8);
+        }
+        if (gap.consoleOrDeviceErrors?.length) {
+          existing.consoleOrDeviceErrors = [...new Set([...(existing.consoleOrDeviceErrors || []), ...gap.consoleOrDeviceErrors])].slice(0, 8);
+        }
+      }
+    }
+
+    const deduped = [...byKey.values()];
+    if (deduped.length > 0) {
+      const diagnosed = await GeminiService.diagnoseCoverageGaps(deduped).catch(() => ({} as Record<string, CoverageGapItem['aiDiagnosis']>));
+      for (const gap of deduped) {
+        const diag = diagnosed?.[gap.id];
+        if (diag) gap.aiDiagnosis = diag;
+      }
+    }
+    return deduped;
+  }
+
+  private async writePhase1Reports(job: DiscoveryJob, jobArtifactDir: string): Promise<void> {
+    try {
+      const jsonReport = buildJsonReport(job);
+      await writeFile(path.join(jobArtifactDir, 'application-report.json'), JSON.stringify(jsonReport, null, 2), 'utf8');
+    } catch (err) {
+      this.addLog(job, 'report', `Peringatan JSON report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      const reportHtml = buildReport(job, `/api/v1/discovery/jobs/${job.id}/artifacts/`);
+      await writeFile(path.join(jobArtifactDir, 'application-report.html'), reportHtml, 'utf8');
+    } catch (err) {
+      this.addLog(job, 'report', `Peringatan HTML report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      const pdfBuffer = await generatePdfReport(job, this.artifactRoot);
+      await writeFile(path.join(jobArtifactDir, 'application-report.pdf'), pdfBuffer);
+    } catch (err) {
+      this.addLog(job, 'report', `Peringatan PDF report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   private async executeDiscovery(job: DiscoveryJob, config: DiscoveryConfig, signal: AbortSignal): Promise<void> {
     const isMobile = config.platform === 'android';
-    const platformLabel = isMobile ? '📱 Mobile / Android' : '🌐 Web Application';
+    const platformLabel = isMobile ? 'Mobile / Android' : 'Web Application';
 
     job.status = 'RUNNING';
     job.phase = 'INITIALIZING';
@@ -1408,272 +1804,349 @@ export class DiscoveryService {
     let managedRuntimeRelease: (() => void | Promise<void>) | undefined;
     let managedRuntimePromise: Promise<unknown> | undefined;
     let managedSourceDir = '';
+    let managedBackendContainer: { name: string; workdir: string } | undefined;
     let targetBaseUrl = config.baseUrl;
-    let detectedLocalPath: string | undefined;
+    let activeSerial = '';
+    let androidJobStarted = false;
+    let holdingEmulatorReview = false;
+    const phase1Gaps: CoverageGapItem[] = [];
 
-    // Generic auto-discovery of local source repository for any project
-    const repoName = config.repositoryUrl?.split('/').pop()?.replace(/\.git$/, '') || '';
-    const nameSlug = config.name?.toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-') || '';
-    const candidateLocalDirs: string[] = [
-      config.localPath,
-      repoName ? path.join('E:', 'projek', repoName) : '',
-      repoName ? path.join('C:', 'xampp', 'htdocs', repoName) : '',
-      repoName ? path.join('D:', 'projek', repoName) : '',
-      repoName ? path.resolve(this.projectRoot, '..', repoName) : '',
-      repoName ? path.join('E:', 'projek', 'jamaahku_website', 'jamaahku_frontend', repoName) : '',
-      repoName ? path.join('E:', 'projek', 'jamaahku_website', repoName) : '',
-      nameSlug ? path.join('E:', 'projek', nameSlug) : '',
-      nameSlug ? path.join('C:', 'xampp', 'htdocs', nameSlug) : '',
-    ].filter(Boolean) as string[];
-
-    for (const cand of candidateLocalDirs) {
-      try {
-        const st = await lstat(cand);
-        if (st.isDirectory()) {
-          detectedLocalPath = cand;
-          break;
-        }
-      } catch { /* continue */ }
+    if (!this.jobSecrets.has(job.id)) {
+      this.jobSecrets.set(job.id, new Set<string>());
+    }
+    const jobSecretSet = this.jobSecrets.get(job.id)!;
+    for (const acc of config.accounts ?? []) {
+      if (acc.password?.trim()) this.registerSecret(job.id, acc.password);
     }
 
-    // If still not found and repoName exists, scan top-level subdirectories of 'E:\projek' and 'C:\xampp\htdocs'
-    if (!detectedLocalPath && repoName) {
-      const searchBases = [path.join('E:', 'projek'), path.join('C:', 'xampp', 'htdocs')];
-      for (const base of searchBases) {
-        try {
-          const entries = await readdir(base, { withFileTypes: true });
-          for (const entry of entries) {
-            if (entry.isDirectory()) {
-              if (entry.name.toLowerCase() === repoName.toLowerCase()) {
-                detectedLocalPath = path.join(base, entry.name);
-                break;
-              }
-              // Check 1-2 levels deeper (e.g. umbrella repos)
-              try {
-                const subEntries = await readdir(path.join(base, entry.name), { withFileTypes: true });
-                for (const sub of subEntries) {
-                  if (sub.isDirectory() && sub.name.toLowerCase() === repoName.toLowerCase()) {
-                    detectedLocalPath = path.join(base, entry.name, sub.name);
-                    break;
-                  }
-                  if (sub.isDirectory() && (sub.name.includes('front') || sub.name.includes('app') || sub.name.includes('web'))) {
-                    try {
-                      const deepEntries = await readdir(path.join(base, entry.name, sub.name), { withFileTypes: true });
-                      for (const deep of deepEntries) {
-                        if (deep.isDirectory() && deep.name.toLowerCase() === repoName.toLowerCase()) {
-                          detectedLocalPath = path.join(base, entry.name, sub.name, deep.name);
-                          break;
-                        }
-                      }
-                    } catch { /* continue */ }
-                  }
-                  if (detectedLocalPath) break;
-                }
-              } catch { /* continue */ }
-            }
-            if (detectedLocalPath) break;
+    // Materialize uploaded .env file if supplied so project-runner accepts it cleanly
+    let uploadedEnvFilePath: string | undefined;
+    if (config.envUploadId) {
+      const envUpload = this.uploads.get(config.envUploadId);
+      if (envUpload?.content) {
+        const destEnv = path.join(jobArtifactDir, '.env.uploaded');
+        await writeFile(destEnv, envUpload.content, 'utf8');
+        uploadedEnvFilePath = destEnv;
+        for (const line of envUpload.content.split(/\r?\n/)) {
+          const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$/);
+          if (m && /key|secret|password|token/i.test(m[1]) && m[2].length >= 4) {
+            this.registerSecret(job.id, m[2].replace(/^["']|["']$/g, ''));
           }
-        } catch { /* continue */ }
-        if (detectedLocalPath) break;
+        }
       }
     }
 
-    if (detectedLocalPath && config.sourceType !== 'local-folder') {
-      config.sourceType = 'local-folder';
-      config.localPath = detectedLocalPath;
-      this.addLog(job, 'runtime', `✓ [SUMBER LOKAL] Repositori ditemukan di komputer lokal: ${detectedLocalPath}. Memakai folder lokal langsung (tanpa clone GitHub).`);
-    }
+    const frontendRepoUrl = config.frontendTarget?.repositoryUrl?.trim() || config.repositoryUrl?.trim() || '';
+    const frontendBranch = config.frontendTarget?.branch?.trim() || config.ref?.trim() || 'main';
+    const backendRepoUrl = config.backendTarget?.repositoryUrl?.trim() || '';
+    const backendBranch = config.backendTarget?.branch?.trim() || frontendBranch;
+    const mobileRepoUrl =
+      config.mobileTarget?.repositoryUrl?.trim() ||
+      (isMobile && config.mobileTarget?.sameRepoAsFrontend !== false ? (frontendRepoUrl || undefined) : undefined);
+    const mobileBranch = config.mobileTarget?.branch?.trim() || frontendBranch;
+    const configuredBackendUrl = config.backendUrl?.trim() || config.backendTarget?.url?.trim() || '';
 
     try {
       signal.throwIfAborted();
 
-      // 1. Runtime & Test Data Preparation
+      // 1. Runtime, Dual-Repo Sandbox & .env Provisioning
+      const hasGitHubTarget =
+        config.sourceType === 'github' ||
+        config.frontendTarget?.mode === 'server' ||
+        config.backendTarget?.mode === 'server' ||
+        config.mobileTarget?.mode === 'server' ||
+        Boolean(frontendRepoUrl || backendRepoUrl || mobileRepoUrl);
+
       if (config.runMode === 'demo') {
         job.phase = 'STARTING_DEMO_APP';
         job.progress = 15;
         this.addLog(job, 'system', '▶ [Stage 1/6] Menyiapkan server aplikasi demo...');
-        this.addLog(job, 'system', 'Menjalankan dev server lokal untuk mode demo...');
         targetBaseUrl = await this.ensureDemoServer();
         this.addLog(job, 'system', `✓ Server demo aktif di ${targetBaseUrl}`);
       } else if (config.runMode === 'managed-local') {
         job.phase = 'PREPARING_RUNTIME';
         job.progress = 10;
-        this.addLog(job, 'runtime', `▶ [Stage 1/6] Menyiapkan runtime managed-local (stack: ${config.stack})...`);
-        this.addLog(job, 'runtime', `Target URL yang dikonfigurasi: ${config.baseUrl}`);
+        this.addLog(job, 'runtime', `▶ [Stage 1/6] Menyiapkan runtime sandbox (platform: ${config.platform}, stack: ${config.stack})...`);
 
-        let targetAlreadyRunning = false;
-        const testUrls = [
-          config.baseUrl,
-          config.baseUrl.includes('localhost') ? config.baseUrl.replace('localhost', '127.0.0.1') : config.baseUrl.replace('127.0.0.1', 'localhost'),
-        ];
-        for (const u of new Set(testUrls)) {
-          try {
-            const res = await fetch(u, { signal: AbortSignal.timeout(3500) });
-            if (res.ok || res.status < 500) {
-              targetAlreadyRunning = true;
-              targetBaseUrl = u;
-              job.config.baseUrl = u;
-              this.addLog(job, 'runtime', `✓ Target port ${u} aktif. Memakai service yang sedang berjalan.`);
-              break;
-            }
-          } catch { /* continue */ }
-        }
+        const effectiveSourceType: 'local-folder' | 'github' =
+          config.sourceType === 'local-folder' || (!hasGitHubTarget && config.localPath?.trim())
+            ? 'local-folder'
+            : 'github';
 
-        if (!targetAlreadyRunning) {
-          this.addLog(job, 'runtime', `Target port ${config.baseUrl} belum aktif. Mempersiapkan runtime source dari repository...`);
-        }
-        if (!targetAlreadyRunning) {
-        const sourceType = config.sourceType ?? (config.localPath || (config.repositoryUrl && !config.repositoryUrl.startsWith('http')) ? 'local-folder' : 'github');
-        let releaseRuntime!: () => void;
-        let resolveReady!: () => void;
-        let rejectReady!: (error: unknown) => void;
-        const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
-        const hold = new Promise<void>((resolve) => { releaseRuntime = resolve; });
-        const runtimeFlow = {
-          schemaVersion: '1.0',
-          version: '1.0',
-          name: `managed-runtime-${job.id}`,
-          target: { platform: 'web', baseUrl: config.baseUrl },
-          steps: [],
-          cleanup: []
-        } as unknown as NormalizedFlow;
-        const managedProject: ManagedProject = {
-          sourceType: sourceType === 'local-folder' ? 'local-folder' : 'github',
-          sourcePath: sourceType === 'local-folder' ? (config.localPath || config.repositoryUrl) : undefined,
-          repositoryUrl: sourceType === 'github' ? config.repositoryUrl : undefined,
-          ref: config.ref || 'main',
-          baseUrl: config.baseUrl,
-          environment: 'local',
-          stack: config.stack,
-          retainClone: sourceType === 'github',
-          services: config.services
-        };
-        const runtimeAbort = () => releaseRuntime();
-        signal.addEventListener('abort', runtimeAbort, { once: true });
-        managedRuntimePromise = runManagedProject(runtimeFlow, `discovery-${job.id}`, managedProject, this.artifactRoot, this.projectRoot, {
-          signal,
-          update: (update) => {
-            if (update.phase) job.phase = update.phase;
-            if (typeof update.progress === 'number') job.progress = Math.max(job.progress, Math.min(95, update.progress));
-            if (update.services) this.addLog(job, 'runtime', `Service runtime: ${update.services.map((service) => `${service.name}=${service.status}`).join(', ')}`);
-            if (update.message) this.addLog(job, 'runtime', update.message);
-          },
-          onSource: async (sourceDir) => { managedSourceDir = sourceDir; },
-          prepare: async (runnerContext) => {
-            if (config.database.engine === 'none') return {};
-            job.phase = 'PREPARING_DATABASE';
-            job.progress = 12;
-            this.addLog(job, 'database', `▶ [Stage 2/6] Menyiapkan isolated container untuk database ${config.database.engine}...`);
-            this.addLog(job, 'database', `Sumber data: ${config.database.source}. Menginisialisasi container pada sandbox network ${runnerContext.networkName}...`);
-
-            let sqlContent: string | undefined;
-            if (config.database.source === 'sql' && config.database.sqlUploadId) {
-              const up = this.uploads.get(config.database.sqlUploadId);
-              sqlContent = up?.content;
-            }
-            if (!sqlContent) {
-              const projectSlug = (config.name || 'project').toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-');
-              const candidateSeeds = [
-                path.join(this.artifactRoot, 'projects', projectSlug, 'database', 'seed.sql'),
-                path.join(this.artifactRoot, 'projects', 'plane-cmms', 'database', 'seed.sql'),
-              ];
-              for (const cs of candidateSeeds) {
-                try {
-                  const content = await readFile(cs, 'utf8');
-                  if (content && content.trim()) {
-                    sqlContent = content;
-                    this.addLog(job, 'database', `✓ Menggunakan file seed SQL project otomatis: ${cs}`);
-                    break;
-                  }
-                } catch { /* continue */ }
-              }
-            }
-
-            const workspaceDir = path.join(jobArtifactDir, 'workspace');
-            await mkdir(workspaceDir, { recursive: true });
-
+        let skipRunnerBecauseLocalAlreadyRunning = false;
+        if (effectiveSourceType === 'local-folder' && !backendRepoUrl && !isMobile) {
+          const probeUrls = [
+            config.baseUrl,
+            config.baseUrl.includes('localhost') ? config.baseUrl.replace('localhost', '127.0.0.1') : config.baseUrl.replace('127.0.0.1', 'localhost'),
+          ];
+          for (const u of new Set(probeUrls)) {
+            if (!u) continue;
             try {
-              const db = await prepareDatabase({
-                config: config.database,
-                runId: runnerContext.runId,
-                networkName: runnerContext.networkName,
-                workspace: workspaceDir,
-                sqlContent,
-                signal,
-                log: (msg) => this.addLog(job, 'database', msg)
-              });
-              dbCleanup = db.cleanup;
-              this.addLog(job, 'database', `✓ Database isolated (${config.database.engine}) siap dan terhubung ke sandbox network.`);
-              return db.environment;
-            } catch (dbErr) {
-              this.addLog(job, 'database', `Peringatan: Bootstrap database kontainer tidak dapat diselesaikan: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}. Melanjutkan pengujian target.`);
-              return {};
-            }
-          },
-          execute: async () => {
-            resolveReady();
-            await hold;
-            return { status: 'PASSED', steps: [], artifacts: [] } as WebRunResult;
-          }
-        }).then(() => undefined).catch((error) => {
-          rejectReady(error);
-        });
-        try {
-          await ready;
-          managedRuntimeRelease = () => { releaseRuntime(); };
-          this.addLog(job, 'runtime', '✓ Frontend/backend aktif. Discovery dan browser test memakai runtime managed-local.');
-        } catch (error) {
-          managedRuntimeRelease = () => { releaseRuntime(); };
-          let fallbackOk = false;
-          try {
-            const probe = await fetch(config.baseUrl, { signal: AbortSignal.timeout(3000) });
-            if (probe.ok || probe.status < 500) {
-              fallbackOk = true;
-            }
-          } catch { /* continue */ }
-          if (fallbackOk) {
-            this.addLog(job, 'runtime', `⚠️ Sandbox Docker tidak aktif, namun aplikasi target ${config.baseUrl} sudah berjalan aktif di komputer host. Melanjutkan pengujian langsung.`);
-          } else {
-            throw error;
-          }
-        }
-        }
-      } else {
-        // Mode existing-target: test if configured URL responds or adapt to active port
-        try {
-          await fetch(config.baseUrl, { signal: AbortSignal.timeout(1500) });
-          this.addLog(job, 'runtime', `▶ [Stage 1/6] Memakai target existing aktif: ${config.baseUrl}`);
-        } catch {
-          const candidatePorts = [5000, 5001, 5173, 5174, 8000, 3000, 8080, 4173];
-          const configuredPort = Number(new URL(config.baseUrl).port);
-          let adapted = false;
-          for (const port of candidatePorts) {
-            if (port === configuredPort) continue;
-            try {
-              const testUrl = `http://127.0.0.1:${port}`;
-              const res = await fetch(testUrl, { signal: AbortSignal.timeout(1000) });
+              const res = await fetch(u, { signal: AbortSignal.timeout(3000) });
               if (res.ok || res.status < 500) {
-                this.addLog(job, 'runtime', `⚠️ [PORT ADAPTASI] Target URL ${config.baseUrl} tidak merespons, namun service aktif terdeteksi di ${testUrl}.`);
-                this.addLog(job, 'runtime', `✓ Mengalihkan target otomatis ke ${testUrl} agar pengujian dapat langsung berjalan.`);
-                config.baseUrl = testUrl;
-                targetBaseUrl = testUrl;
-                job.config.baseUrl = testUrl;
-                adapted = true;
+                skipRunnerBecauseLocalAlreadyRunning = true;
+                targetBaseUrl = u;
+                job.config.baseUrl = u;
+                this.addLog(job, 'runtime', `✓ Service local-folder sudah aktif di ${u}. Memakai service yang berjalan.`);
                 break;
               }
             } catch { /* continue */ }
           }
-          if (!adapted) {
-            this.addLog(job, 'runtime', `▶ [Stage 1/6] Memakai target existing: ${config.baseUrl}`);
+        }
+
+        if (!skipRunnerBecauseLocalAlreadyRunning && (effectiveSourceType === 'github' || Boolean(config.localPath?.trim()))) {
+          let releaseRuntime!: () => void;
+          let resolveReady!: () => void;
+          let rejectReady!: (error: unknown) => void;
+          const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+          const hold = new Promise<void>((resolve) => { releaseRuntime = resolve; });
+          const runtimeFlow = {
+            schemaVersion: '1.0',
+            version: '1.0',
+            name: `managed-runtime-${job.id}`,
+            target: { platform: isMobile ? 'android' : 'web', baseUrl: config.baseUrl },
+            steps: [],
+            cleanup: []
+          } as unknown as NormalizedFlow;
+          const managedProject: ManagedProject = {
+            sourceType: effectiveSourceType,
+            sourcePath: effectiveSourceType === 'local-folder' ? config.localPath : undefined,
+            repositoryUrl: effectiveSourceType === 'github' ? frontendRepoUrl : undefined,
+            ref: frontendBranch,
+            baseUrl: config.baseUrl,
+            backendUrl: configuredBackendUrl || undefined,
+            backendRepositoryUrl: effectiveSourceType === 'github' ? (backendRepoUrl || undefined) : undefined,
+            backendRef: backendBranch,
+            mobileRepositoryUrl: effectiveSourceType === 'github' ? (mobileRepoUrl || undefined) : undefined,
+            mobileRef: mobileBranch,
+            sameRepoAsFrontend: config.mobileTarget?.sameRepoAsFrontend,
+            platform: config.platform,
+            environment: 'local',
+            stack: config.stack,
+            envFilePath: uploadedEnvFilePath,
+            retainClone: effectiveSourceType === 'github',
+            services: config.services
+          };
+          const runtimeAbort = () => releaseRuntime();
+          signal.addEventListener('abort', runtimeAbort, { once: true });
+          managedRuntimePromise = runManagedProject(runtimeFlow, `discovery-${job.id}`, managedProject, this.artifactRoot, this.projectRoot, {
+            signal,
+            update: (update) => {
+              if (update.phase) job.phase = update.phase;
+              if (typeof update.progress === 'number') job.progress = Math.max(job.progress, Math.min(35, update.progress));
+              if (update.services) this.addLog(job, 'runtime', `Service runtime: ${update.services.map((service) => `${service.name}=${service.status}`).join(', ')}`);
+              if (update.message) this.addLog(job, 'runtime', update.message);
+            },
+            onSource: async (sourceDir) => { managedSourceDir = sourceDir; },
+            onEnvProvisioned: (envResult: EnvProvisionResult) => {
+              for (const sec of envResult.secretsToRedact) {
+                this.registerSecret(job.id, sec);
+              }
+              job.envProvisioning = {
+                entries: envResult.entries,
+                warnings: envResult.warnings,
+                secretsToRedact: envResult.secretsToRedact.map(() => '[REDACTED]'),
+              };
+              for (const warning of envResult.warnings) {
+                phase1Gaps.push({
+                  id: `gap-env-${phase1Gaps.length + 1}`,
+                  role: 'infra',
+                  pagePath: '/.env',
+                  pageTitle: 'Environment Provisioning (.env Demo)',
+                  phaseFailed: 'ENV',
+                  category: 'env-misconfigured',
+                  technicalReason: warning,
+                });
+              }
+              void this.persist();
+            },
+            beforeStart: async (runnerContext) => {
+              for (const [svcId, containerInfo] of runnerContext.containers.entries()) {
+                const svcMeta = runnerContext.services.find((s) => s.id === svcId);
+                if (svcMeta?.kind === 'backend' || /backend|laravel|api/i.test(svcId)) {
+                  managedBackendContainer = containerInfo;
+                  break;
+                }
+              }
+              if (!managedBackendContainer && runnerContext.containers.size > 0) {
+                managedBackendContainer = runnerContext.containers.values().next().value;
+              }
+            },
+            prepare: async (runnerContext) => {
+              if (config.database.engine === 'none') return {};
+              job.phase = 'PREPARING_DATABASE';
+              job.progress = 12;
+              this.addLog(job, 'database', `▶ [Stage 2/6] Menyiapkan isolated container database ${config.database.engine} pada ${runnerContext.networkName}...`);
+
+              let sqlContent: string | undefined;
+              if (config.database.source === 'sql' && config.database.sqlUploadId) {
+                const up = this.uploads.get(config.database.sqlUploadId);
+                sqlContent = up?.content;
+              }
+              if (!sqlContent) {
+                const projectSlug = (config.name || 'project').toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-');
+                const projectSeedPath = path.join(this.artifactRoot, 'projects', projectSlug, 'database', 'seed.sql');
+                try {
+                  const content = await readFile(projectSeedPath, 'utf8');
+                  if (content && content.trim()) {
+                    sqlContent = content;
+                    this.addLog(job, 'database', `✓ Menggunakan file seed SQL project: ${projectSeedPath}`);
+                  }
+                } catch { /* no project seed SQL */ }
+              }
+
+              const workspaceDir = path.join(jobArtifactDir, 'workspace');
+              await mkdir(workspaceDir, { recursive: true });
+
+              try {
+                const db = await prepareDatabase({
+                  config: config.database,
+                  runId: runnerContext.runId,
+                  networkName: runnerContext.networkName,
+                  workspace: workspaceDir,
+                  sqlContent,
+                  signal,
+                  log: (msg) => this.addLog(job, 'database', msg)
+                });
+                dbCleanup = db.cleanup;
+                if (db.environment.DB_PASSWORD) this.registerSecret(job.id, db.environment.DB_PASSWORD);
+                this.addLog(job, 'database', `✓ Database isolated (${config.database.engine}) siap dan terhubung.`);
+                return db.environment;
+              } catch (dbErr) {
+                this.addLog(job, 'database', `Peringatan bootstrap DB: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+                return {};
+              }
+            },
+            execute: async () => {
+              resolveReady();
+              await hold;
+              return { status: 'PASSED', steps: [], artifacts: [] } as WebRunResult;
+            }
+          }).then(() => undefined).catch((error) => {
+            rejectReady(error);
+          });
+
+          try {
+            await ready;
+            managedRuntimeRelease = () => { releaseRuntime(); };
+            targetBaseUrl = managedProject.baseUrl || config.baseUrl;
+            job.config.baseUrl = targetBaseUrl;
+            this.addLog(job, 'runtime', `✓ Sandbox runtime aktif (${targetBaseUrl}).`);
+          } catch (error) {
+            managedRuntimeRelease = () => { releaseRuntime(); };
+            throw error;
           }
         }
-        this.addLog(job, 'database', '▶ [Stage 2/6] Database Bootstrap dilewati karena mode existing-target memakai database aplikasi aktif.');
+      } else {
+        // existing-target mode
+        try {
+          await fetch(config.baseUrl, { signal: AbortSignal.timeout(2000) });
+          this.addLog(job, 'runtime', `▶ [Stage 1/6] Memakai target existing aktif: ${config.baseUrl}`);
+        } catch {
+          this.addLog(job, 'runtime', `▶ [Stage 1/6] Memakai target existing: ${config.baseUrl}`);
+        }
+        this.addLog(job, 'database', '▶ [Stage 2/6] Database bootstrap dilewati pada mode existing-target.');
       }
 
-      // 2. Static Source Scanning
-      const stageLabel = isMobile ? '3' : '3';
+      // 2. Android Server Emulator Readiness & APK Install (FR-03)
+      let effectiveAppId = config.appId?.trim() || config.apkPackageId?.trim() || '';
+      if (isMobile) {
+        notifyAndroidJobStarted();
+        androidJobStarted = true;
+        job.phase = 'PREPARING_MOBILE';
+        job.progress = 26;
+        const useServerEmulator = config.useServerEmulator !== false;
+        this.addLog(job, 'android', `▶ Menyiapkan Server Emulator Android headless (useServerEmulator=${useServerEmulator})...`);
+
+        const ready = await ensureDeviceReady(config.deviceId, useServerEmulator);
+        if (!ready.serial) {
+          const reason = ready.error || 'Headless Android Emulator di server gagal siap / tidak ditemukan AVD qc_worker_headless.';
+          phase1Gaps.push({
+            id: 'gap-android-emulator',
+            role: 'mobile',
+            pagePath: '/emulator',
+            pageTitle: 'Server Headless Android Emulator',
+            phaseFailed: 'EMULATOR',
+            category: 'env-misconfigured',
+            technicalReason: reason,
+          });
+          job.coverageGaps = await this.deduplicateAndDiagnoseGaps(phase1Gaps);
+          await this.writePhase1Reports(job, jobArtifactDir);
+          throw new Error(reason);
+        }
+
+        activeSerial = ready.serial;
+        this.addLog(job, 'android', `✓ Server emulator siap: ${activeSerial}${ready.model ? ` (${ready.model})` : ''}`);
+
+        // Reverse backend port so Android emulator reaches backend sandbox cleanly on 127.0.0.1:<port>
+        const reverseTarget = configuredBackendUrl || targetBaseUrl;
+        if (reverseTarget && /^https?:/i.test(reverseTarget)) {
+          try {
+            const parsedBackend = new URL(reverseTarget);
+            const reversePort = Number(parsedBackend.port || (parsedBackend.protocol === 'https:' ? 443 : 80));
+            if (reversePort > 0 && reversePort <= 65535) {
+              const reversed = await setupAdbReverse(activeSerial, reversePort);
+              this.addLog(job, 'android', reversed
+                ? `✓ adb reverse tcp:${reversePort} aktif untuk backend.`
+                : `ℹ adb reverse tcp:${reversePort} dilewati / gunakan 10.0.2.2.`);
+            }
+          } catch { /* ignore invalid URL */ }
+        }
+
+        const apkUpload = config.apkUploadId ? this.getUpload(config.apkUploadId) as { path?: string; packageId?: string } | undefined : undefined;
+        let apkPathToInstall = apkUpload?.path;
+        if (!apkPathToInstall && managedSourceDir) {
+          const mobileBuildDir = existsSync(path.join(managedSourceDir, 'mobile'))
+            ? path.join(managedSourceDir, 'mobile')
+            : managedSourceDir;
+          if (
+            existsSync(path.join(mobileBuildDir, 'pubspec.yaml')) ||
+            existsSync(path.join(mobileBuildDir, 'gradlew')) ||
+            existsSync(path.join(mobileBuildDir, 'android', 'gradlew'))
+          ) {
+            const built = await buildApkFromMobileRepo(mobileBuildDir, (msg) => this.addLog(job, 'android', msg));
+            if (built.apkPath) {
+              apkPathToInstall = built.apkPath;
+              if (built.packageId && !effectiveAppId) effectiveAppId = built.packageId;
+            } else if (built.error) {
+              this.addLog(job, 'android', `Peringatan build APK dari repo mobile: ${built.error}`);
+            }
+          }
+        }
+
+        if (apkPathToInstall) {
+          const inspected = await inspectApk(apkPathToInstall).catch(() => ({} as { packageId?: string }));
+          if (inspected.packageId && !effectiveAppId) {
+            effectiveAppId = inspected.packageId;
+          }
+          const installRes = await installApkToDevice(apkPathToInstall, activeSerial, false, useServerEmulator);
+          if (!installRes.success) {
+            const reason = `Gagal menginstal APK ke server emulator ${activeSerial}: ${installRes.output}`;
+            phase1Gaps.push({
+              id: 'gap-android-install',
+              role: 'mobile',
+              pagePath: '/apk-install',
+              pageTitle: 'Instalasi APK ke Server Emulator',
+              phaseFailed: 'EMULATOR',
+              category: 'env-misconfigured',
+              technicalReason: reason,
+            });
+            job.coverageGaps = await this.deduplicateAndDiagnoseGaps(phase1Gaps);
+            await this.writePhase1Reports(job, jobArtifactDir);
+            throw new Error(reason);
+          }
+          this.addLog(job, 'android', `✓ APK terpasang pada ${activeSerial} (${effectiveAppId || path.basename(apkPathToInstall)}).`);
+        }
+
+        if (!effectiveAppId) {
+          throw new Error('Package App ID Android belum diketahui (isi App ID atau upload APK yang valid).');
+        }
+        job.config.appId = effectiveAppId;
+      }
+
+      // 3. Static Source Scanning
       job.phase = 'SCANNING_SOURCE';
-      job.progress = 35;
+      job.progress = 38;
       let initialPages: InventoryPage[] = [];
       let routes: Array<{ path: string; method: string; source: string }> = [];
       let api: Array<{ path: string; method: string; source: string }> = [];
@@ -1685,43 +2158,14 @@ export class DiscoveryService {
         scanTargetDir = managedSourceDir;
       } else if (config.runMode === 'demo') {
         scanTargetDir = path.join(this.projectRoot, 'apps/demo-app');
-      } else if (config.localPath?.trim()) {
+      } else if (config.localPath?.trim() && existsSync(config.localPath.trim())) {
         scanTargetDir = config.localPath.trim();
-      } else if (detectedLocalPath) {
-        scanTargetDir = detectedLocalPath;
-      } else if (config.repositoryUrl && !config.repositoryUrl.startsWith('http')) {
-        // Local path repository
+      } else if (config.repositoryUrl && !config.repositoryUrl.startsWith('http') && existsSync(config.repositoryUrl)) {
         scanTargetDir = config.repositoryUrl;
-      } else if (config.repositoryUrl && config.repositoryUrl.startsWith('http')) {
-        // Check if repository exists locally in standard directories (e.g. C:/xampp/htdocs/<repo>)
-        const repoName = config.repositoryUrl.split('/').pop()?.replace(/\.git$/, '');
-        if (repoName) {
-          const candidates = [
-            path.join('C:', 'xampp', 'htdocs', repoName),
-            path.join('C:', 'xampp', 'htdocs', repoName.charAt(0).toUpperCase() + repoName.slice(1)),
-            path.join('C:', 'xampp', 'htdocs', repoName.toLowerCase()),
-            path.join('E:', 'projek', 'jamaahku_website', 'jamaahku_frontend', repoName),
-            path.join('E:', 'projek', 'saff', 'jamaahku_website', 'jamaahku_frontend', repoName),
-            path.join('E:', 'projek', repoName)
-          ];
-          for (const cand of candidates) {
-            try {
-              const stat = await lstat(cand);
-              if (stat.isDirectory()) {
-                scanTargetDir = cand;
-                this.addLog(job, 'discovery', `Repository remote '${config.repositoryUrl}' ditemukan pada folder lokal: ${cand}`);
-                break;
-              }
-            } catch {}
-          }
-        }
       }
 
       if (scanTargetDir) {
-        const extLabel = isMobile ? '.dart / .kt / .java' : '.tsx / .vue / .php / .blade';
-        this.addLog(job, 'discovery', `▶ [Stage ${stageLabel}/6] Static code analysis dimulai...`);
-        this.addLog(job, 'discovery', `📂 Target direktori: ${scanTargetDir}`);
-        this.addLog(job, 'discovery', `🔍 Mencari file sumber (${extLabel})...`);
+        this.addLog(job, 'discovery', `▶ [Stage 3/6] Static code analysis: ${scanTargetDir}`);
         try {
           const scan = await scanSource(scanTargetDir);
           initialPages = scan.pages;
@@ -1729,216 +2173,121 @@ export class DiscoveryService {
           api = scan.api;
           filesScanned = scan.filesScanned;
           warnings = scan.warnings;
-          this.addLog(job, 'discovery', `✓ Scan selesai: ${filesScanned} file dibaca.`);
-          this.addLog(job, 'discovery', `📋 Ditemukan: ${initialPages.length} layar/halaman, ${routes.length} route, ${api.length} endpoint API.`);
-          if (warnings.length > 0) {
-            this.addLog(job, 'discovery', `⚠ ${warnings.length} peringatan ditemukan selama scan.`);
-          }
+          this.addLog(job, 'discovery', `✓ Scan selesai: ${filesScanned} file, ${initialPages.length} layar/halaman, ${routes.length} route, ${api.length} endpoint API.`);
         } catch (scanErr) {
           this.addLog(job, 'discovery', `⚠ Scan source dilewati/gagal: ${scanErr instanceof Error ? scanErr.message : String(scanErr)}`);
         }
       } else {
-        this.addLog(job, 'discovery', '▶ [Stage 3/6] Static source scanning...');
-        this.addLog(job, 'discovery', 'Target adalah URL remote — static scan dilewati, lanjut ke dynamic crawl.');
+        this.addLog(job, 'discovery', '▶ [Stage 3/6] Static source dilewati (tidak ada folder lokal / clone), lanjut dynamic discovery.');
       }
 
-      // 3. Target Preparation & Discovery
+      // 4. Auto Role Discovery & Credential Provisioning (FR-04)
+      job.phase = 'PROVISIONING_ACCOUNTS';
+      job.progress = 48;
+      this.addLog(job, 'discovery', '▶ [Stage 4/6] Mendeteksi role aplikasi & menyiapkan kredensial runtime (tanpa hardcode)...');
+      const provisioned = await provisionRoleAccounts({
+        sourceDir: scanTargetDir || undefined,
+        backendUrl: configuredBackendUrl || (!isMobile ? targetBaseUrl : undefined),
+        frontendUrl: !isMobile ? targetBaseUrl : undefined,
+        explicitAccounts: config.accounts,
+        autoProvisionAccounts: config.autoProvisionAccounts !== false,
+        backendContainer: managedBackendContainer,
+        secretsOut: jobSecretSet,
+      });
+      this.runtimeRoleCredentials.set(job.id, provisioned.runtimeCredentials);
+      job.provisionedAccounts = provisioned.publicAccounts;
+      this.addLog(job, 'discovery', `✓ Terdeteksi ${provisioned.runtimeCredentials.size} role akun (${provisioned.publicAccounts.map((a) => `${a.role}:${a.source}`).join(', ') || 'public only'}).`);
+
+      const effectiveLoginPath =
+        config.rules?.loginPath && config.rules.loginPath !== '/login'
+          ? config.rules.loginPath
+          : (provisioned.schema.loginPath || '/login');
+
+      // 5. Stage 1 Reconnaissance — Web & Android (NO final SS/Video yet! FR-05)
       let observedPages: InventoryPage[] = [];
+      const credentialsList = [...provisioned.runtimeCredentials.values()];
 
-      if (config.platform === 'android') {
-        job.phase = 'PREPARING_MOBILE';
-        job.progress = 55;
-        this.addLog(job, 'system', `▶ [Stage 4/6] Persiapan target platform Mobile / Android`);
-        this.addLog(job, 'system', `📱 App ID: ${config.appId || '(tidak disetel)'}`);
-        this.addLog(job, 'system', `📱 Device Target: ${config.deviceId || 'perangkat ADB pertama yang terhubung'}`);
-        this.addLog(job, 'system', `🔗 Backend API yang diuji: ${targetBaseUrl || '(tidak ada — standalone mobile test)'}`);
-        this.addLog(job, 'system', 'Playwright browser crawler DILEWATI — platform native mobile tidak menggunakan DOM HTML.');
-
-        if (targetBaseUrl && targetBaseUrl.startsWith('http')) {
-          this.addLog(job, 'system', `⏳ Memeriksa keterjangkauan Backend API: ${targetBaseUrl}...`);
-          try {
-            await fetch(targetBaseUrl, { signal: AbortSignal.timeout(3000) });
-            this.addLog(job, 'system', `✓ Backend API dapat dijangkau dari jaringan lokal.`);
-          } catch {
-            this.addLog(job, 'system', `ℹ Backend API tidak merespons ping — mungkin hanya menerima request dari emulator/device (10.0.2.2).`);
-          }
-        }
-        job.progress = 60;
-        this.addLog(job, 'system', `🗂 Menggunakan hasil static scan: ${initialPages.length} layar terdeteksi dari source code.`);
-        this.addLog(job, 'system', 'Membangun inventory dari data static analysis...');
-
-        if (initialPages.length > 0) {
-          observedPages = initialPages;
-        } else {
-          observedPages = [
-            {
-              id: 'android-login',
-              path: '/login',
-              title: 'Layar Autentikasi / Login Siswa',
-              state: 'observed',
-              elements: [
-                { type: 'input', name: 'NIS / NISN', selector: 'text:NIS / NISN' },
-                { type: 'input', name: 'Password', selector: 'text:Password' },
-                { type: 'button', name: 'Masuk', selector: 'text:Masuk' },
-                { type: 'text', name: 'Logo / Label Al-Hikmah Digital', selector: 'text:AL- HIKMAH DIGITAL' }
-              ]
-            },
-            {
-              id: 'android-beranda',
-              path: '/beranda',
-              title: 'Beranda Utama & Kartu Siswa',
-              state: 'observed',
-              elements: [
-                { type: 'text', name: 'Profil Siswa (Ahmad Farhan)', selector: 'text:Ahmad Farhan' },
-                { type: 'card', name: 'Status Presensi Hari Ini', selector: 'text:PRESENSI HARI INI' },
-                { type: 'button', name: 'Menu Cepat Amal Siswa Harian', selector: 'text:Amal Harian' },
-                { type: 'button', name: 'Shortcut Absensi', selector: 'text:Absensi' },
-                { type: 'button', name: 'Shortcut Keuangan', selector: 'text:Keuangan' },
-                { type: 'button', name: 'Shortcut Informasi', selector: 'text:Informasi' },
-                { type: 'button', name: 'Shortcut T2Q', selector: 'text:T2Q' }
-              ]
-            },
-            {
-              id: 'android-amal-harian',
-              path: '/amal-harian',
-              title: 'Mutasi & Jurnal Amal Siswa Harian',
-              state: 'observed',
-              elements: [
-                { type: 'header', name: 'Header Amal Harian', selector: 'text:Amal Harian' },
-                { type: 'checkbox', name: 'Shalat Subuh Berjamaah', selector: 'text:Shalat Subuh' },
-                { type: 'checkbox', name: 'Shalat Dzuhur', selector: 'text:Shalat Dzuhur' },
-                { type: 'checkbox', name: 'Shalat Ashar', selector: 'text:Shalat Ashar' },
-                { type: 'checkbox', name: 'Shalat Maghrib', selector: 'text:Shalat Maghrib' },
-                { type: 'checkbox', name: 'Shalat Isya', selector: 'text:Shalat Isya' },
-                { type: 'button', name: 'Simpan Catatan Amal', selector: 'text:Simpan' }
-              ]
-            },
-            {
-              id: 'android-absensi',
-              path: '/absensi',
-              title: 'Tab Presensi & Rekap Kehadiran',
-              state: 'observed',
-              elements: [
-                { type: 'header', name: 'Header Tab Presensi', selector: 'text:Presensi' },
-                { type: 'tab', name: 'Tab Riwayat Kehadiran', selector: 'text:Kehadiran' },
-                { type: 'tab', name: 'Tab Riwayat Pengajuan Izin', selector: 'text:Pengajuan' },
-                { type: 'button', name: 'Tombol Ajukan Izin Baru', selector: 'text:Ajukan Izin' },
-                { type: 'card', name: 'Statistik Rekap Presensi Bulan Ini', selector: 'text:Rekap' }
-              ]
-            },
-            {
-              id: 'android-izin-form',
-              path: '/absensi/ajukan-izin',
-              title: 'Formulir CRUD Pengajuan Izin / Sakit',
-              state: 'observed',
-              elements: [
-                { type: 'header', name: 'Judul Formulir Pengajuan Izin', selector: 'text:Form Pengajuan Izin' },
-                { type: 'select', name: 'Pilihan Jenis Izin (Sakit / Izin)', selector: 'text:Jenis Izin' },
-                { type: 'input', name: 'Alasan / Keterangan Izin', selector: 'text:Keterangan' },
-                { type: 'button', name: 'Tombol Kirim / Submit Pengajuan', selector: 'text:Kirim' },
-                { type: 'button', name: 'Tombol Kembali ke Presensi', selector: 'text:Kembali' }
-              ]
-            },
-            {
-              id: 'android-keuangan',
-              path: '/keuangan',
-              title: 'Tab Keuangan & Tagihan SPP Siswa',
-              state: 'observed',
-              elements: [
-                { type: 'header', name: 'Header Keuangan Siswa', selector: 'text:Keuangan' },
-                { type: 'card', name: 'Total Tagihan Belum Dibayar', selector: 'text:Belum Dibayar' },
-                { type: 'item', name: 'Item Invoice SPP Bulanan', selector: 'text:SPP' },
-                { type: 'button', name: 'Tombol Bayar Tagihan Sekarang', selector: 'text:Bayar' }
-              ]
-            },
-            {
-              id: 'android-pembayaran',
-              path: '/keuangan/pembayaran',
-              title: 'Rincian Invoice & Metode Pembayaran Virtual Account',
-              state: 'observed',
-              elements: [
-                { type: 'header', name: 'Invoice / Rincian Tagihan', selector: 'text:Rincian Pembayaran' },
-                { type: 'text', name: 'Nomor Virtual Account BSI', selector: 'text:BSI' },
-                { type: 'text', name: 'Nominal Tagihan & Kode Transaksi', selector: 'text:Rp' },
-                { type: 'button', name: 'Tombol Selesai / Konfirmasi Pembayaran', selector: 'text:Selesai' }
-              ]
-            },
-            {
-              id: 'android-informasi',
-              path: '/informasi',
-              title: 'Tab Informasi Sekolah & Poin Kedisiplinan',
-              state: 'observed',
-              elements: [
-                { type: 'header', name: 'Header Informasi', selector: 'text:Informasi' },
-                { type: 'card', name: 'Ringkasan Poin Kedisiplinan & Pelanggaran', selector: 'text:Kedisiplinan' },
-                { type: 'list', name: 'Daftar Berita & Pengumuman Sekolah', selector: 'text:Berita' }
-              ]
-            },
-            {
-              id: 'android-t2q',
-              path: '/t2q',
-              title: "Tab T2Q (Tahfidz, Tahsin, & Tilawah Al-Qur'an)",
-              state: 'observed',
-              elements: [
-                { type: 'header', name: 'Header T2Q', selector: 'text:T2Q' },
-                { type: 'tab', name: 'Sub-Tab Tahfidz', selector: 'text:Tahfidz' },
-                { type: 'tab', name: 'Sub-Tab Tahsin', selector: 'text:Tahsin' },
-                { type: 'tab', name: 'Sub-Tab Tilawah', selector: 'text:Tilawah' },
-                { type: 'card', name: "Daftar Capaian Hafalan Al-Qur'an", selector: 'text:Hafalan' }
-              ]
-            }
-          ];
+      if (isMobile) {
+        job.phase = 'RECON_ANDROID';
+        job.progress = 62;
+        this.addLog(job, 'android', '▶ [Stage 5/6] Reconnaissance Android di headless emulator (tanpa simpan SS/video final)...');
+        const recon = await exploreAndroidScreensForRecon({
+          serial: activeSerial,
+          appId: effectiveAppId,
+          credentials: credentialsList,
+          staticPages: initialPages,
+          onLog: (msg) => this.addLog(job, 'android', msg),
+        });
+        observedPages = recon.pages;
+        phase1Gaps.push(...recon.gaps);
+        if (config.businessFlowReview?.mode !== 'auto') {
+          setEmulatorReviewHold(true);
+          holdingEmulatorReview = true;
         }
       } else {
         job.phase = 'CRAWLING_UI';
-        job.progress = 55;
-        this.addLog(job, 'browser', '▶ [Stage 4/6] Dynamic Playwright Crawl dimulai...');
-        this.addLog(job, 'browser', `Memulai dynamic Playwright crawler pada ${targetBaseUrl}...`);
-
+        job.progress = 62;
+        this.addLog(job, 'browser', `▶ [Stage 5/6] Reconnaissance Web Playwright pada ${targetBaseUrl} (tanpa simpan SS/video final)...`);
         try {
-          const crawlAccounts = config.accounts.map(a => ({
-            email: a.email,
-            password: a.password,
-            role: a.role
+          const crawlAccounts = credentialsList.map((cred) => ({
+            email: cred.identifier,
+            password: cred.password,
+            role: cred.role,
+            token: cred.token,
+            identifierField: cred.identifierField,
           }));
-
           observedPages = await crawlUI(
             targetBaseUrl,
             initialPages,
             jobArtifactDir,
-            config.rules,
+            { ...config.rules, loginPath: effectiveLoginPath },
             crawlAccounts,
             signal,
             (msg) => this.addLog(job, 'browser', msg)
           );
 
-          this.addLog(job, 'browser', `UI crawler selesai. ${observedPages.filter(p => p.state === 'observed').length} halaman berhasil diobservasi.`);
-        } catch (crawlErr) {
-          this.addLog(job, 'browser', `Crawl UI gagal atau terpotong: ${crawlErr instanceof Error ? crawlErr.message : String(crawlErr)}`);
-          if (initialPages.length > 0) {
-            observedPages = initialPages;
-          } else {
-            observedPages = [{
-              id: 'root',
-              path: '/',
-              title: 'Home Page (Candidate)',
-              state: 'candidate',
-              elements: []
-            }];
+          // Enrich bare slug titles with Gemini if configured
+          const barePages = observedPages.filter((p) => !p.title || p.title === p.path);
+          if (GeminiService.isConfigured() && barePages.length > 0) {
+            const labels = await GeminiService.labelScreensAndTabs(
+              barePages.slice(0, 20).map((p) => ({
+                id: p.id,
+                rawPathOrWidget: p.path,
+                sampleTexts: (p.interactiveFeatures || []).slice(0, 4).map((f) => f.label),
+              }))
+            ).catch(() => ({} as Record<string, string>));
+            for (const p of barePages) {
+              if (labels[p.id]) p.title = labels[p.id];
+            }
           }
+          this.addLog(job, 'browser', `✓ Reconnaissance selesai: ${observedPages.length} entri halaman/status terpetakan.`);
+        } catch (crawlErr) {
+          this.addLog(job, 'browser', `⚠ Crawl Web tidak lengkap: ${crawlErr instanceof Error ? crawlErr.message : String(crawlErr)}`);
+          observedPages = initialPages.length > 0 ? initialPages : [{
+            id: 'root',
+            path: '/',
+            title: 'Home Page (Candidate)',
+            state: 'candidate',
+            elements: [],
+          }];
         }
       }
 
-      // 4. Inventory Building
+      // 6. Inventory + Recon Summary + Flow Synthesis
       job.phase = 'BUILDING_INVENTORY';
-      job.progress = 75;
-      this.addLog(job, 'discovery', `▶ [Stage 4/6] Membangun Application Inventory...`);
-      this.addLog(job, 'discovery', `📊 Total halaman/layar: ${observedPages.length} (${observedPages.filter(p => p.state === 'observed').length} sudah diobservasi)`);
-      this.addLog(job, 'discovery', `📡 Route HTTP: ${routes.length} | Endpoint API: ${api.length} | File discan: ${filesScanned}`);
+      job.progress = 76;
       const capabilities = detectCapabilities({ pages: observedPages, routes, api });
       const crudPlan = buildCrudPlan({ pages: observedPages, routes, api });
-      const roleActionPlan = buildRoleActionPlan({ pages: observedPages, accounts: config.accounts });
+      const roleActionPlan = buildRoleActionPlan({
+        pages: observedPages,
+        accounts: config.accounts?.length ? config.accounts : (job.provisionedAccounts || credentialsList.map(c => ({ role: c.role }))),
+      });
       const featureContractPlan = buildFeatureContractPlan({ pages: observedPages, capabilities: capabilities.capabilities, crudPlan, roleActionPlan });
+      const rolesDiscovered = [...new Set([
+        ...credentialsList.map((c) => c.role),
+        ...observedPages.map((p) => p.role).filter((r): r is string => Boolean(r)),
+      ])];
+
       const inventory: Inventory = {
         pages: observedPages,
         routes,
@@ -1946,116 +2295,253 @@ export class DiscoveryService {
         filesScanned,
         warnings,
         generatedAt: new Date().toISOString(),
+        rolesDiscovered,
         capabilities,
         crudPlan,
         roleActionPlan,
-        featureContractPlan
+        featureContractPlan,
       };
       job.inventory = inventory;
-      this.addLog(job, 'discovery', `Capability profile: ${capabilities.detectedCount}/${capabilities.totalCatalogCapabilities} kemampuan terdeteksi.`);
-      this.addLog(job, 'flow-builder', `CRUD matrix: ${crudPlan.totals.resources} resource, ${crudPlan.totals.available} operasi terobservasi, ${crudPlan.totals.requiresFixture} operasi membutuhkan fixture.`);
-      this.addLog(job, 'flow-builder', `Role/action matrix: ${roleActionPlan.totals.rows} kombinasi halaman-role, ${roleActionPlan.totals.runtime} perlu verifikasi runtime.`);
-      this.addLog(job, 'flow-builder', `Feature contract: ${featureContractPlan.total} fitur, ${featureContractPlan.readyForReview} siap direview, ${featureContractPlan.requiresReview} perlu review, ${featureContractPlan.scenarioTotals.happy + featureContractPlan.scenarioTotals.negative + featureContractPlan.scenarioTotals.boundary + featureContractPlan.scenarioTotals.permission + featureContractPlan.scenarioTotals.recovery + featureContractPlan.scenarioTotals.integrity} skenario.`);
-      this.addLog(job, 'discovery', `Domain hints: ${capabilities.domainHints.join(', ')}.`);
-      capabilities.capabilities.slice(0, 12).forEach((capability) => {
-        this.addLog(job, 'discovery', `  [${capability.status.toUpperCase()}] ${capability.label} (${Math.round(capability.confidence * 100)}%) — ${capability.evidence.routes.length} route, ${capability.evidence.apiRoutes.length} API evidence.`);
-      });
-      this.addLog(job, 'discovery', '💾 Menyimpan application-inventory.json ke disk...');
+      job.reconSummary = this.buildPhase1ReconSummary(isMobile ? 'android' : 'web', observedPages, credentialsList);
 
-      // Save application-inventory.json
-      await writeFile(
-        path.join(jobArtifactDir, 'application-inventory.json'),
-        JSON.stringify(inventory, null, 2),
-        'utf8'
-      );
-      await writeFile(
-        path.join(jobArtifactDir, 'capability-profile.json'),
-        JSON.stringify(capabilities, null, 2),
-        'utf8'
-      );
-      await writeFile(
-        path.join(jobArtifactDir, 'crud-plan.json'),
-        JSON.stringify(crudPlan, null, 2),
-        'utf8'
-      );
-      await writeFile(
-        path.join(jobArtifactDir, 'role-action-plan.json'),
-        JSON.stringify(roleActionPlan, null, 2),
-        'utf8'
-      );
-      await writeFile(
-        path.join(jobArtifactDir, 'feature-contract-plan.json'),
-        JSON.stringify(featureContractPlan, null, 2),
-        'utf8'
-      );
-      this.addLog(job, 'discovery', '✓ Inventory tersimpan.');
-
-      // 5. Flow Generation
-      job.phase = 'GENERATING_FLOWS';
-      job.progress = 85;
-      const flowPlatformLabel = isMobile ? 'Maestro YAML (Android)' : 'Playwright spec.ts (Web)';
-      this.addLog(job, 'flow-builder', `▶ [Stage 5/6] Menghasilkan skenario QC otomatis (${flowPlatformLabel})...`);
-      this.addLog(job, 'flow-builder', `🔧 Menganalisis ${observedPages.length} layar untuk membuat skenario pengujian...`);
-      const flows = buildFlows(inventory, { ...config, baseUrl: targetBaseUrl });
+      const flowAccountStubs = credentialsList.map((c) => ({ name: c.name, email: c.identifier, role: c.role, password: '' }));
+      const flows = buildFlows(inventory, { ...config, baseUrl: targetBaseUrl, accounts: flowAccountStubs });
       job.flows = flows;
-      job.businessFlowMap = buildBusinessFlowMap(inventory, { ...config, baseUrl: targetBaseUrl });
-      this.addLog(job, 'flow-builder', `✓ ${flows.length} flow skenario berhasil dibuat.`);
-      flows.forEach((f, i) => {
-        this.addLog(job, 'flow-builder', `  [${i + 1}] ${f.name} (${f.platform}) — status: ${f.status}`);
-      });
+      job.businessFlowMap = buildBusinessFlowMap(inventory, { ...config, baseUrl: targetBaseUrl, accounts: flowAccountStubs });
 
-      // Save Playwright specs & yaml artifacts
-      const playwrightDir = path.join(jobArtifactDir, 'playwright');
-      await mkdir(playwrightDir, { recursive: true });
-      for (const f of flows) {
-        const val = validateFlow(f.source);
-        if (val.valid && val.normalized) {
-          if (val.normalized.target.platform === 'web') {
-            const code = compilePlaywrightFlow(val.normalized);
-            await writeFile(path.join(playwrightDir, `${f.id}.spec.ts`), code, 'utf8');
-          }
+      await writeFile(path.join(jobArtifactDir, 'application-inventory.json'), JSON.stringify(inventory, null, 2), 'utf8');
+      await writeFile(path.join(jobArtifactDir, 'capability-profile.json'), JSON.stringify(capabilities, null, 2), 'utf8');
+      await writeFile(path.join(jobArtifactDir, 'crud-plan.json'), JSON.stringify(crudPlan, null, 2), 'utf8');
+      await writeFile(path.join(jobArtifactDir, 'role-action-plan.json'), JSON.stringify(roleActionPlan, null, 2), 'utf8');
+      await writeFile(path.join(jobArtifactDir, 'feature-contract-plan.json'), JSON.stringify(featureContractPlan, null, 2), 'utf8');
+
+      // 7. Mandatory Human-in-the-Loop ACC Gate for BOTH Web & Android (FR-05)
+      if (config.businessFlowReview?.mode !== 'auto') {
+        this.addLog(
+          job,
+          'flow-builder',
+          `📋 Reconnaissance selesai: ${job.reconSummary.totalRoles} role, ${job.reconSummary.totalPages} halaman/layar, ${job.reconSummary.totalInteractiveFeatures} tab/fitur interaktif. Menunggu ACC user sebelum Command Plan, Long SS, & Video.`
+        );
+        await this.waitForBusinessFlowApproval(job, signal);
+      } else {
+        const now = new Date().toISOString();
+        if (job.reconSummary) job.reconSummary.approvedAt = now;
+        if (job.businessFlowMap) {
+          job.businessFlowMap.flows.forEach((f) => { f.status = 'APPROVED'; f.approvedAt = now; });
+          refreshBusinessFlowSummary(job.businessFlowMap);
         }
       }
 
-      // Save HTML report
-      const reportHtml = buildReport(job, `/api/v1/discovery/jobs/${job.id}/artifacts/`);
-      await writeFile(path.join(jobArtifactDir, 'application-report.html'), reportHtml, 'utf8');
+      if (holdingEmulatorReview) {
+        setEmulatorReviewHold(false);
+        holdingEmulatorReview = false;
+      }
 
-      // 6. Review Gate: Wajib ada jeda review dulu — engine berhenti di WAITING_REVIEW dan menunggu user approve di halaman Flow
-      if (!isMobile && job.businessFlowMap && job.config.businessFlowReview?.mode !== 'auto') {
-        this.addLog(job, 'flow-builder', '📋 Peta Alur Bisnis lengkap telah disintesis. Status dialihkan ke WAITING_REVIEW.');
-        this.addLog(job, 'flow-builder', '⏸️ Menunggu review dan persetujuan (approval) user pada halaman Flow sebelum melanjutkan eksekusi pengujian di terminal.');
-        await this.waitForBusinessFlowApproval(job, signal);
-      } else if (!isMobile && job.businessFlowMap) {
-        job.businessFlowMap.flows.forEach((flow) => {
-          flow.status = 'APPROVED';
-          flow.approvedAt = new Date().toISOString();
+      // 8. Post-ACC Step 1: Deterministic Command Plan Generation (FR-06)
+      job.status = 'RUNNING';
+      job.phase = 'GENERATING_COMMANDS';
+      job.progress = 86;
+      this.addLog(job, 'flow-builder', '▶ [Post-ACC 1/4] Menghasilkan Command Plan (Long Screenshot & Continuous Role Video)...');
+      const commandOutput = await generatePostAccCommandPlan({
+        inventory,
+        platform: isMobile ? 'android' : 'web',
+        baseUrl: targetBaseUrl,
+        appId: effectiveAppId,
+        credentials: credentialsList,
+        runPath: jobArtifactDir,
+      });
+      job.commandPlan = commandOutput.plan;
+      phase1Gaps.push(...commandOutput.unresolvedGaps);
+      this.addLog(
+        job,
+        'flow-builder',
+        `✓ Command plan siap: ${commandOutput.plan.screenshotCommands.length} perintah Long SS, ${commandOutput.plan.videoCommands.length} skrip video role.`
+      );
+      await this.persist();
+      await this.writeWorkspaceSnapshot(job);
+
+      // 9. Post-ACC Step 2 (Batch 1): Strictly 1 Long Full-Page Screenshot per Page per Role (FR-06)
+      job.phase = 'CAPTURING_LONG_SCREENSHOTS';
+      job.progress = 89;
+      this.addLog(job, 'runner', '▶ [Post-ACC 2/4 — Batch 1] Menjalankan capture 1 Long Screenshot (atas-bawah) per halaman...');
+      const ssResult = isMobile
+        ? await captureAndroidLongScreenshots({
+            jobId: job.id,
+            serial: activeSerial,
+            appId: effectiveAppId,
+            plan: commandOutput.plan,
+            credentials: credentialsList,
+            runPath: jobArtifactDir,
+            signal,
+            onLog: (msg) => this.addLog(job, 'android', msg),
+          })
+        : await captureWebLongScreenshots({
+            jobId: job.id,
+            plan: commandOutput.plan,
+            credentials: credentialsList,
+            baseUrl: targetBaseUrl,
+            runPath: jobArtifactDir,
+            loginRules: { ...config.rules, loginPath: effectiveLoginPath },
+            signal,
+            onLog: (msg) => this.addLog(job, 'browser', msg),
+          });
+
+      job.longScreenshots = ssResult.artifacts;
+      phase1Gaps.push(...ssResult.gaps);
+
+      for (const art of ssResult.artifacts) {
+        if (art.status !== 'CAPTURED') continue;
+        const page = inventory.pages.find(
+          (p) => p.id === art.pageId || (p.path === art.pagePath && (!p.role || p.role === art.role))
+        );
+        if (page) {
+          page.screenshot = `screenshots/long/${art.filename}`;
+          page.state = 'observed';
+        }
+      }
+      if (job.reconSummary) {
+        job.reconSummary.batch1TotalScreenshots = ssResult.artifacts.length;
+        job.reconSummary.batch1CapturedCount = ssResult.artifacts.filter((a) => a.status === 'CAPTURED').length;
+      }
+      this.addLog(
+        job,
+        'runner',
+        `✓ Batch 1 selesai: ${job.reconSummary?.batch1CapturedCount ?? 0}/${ssResult.artifacts.length} Long Screenshot berhasil.`
+      );
+      await writeFile(path.join(jobArtifactDir, 'application-inventory.json'), JSON.stringify(inventory, null, 2), 'utf8');
+      await this.persist();
+      await this.writeWorkspaceSnapshot(job);
+
+      // 10. Post-ACC Step 3 (Batch 2 — Strictly After Batch 1): Continuous Video per Role (FR-07)
+      job.phase = 'RECORDING_ROLE_VIDEOS';
+      job.progress = 93;
+      this.addLog(job, 'runner', '▶ [Post-ACC 3/4 — Batch 2] Merekam video perjalanan penuh per role (klik seluruh tab + scroll penuh)...');
+      const vidResult = isMobile
+        ? await recordAndroidRoleVideos({
+            jobId: job.id,
+            serial: activeSerial,
+            appId: effectiveAppId,
+            plan: commandOutput.plan,
+            credentials: credentialsList,
+            runPath: jobArtifactDir,
+            signal,
+            onLog: (msg) => this.addLog(job, 'android', msg),
+          })
+        : await recordWebRoleVideos({
+            jobId: job.id,
+            plan: commandOutput.plan,
+            credentials: credentialsList,
+            baseUrl: targetBaseUrl,
+            runPath: jobArtifactDir,
+            loginRules: { ...config.rules, loginPath: effectiveLoginPath },
+            signal,
+            onLog: (msg) => this.addLog(job, 'browser', msg),
+          });
+
+      job.roleVideos = vidResult.videos;
+      phase1Gaps.push(...vidResult.gaps);
+      if (job.reconSummary) {
+        job.reconSummary.batch2TotalRoleVideos = vidResult.videos.length;
+        job.reconSummary.batch2RecordedCount = vidResult.videos.filter((v) => v.status === 'RECORDED').length;
+      }
+      this.addLog(
+        job,
+        'runner',
+        `✓ Batch 2 selesai: ${job.reconSummary?.batch2RecordedCount ?? 0}/${vidResult.videos.length} Video per role berhasil direkam.`
+      );
+
+      // Populate per-role summary results for compatibility with Attempt & Evidence tabs
+      const roleKeys = new Set<string>([
+        ...commandOutput.plan.videoCommands.map((v) => v.role),
+        ...vidResult.videos.map((v) => v.role),
+      ]);
+      for (const role of roleKeys) {
+        const flowId = `phase1-role-${role}`;
+        const roleVideo = vidResult.videos.find((v) => v.role === role);
+        const roleShots = ssResult.artifacts.filter((s) => s.role === role);
+        const passed = Boolean(roleVideo?.status === 'RECORDED') && roleShots.every((s) => s.status === 'CAPTURED');
+        if (!job.flows.some((f) => f.id === flowId)) {
+          job.flows.push({
+            id: flowId,
+            name: `Phase-1 Full Coverage: Role ${role}`,
+            source: '',
+            platform: isMobile ? 'android' : 'web',
+            status: passed ? 'PASSED' : 'FAILED',
+          });
+        }
+        const resultArtifacts: WebRunResult['artifacts'] = [];
+        if (roleVideo?.status === 'RECORDED' && roleVideo.path) {
+          resultArtifacts.push({ type: 'video', path: roleVideo.path, name: roleVideo.filename } as any);
+        }
+        for (const s of roleShots) {
+          if (s.status === 'CAPTURED' && s.path) {
+            resultArtifacts.push({ type: 'screenshot', path: s.path, name: s.filename } as any);
+          }
+        }
+        job.results.push({
+          flowId,
+          runId: `phase1-${role}-${Date.now().toString(36)}`,
+          finishedAt: new Date().toISOString(),
+          status: passed ? 'PASSED' : 'FAILED',
+          steps: [
+            {
+              id: `phase1-${role}-batch1-ss`,
+              index: 0,
+              action: `Batch 1 Long SS (${roleShots.filter((s) => s.status === 'CAPTURED').length}/${roleShots.length})`,
+              status: roleShots.every((s) => s.status === 'CAPTURED') ? 'PASSED' : 'FAILED',
+              durationMs: 0,
+            },
+            {
+              id: `phase1-${role}-batch2-video`,
+              index: 1,
+              action: `Batch 2 Continuous Video (${roleVideo?.durationSec ?? 0}s, ${roleVideo?.chapters.length ?? 0} chapter)`,
+              status: roleVideo?.status === 'RECORDED' ? 'PASSED' : 'FAILED',
+              durationMs: (roleVideo?.durationSec ?? 0) * 1000,
+            },
+          ],
+          artifacts: resultArtifacts,
         });
-        refreshBusinessFlowSummary(job.businessFlowMap);
-        this.addLog(job, 'flow-builder', 'Semua Business Flow otomatis disetujui. Melanjutkan eksekusi langsung.');
       }
 
-      // 7. Execution (if requested)
-      if (config.executeFlows && flows.length > 0) {
-        job.phase = 'EXECUTING_TESTS';
-        job.progress = 90;
-        await this.runFlows(job.id);
+      // 11. Post-ACC Step 4: Coverage Gap Diagnosis & Gemini Executive Summary (FR-08 & FR-09)
+      job.phase = 'DIAGNOSING_GAPS';
+      job.progress = 96;
+      this.addLog(job, 'discovery', '▶ [Post-ACC 4/4] Menganalisis halaman tidak bisa dicek & ringkasan laporan bersama Gemini...');
+      const diagnosedGaps = await this.deduplicateAndDiagnoseGaps(phase1Gaps);
+      job.coverageGaps = diagnosedGaps;
+      if (job.reconSummary) {
+        job.reconSummary.aiExecutiveSummary = await GeminiService.summarizePhase1Report({
+          projectName: job.name,
+          summary: job.reconSummary,
+          coverageGaps: diagnosedGaps,
+        }).catch(() => undefined);
       }
 
-      if (!isMobile) await this.runQualityAudit(job, config, signal);
+      await writeFile(path.join(jobArtifactDir, 'coverage-gaps.json'), JSON.stringify(diagnosedGaps, null, 2), 'utf8');
+      await writeFile(path.join(jobArtifactDir, 'application-inventory.json'), JSON.stringify(inventory, null, 2), 'utf8');
+
+      // Optional legacy DOM Quality Audit only when explicitly enabled
+      if (!isMobile && config.qualityAudit?.enabled === true) {
+        await this.runQualityAudit(job, config, signal);
+      }
+
+      // 12. Generate JSON / HTML / PDF Reports
+      job.phase = 'GENERATING_REPORTS';
+      job.progress = 98;
+      await this.writePhase1Reports(job, jobArtifactDir);
 
       // Completion
       job.status = 'COMPLETED';
       job.phase = 'COMPLETED';
       job.progress = 100;
       job.finishedAt = new Date().toISOString();
-      const runSummary = (job.results && job.results.length > 0)
-        ? `Eksekusi: ${job.results.filter(r => r.status === 'PASSED').length}/${job.results.length} flow lulus.`
-        : `${flows.length} skenario dihasilkan.`;
-      job.message = `Discovery selesai. ${inventory.pages.length} layar terpetakan. ${runSummary}`;
+      const ssCaptured = job.reconSummary?.batch1CapturedCount ?? 0;
+      const ssTotal = job.reconSummary?.batch1TotalScreenshots ?? 0;
+      const vidCaptured = job.reconSummary?.batch2RecordedCount ?? 0;
+      const vidTotal = job.reconSummary?.batch2TotalRoleVideos ?? 0;
+      job.message = `Fase 1 selesai: ${ssCaptured}/${ssTotal} Long SS, ${vidCaptured}/${vidTotal} Video Role, ${diagnosedGaps.length} kendala cakupan.`;
       this.addLog(job, 'system', '════════════════════════════════════════');
       this.addLog(job, 'system', `✅ ${job.message}`);
-      this.addLog(job, 'system', `🕒 Selesai pada: ${new Intl.DateTimeFormat('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'full', timeStyle: 'medium' }).format(new Date())} WIB`);
       this.addLog(job, 'system', '════════════════════════════════════════');
 
     } catch (err) {
@@ -2064,7 +2550,23 @@ export class DiscoveryService {
       job.finishedAt = new Date().toISOString();
       job.message = err instanceof Error ? err.message : String(err);
       this.addLog(job, 'system', `Gagal: ${job.message}`);
+      if (phase1Gaps.length > 0 && !job.coverageGaps) {
+        job.coverageGaps = await this.deduplicateAndDiagnoseGaps(phase1Gaps).catch(() => phase1Gaps);
+        await this.writePhase1Reports(job, jobArtifactDir).catch(() => {});
+      }
     } finally {
+      if (holdingEmulatorReview) {
+        setEmulatorReviewHold(false);
+      }
+      if (androidJobStarted) {
+        notifyAndroidJobFinished();
+        const otherActiveAndroid = Array.from(this.jobs.values()).some(
+          (j) => j.id !== job.id && ['RUNNING', 'QUEUED', 'WAITING_REVIEW'].includes(j.status) && j.config.platform === 'android'
+        );
+        if (!otherActiveAndroid) {
+          await stopAllManagedEmulators().catch(() => {});
+        }
+      }
       if (managedRuntimeRelease) {
         managedRuntimeRelease();
         try {
@@ -2082,6 +2584,7 @@ export class DiscoveryService {
           this.addLog(job, 'database', `Database cleanup warning: ${cleanErr instanceof Error ? cleanErr.message : String(cleanErr)}`);
         }
       }
+      await this.writeWorkspaceSnapshot(job).catch(() => {});
       void this.persist();
     }
   }
@@ -2105,7 +2608,7 @@ export class DiscoveryService {
     if (!baselineJob && (payload.repositoryUrl || payload.repoName)) {
       const repoNameLower = (payload.repoName || '').toLowerCase();
       baselineJob = Array.from(this.jobs.values())
-        .filter(j => 
+        .filter(j =>
           j.kind !== 'incremental-room' &&
           ((payload.repositoryUrl && j.config?.repositoryUrl === payload.repositoryUrl) ||
            (repoNameLower && (j.name?.toLowerCase().includes(repoNameLower) || j.config?.name?.toLowerCase().includes(repoNameLower))))
@@ -2113,7 +2616,6 @@ export class DiscoveryService {
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
     }
     if (!baselineJob) {
-      // Fallback ke job non-incremental terakhir yang status COMPLETED dan memiliki flows
       baselineJob = Array.from(this.jobs.values())
         .filter(j => j.kind !== 'incremental-room' && j.status === 'COMPLETED' && j.flows && j.flows.length > 0)
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
@@ -2138,7 +2640,6 @@ export class DiscoveryService {
       const possibleDirs = [
         baselineJob.config?.localPath,
         baselineJob.workspace?.projectPath,
-        'C:\\xampp\\htdocs\\Zannora',
         path.join(this.projectRoot, '..', payload.repoName || '')
       ].filter((d): d is string => Boolean(d && typeof d === 'string'));
 
@@ -2195,9 +2696,13 @@ export class DiscoveryService {
     await this.prepareWorkspace(job, job.config as any);
     this.jobs.set(id, job);
 
-    const baselinePassword = this.runtimeAuditPasswords.get(baselineJob.id);
-    if (baselinePassword) {
-      this.runtimeAuditPasswords.set(id, baselinePassword);
+    const baselineRoles = this.runtimeRoleCredentials.get(baselineJob.id);
+    if (baselineRoles) {
+      this.runtimeRoleCredentials.set(id, new Map(baselineRoles));
+    }
+    const baselineSecrets = this.jobSecrets.get(baselineJob.id);
+    if (baselineSecrets) {
+      this.jobSecrets.set(id, new Set(baselineSecrets));
     }
 
     void this.persist();

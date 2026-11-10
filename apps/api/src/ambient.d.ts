@@ -4,16 +4,25 @@ declare module 'node:*' {
   const all: any;
   export default all;
   export const spawn: any;
+  export const execFile: any;
+  export const execFileSync: any;
   export const execSync: any;
   export type ChildProcess = any;
   export const ChildProcess: any;
+  export const promisify: any;
+  export const inflateSync: any;
+  export const deflateSync: any;
+  export const createReadStream: any;
   export const mkdir: any;
+  export const mkdirSync: any;
   export const mkdtemp: any;
   export const writeFile: any;
+  export const writeFileSync: any;
   export const readFile: any;
   export const readdir: any;
   export const copyFile: any;
   export const rm: any;
+  export const rmSync: any;
   export const stat: any;
   export const lstat: any;
   export const opendir: any;
@@ -78,6 +87,12 @@ interface Buffer {
   toString(encoding?: string): string;
   slice(start?: number, end?: number): Buffer;
   subarray(start?: number, end?: number): Buffer;
+  equals(other: any): boolean;
+  readUInt32BE(offset?: number): number;
+  readInt32BE(offset?: number): number;
+  readUInt8(offset?: number): number;
+  writeUInt32BE(value: number, offset?: number): number;
+  writeUInt8(value: number, offset?: number): number;
   length: number;
   [index: number]: number;
 }

@@ -482,13 +482,239 @@ export function buildReport(job: DiscoveryJob, artifactPrefix = '', options?: { 
       width: 100%;
     }
 
-    /* LIGHTBOX MODAL */
+    /* PHASE 1 SECTIONS */
+    .p1-section {
+      margin-bottom: 32px;
+    }
+    .p1-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .p1-section-header h2 {
+      font-size: 19px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .p1-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+    }
+    .p1-summary-banner {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(16, 185, 129, 0.06));
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--primary);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      margin-bottom: 18px;
+    }
+    .p1-summary-banner .ai-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--primary);
+      margin-bottom: 8px;
+    }
+    .p1-summary-banner p {
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.65;
+      white-space: pre-line;
+    }
+    .p1-mini-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .p1-mini-stat {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .p1-mini-stat .k {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .p1-mini-stat .v {
+      font-size: 22px;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .p1-two-col {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 16px;
+    }
+    .p1-ss-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+    }
+    .p1-ss-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+      transition: transform 0.16s ease, border-color 0.16s ease;
+    }
+    .p1-ss-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--primary);
+    }
+    .p1-ss-thumb-wrap {
+      height: 280px;
+      overflow: hidden;
+      background: #060911;
+      border-bottom: 1px solid var(--border-subtle);
+      position: relative;
+    }
+    .p1-ss-thumb {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top center;
+      display: block;
+    }
+    .p1-ss-badge-height {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      background: rgba(9, 13, 22, 0.86);
+      color: #e2e8f0;
+      border: 1px solid rgba(255,255,255,0.14);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .p1-ss-meta {
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .p1-role-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: var(--primary-glow);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      align-self: flex-start;
+    }
+    .p1-video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+      gap: 18px;
+    }
+    .p1-video-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .p1-chapter-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .p1-chapter-btn {
+      background: var(--bg-card-inner);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      padding: 4px 9px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: border-color 0.14s ease, color 0.14s ease;
+    }
+    .p1-chapter-btn:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+    .p1-gap-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .p1-gap-card {
+      background: var(--bg-card);
+      border: 1px solid var(--danger-border);
+      border-left: 4px solid var(--danger);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+    }
+    .p1-gap-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .p1-gap-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .p1-gap-chip {
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      background: var(--bg-card-inner);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .p1-gap-ai {
+      margin-top: 12px;
+      padding: 12px 14px;
+      background: rgba(56, 189, 248, 0.07);
+      border: 1px solid rgba(56, 189, 248, 0.22);
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    /* LIGHTBOX MODAL (Supports scrollable tall full-page screenshots) */
     .lightbox {
       display: none;
       position: fixed;
       z-index: 9999;
       top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.85);
+      background: rgba(0,0,0,0.88);
       backdrop-filter: blur(8px);
       align-items: center;
       justify-content: center;
@@ -498,12 +724,20 @@ export function buildReport(job: DiscoveryJob, artifactPrefix = '', options?: { 
     .lightbox.active {
       display: flex;
     }
-    .lightbox-img {
-      max-width: 90vw;
-      max-height: 85vh;
-      object-fit: contain;
+    .lightbox-scroll {
+      max-width: 92vw;
+      max-height: 82vh;
+      overflow: auto;
       border-radius: 8px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+      background: #050811;
+      padding: 4px;
+    }
+    .lightbox-img {
+      display: block;
+      max-width: min(88vw, 1080px);
+      height: auto;
+      border-radius: 6px;
     }
     .lightbox-caption {
       margin-top: 12px;
@@ -652,7 +886,7 @@ export function buildReport(job: DiscoveryJob, artifactPrefix = '', options?: { 
         <span>QA HEALTH SCORE</span>
         <span>🛡️</span>
       </div>
-      <div class="metric-val" id="kpi-health" style="color: var(--success)">100%</div>
+      <div class="metric-val" id="kpi-health" style="color: var(--success)">—</div>
       <div class="metric-sub" id="kpi-health-sub">Tingkat kelulusan skenario pengujian</div>
     </div>
 
@@ -661,8 +895,8 @@ export function buildReport(job: DiscoveryJob, artifactPrefix = '', options?: { 
         <span>TOTAL SKENARIO</span>
         <span>📑</span>
       </div>
-      <div class="metric-val" id="kpi-total" style="color: var(--text)">8</div>
-      <div class="metric-sub">Skenario deterministik diuji</div>
+      <div class="metric-val" id="kpi-total" style="color: var(--text)">0</div>
+      <div class="metric-sub">Skenario / Role Fase 1 diuji</div>
     </div>
 
     <div class="metric-card">
@@ -670,8 +904,8 @@ export function buildReport(job: DiscoveryJob, artifactPrefix = '', options?: { 
         <span>SKENARIO LULUS</span>
         <span>✅</span>
       </div>
-      <div class="metric-val" id="kpi-passed" style="color: var(--success)">8</div>
-      <div class="metric-sub">100% Bebas Crash &amp; Terverifikasi</div>
+      <div class="metric-val" id="kpi-passed" style="color: var(--success)">0</div>
+      <div class="metric-sub">Bebas Crash &amp; Terverifikasi</div>
     </div>
 
     <div class="metric-card">
@@ -692,6 +926,13 @@ export function buildReport(job: DiscoveryJob, artifactPrefix = '', options?: { 
       <div class="metric-sub" id="kpi-engine-issues-sub">Infrastruktur driver/daemon</div>
     </div>
   </div>
+
+  <!-- PHASE 1: OVERVIEW, GEMINI SUMMARY, ENV & AUTH -->
+  <div id="phase1-overview-container"></div>
+  <div id="phase1-env-auth-container"></div>
+  <div id="phase1-long-screenshots-container"></div>
+  <div id="phase1-role-videos-container"></div>
+  <div id="phase1-coverage-gaps-container"></div>
 
   <!-- FILTER & ATTEMPT SELECTOR -->
   <div class="filter-section">
@@ -739,10 +980,12 @@ export function buildReport(job: DiscoveryJob, artifactPrefix = '', options?: { 
   </div>
 </div>
 
-<!-- LIGHTBOX MODAL -->
+<!-- LIGHTBOX MODAL (Scrollable for Full-Page Long Screenshots) -->
 <div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
   <button class="lightbox-close" onclick="closeLightbox(event)">&times;</button>
-  <img class="lightbox-img" id="lightbox-img" src="" alt="Preview">
+  <div class="lightbox-scroll">
+    <img class="lightbox-img" id="lightbox-img" src="" alt="Preview">
+  </div>
   <div class="lightbox-caption" id="lightbox-caption"></div>
 </div>
 
@@ -755,8 +998,14 @@ ${JSON.stringify(structuredData)}
   const reportData = JSON.parse(document.getElementById('qc-report-data').textContent);
   let currentAttemptId = '${initialAttemptId}';
   let currentStatusFilter = '${initialStatus}';
+  let currentLongSsRoleFilter = 'all';
 
   function init() {
+    renderPhase1Overview();
+    renderPhase1EnvAndAccounts();
+    renderPhase1LongScreenshots();
+    renderPhase1RoleVideos();
+    renderPhase1CoverageGaps();
     renderAttemptPills();
     renderView();
   }
@@ -846,7 +1095,12 @@ ${JSON.stringify(structuredData)}
     const passedCount = allFlowsInAttempt.filter(f => f.status === 'PASSED').length;
     const failedCount = allFlowsInAttempt.filter(f => f.status !== 'PASSED').length;
     const totalCount = allFlowsInAttempt.length;
-    const passRate = totalCount > 0 ? Math.round((passedCount / totalCount) * 100) : 0;
+    const phase1 = reportData.summary && reportData.summary.phase1;
+    const p1Captured = phase1 ? (phase1.longScreenshotsCaptured || 0) : 0;
+    const p1Total = phase1 ? (phase1.longScreenshotsTotal || 0) : 0;
+    const passRate = totalCount > 0
+      ? Math.round((passedCount / totalCount) * 100)
+      : (p1Total > 0 ? Math.round((p1Captured / p1Total) * 100) : 0);
 
     // Update Counts in Filter Buttons
     document.getElementById('count-all').textContent = totalCount;
@@ -855,16 +1109,21 @@ ${JSON.stringify(structuredData)}
 
     // Update Scorecards
     const healthEl = document.getElementById('kpi-health');
-    healthEl.textContent = passRate + '%';
+    healthEl.textContent = (totalCount === 0 && p1Total === 0) ? '—' : (passRate + '%');
     healthEl.style.color = passRate >= 80 ? 'var(--success)' : 'var(--danger)';
 
     const healthSubEl = document.getElementById('kpi-health-sub');
-    healthSubEl.textContent = passRate === 100 ? 'Semua lolos sempurna (Zero Defect)' : (failedCount + ' skenario membutuhkan perhatian');
+    if (totalCount === 0 && p1Total > 0) {
+      healthSubEl.textContent = 'Cakupan Batch 1 Long Screenshot (' + p1Captured + '/' + p1Total + ')';
+    } else {
+      healthSubEl.textContent = passRate === 100 && totalCount > 0 ? 'Semua lolos sempurna' : (failedCount + ' skenario membutuhkan perhatian');
+    }
 
     document.getElementById('kpi-total').textContent = totalCount;
     document.getElementById('kpi-passed').textContent = passedCount;
 
-    const userAppErrors = allFlowsInAttempt.filter(f => f.errorOrigin === 'user_target_application').length;
+    const gapsCount = (reportData.coverageGaps || []).length;
+    const userAppErrors = allFlowsInAttempt.filter(f => f.errorOrigin === 'user_target_application').length + gapsCount;
     const qcEngineErrors = allFlowsInAttempt.filter(f => f.errorOrigin === 'qc_maestro_engine').length;
 
     const userBugsEl = document.getElementById('kpi-user-bugs');
@@ -940,82 +1199,15 @@ ${JSON.stringify(structuredData)}
       }
 
       function humanizeCaption(name) {
-        const base = (name || '').replace(/\.[^/.]+$/, '').toLowerCase();
-        if (base.includes('launch-screen') || base.includes('splash')) return 'Layar Login & Pemilihan Role Demo';
-        if (base.includes('dashboard-beranda')) return 'Dashboard Beranda Siswa (Ahmad Farhan)';
-        if (base.includes('dashboard-restored')) return 'Beranda Setelah Navigasi Tab';
-        if (base.includes('tab-beranda')) return 'Navigasi Tab: Beranda';
-        if (base.includes('tab-absensi')) return 'Navigasi Tab: Absensi Siswa';
-        if (base.includes('tab-keuangan')) return 'Navigasi Tab: Rincian Keuangan';
-        if (base.includes('tab-informasi')) return 'Navigasi Tab: Informasi & Kedisiplinan';
-        if (base.includes('tab-t2q')) return 'Navigasi Tab: Hafalan & Tilawah T2Q';
-        if (base.includes('home-top')) return 'Beranda: Header & Profil Siswa';
-        if (base.includes('home-middle')) return 'Beranda: Widget Presensi & Poin';
-        if (base.includes('home-bottom')) return 'Beranda: Agenda & Mutasi Amal';
-        if (base.includes('home-restored-top')) return 'Beranda: Kembali ke Posisi Atas';
-        if (base.includes('amal-form-opened')) return 'Formulir Mutasi Amal Siswa Terbuka';
-        if (base.includes('amal-form-filled')) return 'Pengisian Checklist Mutasi Amal (Selesai)';
-        if (base.includes('amal-completed-return')) return 'Beranda Siswa Setelah Simpan Amal';
-        if (base.includes('absensi-loaded')) return 'Absensi: Rekap Presensi & Kalender';
-        if (base.includes('izin-form-opened')) return 'Formulir Pengajuan Izin Siswa Terbuka';
-        if (base.includes('izin-form-filled')) return 'Formulir Pengajuan Izin Diisi Lengkap';
-        if (base.includes('absensi-riwayat-pengajuan')) return 'Tab Absensi: Riwayat Pengajuan Izin';
-        if (base.includes('absensi-riwayat-kehadiran')) return 'Tab Absensi: Riwayat Presensi Siswa';
-        if (base.includes('keuangan-loaded')) return 'Keuangan: Daftar Tagihan SPP Siswa';
-        if (base.includes('keuangan-tagihan-unpaid')) return 'Keuangan: Rincian Tagihan Belum Dibayar';
-        if (base.includes('keuangan-struk-pembayaran')) return 'Keuangan: Struk Bukti Pembayaran';
-        if (base.includes('keuangan-restored')) return 'Keuangan: Kembali ke Tampilan Normal';
-        if (base.includes('informasi-kedisiplinan')) return 'Informasi: Rekap Catatan Kedisiplinan';
-        if (base.includes('informasi-berita-sekolah')) return 'Informasi: Pengumuman & Berita Sekolah';
-        if (base.includes('informasi-berita-scrolled')) return 'Informasi: Feed Berita Lengkap';
-        if (base.includes('t2q-loaded')) return 'T2Q: Riwayat Hafalan Tahfidz';
-        if (base.includes('t2q-tahsin-modul')) return 'T2Q: Modul Pembelajaran Tahsin';
-        if (base.includes('t2q-tahsin-detail')) return 'T2Q: Modal Detail Penilaian Tahsin';
-        if (base.includes('t2q-tahsin')) return 'T2Q: Rekap Pembelajaran Tahsin';
-        if (base.includes('t2q-tilawah-progress')) return 'T2Q: Progres Tilawah Al-Quran';
-        if (base.includes('t2q-tilawah-detail')) return 'T2Q: Modal Detail Setoran Tilawah (An-Nur)';
-        if (base.includes('t2q-tilawah')) return 'T2Q: Catatan & Setoran Tilawah';
-        if (base.includes('t2q-hafalan-setoran')) return 'T2Q: Modal Detail Hafalan Tahfidz (Al-Mulk)';
-        if (base.includes('t2q-scrolled')) return 'T2Q: Riwayat Hafalan Lengkap';
-        if (base.includes('detail-keuangan-tagihan-unpaid')) return 'Keuangan: Detail Tagihan Belum Dibayar';
-        if (base.includes('detail-keuangan-rincian-tagihan')) return 'Keuangan: Rincian Breakdown Komponen Tagihan';
-        if (base.includes('detail-keuangan-instruksi-bank-transfer')) return 'Keuangan: Instruksi Bank Transfer BSI Virtual Account';
-        if (base.includes('detail-keuangan-riwayat-lunas')) return 'Keuangan: Riwayat Transaksi Lunas';
-        if (base.includes('detail-absensi-riwayat-presensi')) return 'Absensi: Detail Pengajuan Izin Siswa';
-        if (base.includes('detail-absensi-formulir-izin')) return 'Absensi: Formulir Pengajuan Izin Siswa';
-        if (base.includes('detail-absensi-kehadiran-siswa')) return 'Absensi: Modal Detail Presensi Harian';
-        if (base.includes('detail-absensi-kehadiran-statistik')) return 'Absensi: Statistik Kehadiran & Ketepatan Waktu';
-        if (base.includes('detail-beranda-pusat-notifikasi')) return 'Beranda: Pusat Notifikasi Sekolah';
-        if (base.includes('detail-beranda-profil-siswa')) return 'Beranda: Profil Akun & Data Siswa';
-        if (base.includes('detail-beranda-ekskul-daftar')) return 'Beranda: Daftar & Status Ekstrakurikuler';
-        if (base.includes('detail-beranda-roadmap-amal-siswa')) return 'Beranda: Roadmap Level & Lencana Amal';
-        if (base.includes('detail-beranda-form-amal-yaumi')) return 'Beranda: Formulir Checklist Amalan Harian';
-        if (base.includes('detail-beranda-artikel-berita')) return 'Beranda: Halaman Penuh Artikel Berita';
-        if (base.includes('detail-informasi-pelanggaran-santri')) return 'Informasi: Detail Penghargaan & Catatan Poin';
-        if (base.includes('detail-informasi-berita-lengkap')) return 'Informasi: Baca Berita & Pengumuman Lengkap';
-        if (base.includes('detail-role-guru-dashboard')) return 'Dewan Guru: Dashboard Ustadzah Khadijah, S.Pd';
-        if (base.includes('detail-role-guru-presensi')) return 'Dewan Guru: Presensi & Riwayat Kehadiran Guru';
-        if (base.includes('detail-role-guru-sarpras-laporan')) return 'Dewan Guru: Detail Tiket Keluhan Sarpras';
-        if (base.includes('detail-role-guru-sarpras')) return 'Dewan Guru: Daftar Pengaduan Sarpras';
-        if (base.includes('detail-role-guru-profil')) return 'Dewan Guru: Profil & Data Kepegawaian Guru';
-        if (base.includes('role-guru-dashboard')) return 'Dashboard Dewan Guru (Ustadzah Khadijah, S.Pd)';
-        if (base.includes('detail-role-manager-dashboard')) return 'Manager Sarpras: Dashboard Ir. H. Syarifuddin, M.T.';
-        if (base.includes('detail-role-manager-tiket-sarpras')) return 'Manager Sarpras: Detail Tiket & Foto Sarpras';
-        if (base.includes('detail-role-manager-tiket-disposisi')) return 'Manager Sarpras: Disposisi Penugasan & Timeline';
-        if (base.includes('role-manager-dashboard')) return 'Dashboard Manager Sarpras (Ir. H. Syarifuddin, M.T.)';
-        if (base.includes('detail-role-teknisi-dashboard')) return 'Staff Teknisi: Dashboard Penugasan Ahmad Rian';
-        if (base.includes('detail-role-teknisi-tiket')) return 'Staff Teknisi: Detail Pekerjaan Tiket Lapangan';
-        if (base.includes('detail-role-teknisi-form-laporan-selesai')) return 'Staff Teknisi: Formulir Laporan Selesai & Upload Foto';
-        if (base.includes('role-teknisi-dashboard')) return 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
-        if (base.includes('drawer-menu-opened')) return 'Menu Samping (Drawer): Profil, Ekskul & Versi';
-        if (base.includes('profil-siswa-screen')) return 'Profil Siswa & Akun Keluarga (Saudara)';
-        if (base.includes('ekskul-screen')) return 'Daftar Kegiatan Ekstrakurikuler';
-        if (base.includes('kalender-kegiatan-screen')) return 'Kalender Akademik & Agenda Kegiatan';
-        if (base.includes('berita-detail-screen')) return 'Detail Berita & Pengumuman Sekolah';
-        if (base.includes('notifikasi-screen')) return 'Pusat Notifikasi Aplikasi';
-        if (base.includes('step-13-scroll')) return 'Dashboard Beranda: Aksi Cepat & Agenda';
-        if (base.includes('step-16-scroll')) return 'Detail Berita: Hari Santri Nasional';
-        return (name || '').replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+        const clean = String(name || '').replace(/\.[^/.]+$/, '').replace(/__full$/i, '');
+        if (!clean) return 'Screenshot';
+        if (clean.includes('__')) {
+          const parts = clean.split('__');
+          const rolePart = (parts[0] || '').toUpperCase();
+          const slugPart = (parts.slice(1).join(' ') || 'home').replace(/[-_]+/g, ' ').trim();
+          return '[' + rolePart + '] ' + (slugPart || 'Halaman Utama');
+        }
+        return clean.replace(/[-_]+/g, ' ').trim();
       }
 
       // Screenshot gallery
@@ -1023,7 +1215,7 @@ ${JSON.stringify(structuredData)}
         html += '  <div class="gallery-grid">';
         flow.screenshots.forEach(sc => {
           const caption = humanizeCaption(sc.name);
-          html += '    <div class="gallery-card" onclick="openLightbox(\\'' + encodeURI(sc.url) + '\\', \\'' + escapeHtml(caption + ' (' + sc.name + ')') + '\\')">';
+          html += '    <div class="gallery-card" data-src="' + escapeHtml(sc.url) + '" data-caption="' + escapeHtml(caption + ' (' + sc.name + ')') + '" onclick="openLightboxFromEl(this)">';
           html += '      <img class="gallery-img" src="' + escapeHtml(sc.url) + '" alt="' + escapeHtml(caption) + '" loading="lazy">';
           html += '      <div class="gallery-caption"><strong style="display:block;font-size:12px;color:var(--text);margin-bottom:3px;">' + escapeHtml(caption) + '</strong><span style="font-size:10.5px;color:var(--text-dim);font-family:var(--font-mono);">' + escapeHtml(sc.name) + '</span></div>';
           html += '    </div>';
@@ -1037,7 +1229,7 @@ ${JSON.stringify(structuredData)}
         html += '    <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px; color: var(--primary);">🎬 Rekaman Video Eksekusi:</div>';
         flow.videos.forEach(v => {
           html += '    <div style="margin-bottom: 12px; background: var(--bg-card-inner); padding: 12px; border-radius: var(--radius); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 8px;">';
-          html += '      <video controls playsinline preload="metadata" style="width: 100%; max-width: 480px; max-height: 480px; border-radius: 8px; background: #000;" src="' + escapeHtml(v.url) + '"></video>';
+          html += '      <video controls playsinline preload="metadata" style="width: 100%; max-width: 560px; max-height: 480px; border-radius: 8px; background: #000;" src="' + escapeHtml(v.url) + '"></video>';
           html += '      <div><a href="' + escapeHtml(v.url) + '" target="_blank" download style="color: var(--primary); font-size: 12px; text-decoration: none; font-weight: 600;">⬇️ Unduh Video (' + escapeHtml(v.name) + ')</a></div>';
           html += '    </div>';
         });
@@ -1050,12 +1242,297 @@ ${JSON.stringify(structuredData)}
     container.innerHTML = html;
   }
 
+  function renderPhase1Overview() {
+    const el = document.getElementById('phase1-overview-container');
+    if (!el) return;
+    const summary = reportData.summary && reportData.summary.phase1;
+    const recon = reportData.reconSummary;
+    if (!summary && !recon) {
+      el.innerHTML = '';
+      return;
+    }
+
+    const totalRoles = (recon && recon.totalRoles) || (summary && summary.totalRoles) || 0;
+    const totalPages = (recon && recon.totalPages) || (summary && summary.totalPages) || 0;
+    const totalFeatures = (recon && recon.totalInteractiveFeatures) || (summary && summary.totalInteractiveFeatures) || 0;
+    const ssCaptured = (reportData.longScreenshots || []).filter(s => s.status === 'CAPTURED').length;
+    const ssTotal = (reportData.longScreenshots || []).length || (summary && summary.longScreenshotsTotal) || 0;
+    const vidRecorded = (reportData.roleVideos || []).filter(v => v.status === 'RECORDED').length;
+    const vidTotal = (reportData.roleVideos || []).length || (summary && summary.roleVideosTotal) || 0;
+    const gapsCount = (reportData.coverageGaps || []).length;
+    const aiExec = (recon && recon.aiExecutiveSummary) || (summary && summary.aiExecutiveSummary) || '';
+
+    let html = '<section class="p1-section">';
+    html += '  <div class="p1-section-header"><h2>🧭 Ringkasan Cakupan Penuh Fase 1</h2><span class="metric-sub">Stage 1 Recon → ACC Gate → Batch 1 Long SS → Batch 2 Continuous Role Video</span></div>';
+
+    if (aiExec) {
+      html += '  <div class="p1-summary-banner">';
+      html += '    <div class="ai-badge">✨ Ringkasan Eksekutif (Gemini AI Collaboration)</div>';
+      html += '    <p>' + escapeHtml(aiExec) + '</p>';
+      html += '  </div>';
+    }
+
+    html += '  <div class="p1-mini-grid">';
+    html += '    <div class="p1-mini-stat"><div class="k">Role Terdeteksi</div><div class="v">' + totalRoles + '</div></div>';
+    html += '    <div class="p1-mini-stat"><div class="k">Halaman / Layar Unik</div><div class="v">' + totalPages + '</div></div>';
+    html += '    <div class="p1-mini-stat"><div class="k">Tab / Fitur Interaktif</div><div class="v">' + totalFeatures + '</div></div>';
+    html += '    <div class="p1-mini-stat"><div class="k">Batch 1 Long SS</div><div class="v" style="color:var(--success)">' + ssCaptured + '/' + ssTotal + '</div></div>';
+    html += '    <div class="p1-mini-stat"><div class="k">Batch 2 Video Role</div><div class="v" style="color:var(--primary)">' + vidRecorded + '/' + vidTotal + '</div></div>';
+    html += '    <div class="p1-mini-stat"><div class="k">Halaman Terkendala</div><div class="v" style="color:' + (gapsCount > 0 ? 'var(--danger)' : 'var(--success)') + '">' + gapsCount + '</div></div>';
+    html += '  </div>';
+    html += '</section>';
+    el.innerHTML = html;
+  }
+
+  function renderPhase1EnvAndAccounts() {
+    const el = document.getElementById('phase1-env-auth-container');
+    if (!el) return;
+    const envProv = reportData.envProvisioning;
+    const accounts = reportData.provisionedAccounts || [];
+    if (!envProv && accounts.length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+
+    let html = '<section class="p1-section">';
+    html += '  <div class="p1-section-header"><h2>🔐 Provisioning .env Demo & Akun Role Runtime</h2><span class="metric-sub">Kredensial hanya disimpan di memori runtime (tidak diserialisasi ke laporan)</span></div>';
+    html += '  <div class="p1-two-col">';
+
+    html += '    <div class="p1-panel">';
+    html += '      <div style="font-weight:700;margin-bottom:10px;font-size:14px;">⚙️ File .env Demo Otomatis</div>';
+    if (envProv && envProv.entries && envProv.entries.length) {
+      html += '      <div class="steps-table-wrap"><table class="steps-table"><thead><tr><th>Direktori</th><th>Template → Target</th><th>Key Terisi</th><th>Dibantu Gemini</th></tr></thead><tbody>';
+      envProv.entries.forEach(entry => {
+        html += '        <tr>';
+        html += '          <td><code>' + escapeHtml(entry.directory || '.') + '</code></td>';
+        html += '          <td><code>' + escapeHtml(entry.templateFile) + '</code> → <code>' + escapeHtml(entry.targetEnvFile) + '</code></td>';
+        html += '          <td>' + ((entry.keysPopulated || []).length) + ' keys</td>';
+        html += '          <td>' + ((entry.aiInferredKeys || []).length) + ' keys</td>';
+        html += '        </tr>';
+      });
+      html += '      </tbody></table></div>';
+      if (envProv.warnings && envProv.warnings.length) {
+        html += '      <div style="font-size:12px;color:var(--warning);margin-top:8px;">⚠️ Peringatan: ' + escapeHtml(envProv.warnings.join('; ')) + '</div>';
+      }
+    } else {
+      html += '      <div style="font-size:13px;color:var(--text-muted);">Tidak ada template example.env yang perlu diprovisioning (atau target existing).</div>';
+    }
+    html += '    </div>';
+
+    html += '    <div class="p1-panel">';
+    html += '      <div style="font-weight:700;margin-bottom:10px;font-size:14px;">👤 Akun Role Terprovision</div>';
+    if (accounts.length) {
+      html += '      <div class="steps-table-wrap"><table class="steps-table"><thead><tr><th>Role</th><th>Identifier</th><th>Sumber</th><th>Verifikasi</th><th>Rute</th></tr></thead><tbody>';
+      accounts.forEach(acc => {
+        html += '        <tr>';
+        html += '          <td><span class="p1-role-chip">' + escapeHtml(acc.role) + '</span></td>';
+        html += '          <td><code>' + escapeHtml(acc.identifier || '—') + '</code></td>';
+        html += '          <td>' + escapeHtml(acc.source) + '</td>';
+        html += '          <td><span style="font-weight:700;color:' + (acc.verified ? 'var(--success)' : 'var(--warning)') + '">' + (acc.verified ? '✓ TERVERIFIKASI' : 'BELUM') + '</span></td>';
+        html += '          <td><code>' + escapeHtml(acc.homePath || acc.loginPath || '/') + '</code></td>';
+        html += '        </tr>';
+      });
+      html += '      </tbody></table></div>';
+    } else {
+      html += '      <div style="font-size:13px;color:var(--text-muted);">Target tidak membutuhkan login atau belum ada akun terverifikasi.</div>';
+    }
+    html += '    </div>';
+
+    html += '  </div>';
+    html += '</section>';
+    el.innerHTML = html;
+  }
+
+  function selectLongSsRole(role) {
+    currentLongSsRoleFilter = role;
+    renderPhase1LongScreenshots();
+  }
+
+  function renderPhase1LongScreenshots() {
+    const el = document.getElementById('phase1-long-screenshots-container');
+    if (!el) return;
+    const shots = reportData.longScreenshots || [];
+    if (!shots.length) {
+      el.innerHTML = '';
+      return;
+    }
+
+    const roles = [...new Set(shots.map(s => s.role || 'public'))];
+    const filtered = currentLongSsRoleFilter === 'all' ? shots : shots.filter(s => s.role === currentLongSsRoleFilter);
+
+    let html = '<section class="p1-section">';
+    html += '  <div class="p1-section-header">';
+    html += '    <h2>🖼️ Batch 1: Galeri Long Screenshot Full-Page (' + shots.filter(s => s.status === 'CAPTURED').length + '/' + shots.length + ')</h2>';
+    html += '    <div class="filter-pills">';
+    html += '      <button class="pill ' + (currentLongSsRoleFilter === 'all' ? 'active' : '') + '" data-role="all" onclick="selectLongSsRole(this.dataset.role)">Semua Role (' + shots.length + ')</button>';
+    roles.forEach(role => {
+      const cnt = shots.filter(s => s.role === role).length;
+      html += '      <button class="pill ' + (currentLongSsRoleFilter === role ? 'active' : '') + '" data-role="' + escapeHtml(role) + '" onclick="selectLongSsRole(this.dataset.role)">' + escapeHtml(role.toUpperCase()) + ' (' + cnt + ')</button>';
+    });
+    html += '    </div>';
+    html += '  </div>';
+
+    html += '  <div class="p1-ss-grid">';
+    filtered.forEach(ss => {
+      const isOk = ss.status === 'CAPTURED';
+      const cap = '[' + (ss.role || 'user').toUpperCase() + '] ' + (ss.pageTitle || ss.pagePath) + ' — ' + ss.width + 'x' + ss.height + 'px (' + (ss.segmentCount || 1) + ' segmen)';
+      html += '    <div class="p1-ss-card" data-src="' + escapeHtml(ss.url) + '" data-caption="' + escapeHtml(cap) + '" onclick="if(this.dataset.src){openLightboxFromEl(this)}">';
+      if (isOk && ss.url) {
+        html += '      <div class="p1-ss-thumb-wrap">';
+        html += '        <img class="p1-ss-thumb" src="' + escapeHtml(ss.url) + '" alt="' + escapeHtml(ss.pageTitle || ss.pagePath) + '" loading="lazy">';
+        html += '        <span class="p1-ss-badge-height">' + ss.width + '×' + ss.height + 'px · ' + (ss.segmentCount || 1) + ' seg</span>';
+        html += '      </div>';
+      } else {
+        html += '      <div class="p1-ss-thumb-wrap" style="display:flex;align-items:center;justify-content:center;padding:16px;color:var(--danger);font-size:12px;">✕ Gagal Capture: ' + escapeHtml(ss.error || 'Unknown') + '</div>';
+      }
+      html += '      <div class="p1-ss-meta">';
+      html += '        <span class="p1-role-chip">' + escapeHtml(ss.role) + '</span>';
+      html += '        <strong style="font-size:13px;color:var(--text);">' + escapeHtml(ss.pageTitle || ss.pagePath) + '</strong>';
+      html += '        <code style="font-size:11px;color:var(--text-dim);word-break:break-all;">' + escapeHtml(ss.pagePath) + '</code>';
+      html += '      </div>';
+      html += '    </div>';
+    });
+    html += '  </div>';
+    html += '</section>';
+    el.innerHTML = html;
+  }
+
+  function jumpRoleVideoChapter(videoId, startSec) {
+    const vid = document.getElementById(videoId);
+    if (!vid) return;
+    vid.currentTime = Number(startSec) || 0;
+    if (typeof vid.play === 'function') {
+      vid.play().catch(function() {});
+    }
+    vid.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function renderPhase1RoleVideos() {
+    const el = document.getElementById('phase1-role-videos-container');
+    if (!el) return;
+    const videos = reportData.roleVideos || [];
+    if (!videos.length) {
+      el.innerHTML = '';
+      return;
+    }
+
+    let html = '<section class="p1-section">';
+    html += '  <div class="p1-section-header"><h2>🎬 Batch 2: Video Perjalanan Lengkap per Role (' + videos.filter(v => v.status === 'RECORDED').length + '/' + videos.length + ')</h2><span class="metric-sub">Klik chapter untuk melompat langsung ke halaman/tab terkait</span></div>';
+    html += '  <div class="p1-video-grid">';
+
+    videos.forEach((v, idx) => {
+      const domId = 'p1-role-video-' + idx;
+      const sizeKb = v.sizeBytes ? Math.round(v.sizeBytes / 1024) : 0;
+      html += '    <div class="p1-video-card">';
+      html += '      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">';
+      html += '        <div><span class="p1-role-chip">' + escapeHtml(v.role) + '</span> <strong style="margin-left:6px;font-size:14px;">Perjalanan Lengkap Role ' + escapeHtml(v.role) + '</strong></div>';
+      html += '        <span style="font-size:12px;color:var(--text-dim);font-family:var(--font-mono);">' + (v.durationSec || 0) + 's · ' + sizeKb + ' KB · ' + (v.status === 'RECORDED' ? '✓ RECORDED' : '✕ FAILED') + '</span>';
+      html += '      </div>';
+
+      if (v.status === 'RECORDED' && v.url) {
+        html += '      <video id="' + domId + '" controls playsinline preload="metadata" style="width:100%;max-height:420px;border-radius:8px;background:#000;" src="' + escapeHtml(v.url) + '"></video>';
+      } else {
+        html += '      <div class="empty-state" style="padding:24px;">✕ Video gagal direkam: ' + escapeHtml(v.error || 'Tidak diketahui') + '</div>';
+      }
+
+      if (v.chapters && v.chapters.length) {
+        html += '      <div>';
+        html += '        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-dim);margin-bottom:6px;">Chapters (' + v.chapters.length + ' titik halaman/fitur):</div>';
+        html += '        <div class="p1-chapter-list">';
+        v.chapters.forEach(ch => {
+          const chLabel = ch.page + (ch.feature ? ' → ' + ch.feature : '');
+          html += '          <button type="button" class="p1-chapter-btn" data-video-id="' + domId + '" data-start="' + (ch.startSec || 0) + '" onclick="jumpRoleVideoChapter(this.dataset.videoId, this.dataset.start)">[' + (ch.startSec || 0) + 's] ' + escapeHtml(chLabel) + '</button>';
+        });
+        html += '        </div>';
+        html += '      </div>';
+      }
+
+      if (v.status === 'RECORDED' && v.url) {
+        html += '      <div><a href="' + escapeHtml(v.url) + '" target="_blank" download style="color:var(--primary);font-size:12px;font-weight:600;text-decoration:none;">⬇️ Unduh Video (' + escapeHtml(v.filename) + ')</a></div>';
+      }
+      html += '    </div>';
+    });
+
+    html += '  </div>';
+    html += '</section>';
+    el.innerHTML = html;
+  }
+
+  function renderPhase1CoverageGaps() {
+    const el = document.getElementById('phase1-coverage-gaps-container');
+    if (!el) return;
+    const gaps = reportData.coverageGaps;
+    if (!Array.isArray(gaps)) {
+      el.innerHTML = '';
+      return;
+    }
+
+    let html = '<section class="p1-section">';
+    html += '  <div class="p1-section-header"><h2>🚧 Halaman Tidak Bisa Dicek & Kendala Detail (' + gaps.length + ')</h2><span class="metric-sub">Diagnosis teknis + analisis Gemini untuk halaman yang gagal atau terblokir</span></div>';
+
+    if (gaps.length === 0) {
+      html += '  <div class="empty-state" style="border-color:var(--success-border);color:var(--success);">✅ Seluruh halaman yang dapat dijangkau berhasil di-capture dan direkam tanpa kendala cakupan.</div>';
+      html += '</section>';
+      el.innerHTML = html;
+      return;
+    }
+
+    html += '  <div class="p1-gap-list">';
+    gaps.forEach((gap, idx) => {
+      html += '    <article class="p1-gap-card">';
+      html += '      <div class="p1-gap-top">';
+      html += '        <div>';
+      html += '          <div style="font-size:15px;font-weight:700;color:var(--text);">' + (idx + 1) + '. ' + escapeHtml(gap.pageTitle || gap.pagePath) + '</div>';
+      html += '          <div style="font-size:12px;color:var(--text-dim);margin-top:2px;">Path: <code>' + escapeHtml(gap.pagePath) + '</code>' + (gap.redirectedTo ? ' · Redirect → <code>' + escapeHtml(gap.redirectedTo) + '</code>' : '') + '</div>';
+      html += '        </div>';
+      html += '        <div class="p1-gap-chips">';
+      html += '          <span class="p1-role-chip">' + escapeHtml(gap.role || 'public') + '</span>';
+      html += '          <span class="p1-gap-chip">' + escapeHtml(gap.phaseFailed) + '</span>';
+      html += '          <span class="p1-gap-chip" style="color:var(--danger);border-color:var(--danger-border);">' + escapeHtml(gap.category) + '</span>';
+      if (gap.httpStatus) {
+        html += '        <span class="p1-gap-chip">HTTP ' + gap.httpStatus + '</span>';
+      }
+      html += '        </div>';
+      html += '      </div>';
+      html += '      <div style="font-size:13px;color:var(--text);margin-bottom:8px;"><strong>Kendala Teknis:</strong> ' + escapeHtml(gap.technicalReason) + '</div>';
+
+      if (gap.failedApiCalls && gap.failedApiCalls.length) {
+        html += '      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;"><strong>API Gagal:</strong> ' + gap.failedApiCalls.map(api => '<code>' + escapeHtml(api.method + ' ' + api.url + ' → ' + api.status) + '</code>').join(' · ') + '</div>';
+      }
+      if (gap.consoleOrDeviceErrors && gap.consoleOrDeviceErrors.length) {
+        html += '      <div style="font-size:12px;color:var(--warning);margin-bottom:6px;"><strong>Console/Device Error:</strong> ' + escapeHtml(gap.consoleOrDeviceErrors.join(' | ')) + '</div>';
+      }
+      if (gap.errorScreenshotUrl) {
+        html += '      <div style="margin-top:8px;"><button type="button" class="btn" data-src="' + escapeHtml(gap.errorScreenshotUrl) + '" data-caption="' + escapeHtml('Error Snapshot: ' + gap.pagePath) + '" onclick="openLightboxFromEl(this)">🖼️ Lihat Screenshot Saat Error</button></div>';
+      }
+      if (gap.aiDiagnosis) {
+        html += '      <div class="p1-gap-ai">';
+        html += '        <div style="font-weight:700;color:var(--primary);margin-bottom:4px;">✨ Diagnosis Gemini AI (Owner: ' + escapeHtml((gap.aiDiagnosis.ownerRole || 'infra').toUpperCase()) + ')</div>';
+        html += '        <div>' + escapeHtml(gap.aiDiagnosis.summaryId) + '</div>';
+        html += '        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;"><strong>Kemungkinan Penyebab:</strong> ' + escapeHtml(gap.aiDiagnosis.likelyCause) + ' · <strong>Saran Perbaikan:</strong> ' + escapeHtml(gap.aiDiagnosis.recommendedFix) + '</div>';
+        html += '      </div>';
+      }
+      html += '    </article>';
+    });
+    html += '  </div>';
+    html += '</section>';
+    el.innerHTML = html;
+  }
+
+  function openLightboxFromEl(el) {
+    if (!el || !el.dataset) return;
+    openLightbox(el.dataset.src || '', el.dataset.caption || '');
+  }
+
   function openLightbox(src, caption) {
+    if (!src) return;
     const lb = document.getElementById('lightbox');
     const img = document.getElementById('lightbox-img');
     const cap = document.getElementById('lightbox-caption');
+    const scrollBox = lb.querySelector('.lightbox-scroll');
     img.src = src;
     cap.textContent = caption;
+    if (scrollBox) scrollBox.scrollTop = 0;
     lb.classList.add('active');
   }
 

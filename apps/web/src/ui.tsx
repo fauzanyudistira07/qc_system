@@ -1,5 +1,5 @@
 import React from 'react';
-export function Icon({ name, size = 20 }: { name: string; size?: number }) {
+export function Icon({ name, size = 20, className, style }: { name: string; size?: number; className?: string; style?: React.CSSProperties }) {
   const paths: Record<string, React.ReactNode> = {
     overview: <><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
     projects: <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z"/>,
@@ -48,12 +48,12 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
     grid: <><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></>,
     layers: <><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>,
   };
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] || paths.overview}</svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className} style={style}>{paths[name] || paths.overview}</svg>;
 }
 export function Badge({ value }: { value?: string }) { const text = value || 'unknown'; return <span className={`badge badge-${text.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`}><span/>{text.replace(/_/g, ' ')}</span>; }
 export function Empty({ icon = 'discovery', title, children, action }: { icon?: string; title: string; children?: React.ReactNode; action?: React.ReactNode }) { return <div className="empty"><div className="empty-orbit"><Icon name={icon} size={28}/></div><h3>{title}</h3>{children !== undefined && <p>{children}</p>}{action}</div>; }
 export function Panel({ title, description, actions, children, className = '' }: { title?: string; description?: string; actions?: React.ReactNode; children?: React.ReactNode; className?: string; key?: any }) { return <section className={`panel ${className}`}>{(title || actions) && <div className="panel-heading"><div><h2>{title}</h2>{description && <p>{description}</p>}</div>{actions}</div>}{children}</section>; }
 export function Field({ label, hint, children, wide }: { label: string; hint?: string; children?: React.ReactNode; wide?: boolean }) { return <label className={`field ${wide ? 'wide' : ''}`}><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>; }
-export function Notice({ children, error = false }: { children?: React.ReactNode; error?: boolean }) { return <div className={`notice ${error ? 'notice-error' : ''}`} role={error ? 'alert' : 'status'}><Icon name={error ? 'warning' : 'shield'} size={18}/><div>{children}</div></div>; }
+export function Notice({ children, error = false, key }: { children?: React.ReactNode; error?: boolean; key?: string | number }) { return <div key={key} className={`notice ${error ? 'notice-error' : ''}`} role={error ? 'alert' : 'status'}><Icon name={error ? 'warning' : 'shield'} size={18}/><div>{children}</div></div>; }
 export function Metric({ label, value, note, icon, tone = 'cyan', onClick }: { label: string; value: number | string; note: string; icon: string; tone?: string; onClick?: () => void }) { return <button className={`metric ${tone}`} onClick={onClick}><div className="metric-top"><span>{label}</span><Icon name={icon}/></div><strong>{value}</strong><div className="metric-note">{note}<Icon name="arrow" size={16}/></div></button>; }
 export function Progress({ value, label }: { value: number; label: string }) { const safe = Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0)); return <div className="progress" role="progressbar" aria-label={label} aria-valuenow={safe} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${safe}%` }}/></div>; }

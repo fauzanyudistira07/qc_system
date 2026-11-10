@@ -3,438 +3,105 @@ import type { FlowStep } from '@qc/flow-schema';
 import type { Inventory, DiscoveryConfig, GeneratedFlow } from '../discovery/types.ts';
 import { detectCapabilities } from '../discovery/capability-model.ts';
 
-/**
- * Menghasilkan raw Maestro YAML commands untuk login.
- * - Dismiss dialog izin notifikasi Android (Don't allow) jika muncul
- * - Tap field NIS, isi NIS, tap field Password, isi password, tap Masuk
- * Semua optional agar jika sudah login tidak error.
- */
-function buildLoginYamlCommands(nis: string, password: string): object[] {
-  return [
-    // Dismiss dialog izin notifikasi Android jika muncul (urutan: Don't allow dulu)
-    { tapOn: { text: "Don't allow", optional: true } },
-    { tapOn: { text: "Don\u2019t allow", optional: true } },
-    { waitForAnimationToEnd: { timeout: 1500 } },
-    // Isi form login
-    { tapOn: { text: 'NIS / NISN', optional: true } },
-    { inputText: nis || '12345678' },
-    { tapOn: { text: 'Password', optional: true } },
-    { inputText: password || '123456' },
-    { tapOn: { text: 'Masuk', optional: true } },
-    { waitForAnimationToEnd: { timeout: 5000 } }
-  ];
-}
-
-/**
- * Menghasilkan raw Maestro YAML string (format baru: appId + --- + commands list)
- * untuk digunakan sebagai 'source' pada GeneratedFlow Android.
- */
 function buildRawMaestroYaml(appId: string, name: string, commands: object[]): string {
   const header = `appId: ${appId}\nname: "${name}"\n---\n`;
   return header + stringify(commands, { indentSeq: false });
 }
 
+function buildGenericAndroidFlows(inventory: Inventory, config: DiscoveryConfig): GeneratedFlow[] {
+  const appId = config.appId || 'com.example.app';
+  const roles = [...new Set(inventory.pages.map((p) => p.role).filter(Boolean) as string[])];
+  const primaryAccount = config.accounts?.[0];
+
+  const flows: GeneratedFlow[] = [];
+
+  if (primaryAccount?.email) {
+    flows.push({
+      id: 'android-auth-check',
+      name: `Autentikasi (${primaryAccount.role || 'user'})`,
+      platform: 'android',
+      status: 'READY',
+      source: buildRawMaestroYaml(appId, `Autentikasi (${primaryAccount.role || 'user'})`, [
+        { tapOn: { text: "Don't allow", optional: true } },
+        { waitForAnimationToEnd: { timeout: 1200 } },
+        { tapOn: { text: 'Email', optional: true } },
+        { inputText: primaryAccount.email },
+        { tapOn: { text: 'Password', optional: true } },
+        { inputText: primaryAccount.password || '' },
+        { tapOn: { text: 'Login', optional: true } },
+        { waitForAnimationToEnd: { timeout: 3000 } },
+      ]),
+    });
+  }
+
+  const groupByRole = new Map<string, typeof inventory.pages>();
+  for (const page of inventory.pages) {
+    const role = page.role || 'default';
+    const arr = groupByRole.get(role) ?? [];
+    arr.push(page);
+    groupByRole.set(role, arr);
+  }
+
+  for (const [role, pages] of groupByRole.entries()) {
+    const commands: object[] = [{ waitForAnimationToEnd: { timeout: 1000 } }];
+    for (const page of pages) {
+      const firstFeature = page.interactiveFeatures?.[0];
+      if (firstFeature?.bounds) {
+        commands.push({ tapOn: { point: `${firstFeature.bounds.x},${firstFeature.bounds.y}`, optional: true } });
+        commands.push({ waitForAnimationToEnd: { timeout: 1000 } });
+      }
+      if (page.isScrollable) {
+        commands.push({ swipe: { start: '50%,75%', end: '50%,25%', duration: 400 } });
+      }
+      const slug = page.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'screen';
+      commands.push({ takeScreenshot: `${role}__${slug}__full` });
+    }
+    flows.push({
+      id: `android-role-${role}`,
+      name: `Eksplorasi Penuh Role ${role} (${pages.length} layar)`,
+      platform: 'android',
+      status: 'READY',
+      source: buildRawMaestroYaml(appId, `Eksplorasi Role ${role}`, commands),
+    });
+  }
+
+  if (flows.length === 0 && roles.length === 0) {
+    flows.push({
+      id: 'android-launch-smoke',
+      name: 'Launch & Smoke Capture Mobile',
+      platform: 'android',
+      status: 'READY',
+      source: buildRawMaestroYaml(appId, 'Launch & Smoke Capture Mobile', [
+        { waitForAnimationToEnd: { timeout: 1500 } },
+        { takeScreenshot: 'mobile-launch-full' },
+      ]),
+    });
+  }
+
+  return flows;
+}
+
 export function buildFlows(inventory: Inventory, config: DiscoveryConfig): GeneratedFlow[] {
   if (config.platform === 'android') {
-    const appId = config.appId || 'com.sopan.digital';
-    const nis = config.accounts?.[0]?.email || '161676';
-    const password = config.accounts?.[0]?.password || 'Alhikmah123';
-    const loginCmds = buildLoginYamlCommands(nis, password);
-
-    const androidFlows: GeneratedFlow[] = [
-      // ── Flow 1: Launch & Smoke Check ─────────────────────────────────────
-      {
-        id: 'android-launch',
-        name: '1. Launch & Smoke Check',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '1. Launch & Smoke Check', [
-          { tapOn: { text: "Don't allow", optional: true } },
-          { tapOn: { text: "Don\u2019t allow", optional: true } },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { tapOn: { text: 'Beranda', optional: true } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { takeScreenshot: 'launch-screen' }
-        ])
-      },
-
-      // ── Flow 2: Login & Masuk Dashboard ──────────────────────────────────
-      {
-        id: 'android-login',
-        name: '2. Login & Masuk Dashboard',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '2. Login & Masuk Dashboard', [
-          ...loginCmds,
-          { tapOn: { text: 'Beranda', optional: true } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'dashboard-beranda' }
-        ])
-      },
-
-      // ── Flow 3: Navigasi Semua Tab Utama ─────────────────────────────────
-      {
-        id: 'android-tabs-all',
-        name: '3. Navigasi Semua Tab Dashboard',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '3. Navigasi Semua Tab Dashboard', [
-          { tapOn: { text: 'Beranda' } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { assertVisible: { text: 'Beranda' } },
-          { takeScreenshot: 'tab-beranda' },
-          { tapOn: { text: 'Absensi' } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { assertVisible: { text: 'Ajukan Izin' } },
-          { takeScreenshot: 'tab-absensi' },
-          { tapOn: { text: 'Keuangan' } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { assertVisible: { text: 'Belum Dibayar' } },
-          { takeScreenshot: 'tab-keuangan' },
-          { tapOn: { text: 'Informasi' } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { assertVisible: { text: 'Kedisiplinan' } },
-          { takeScreenshot: 'tab-informasi' },
-          { tapOn: { text: 'T2Q' } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { assertVisible: { text: 'Tahfidz' } },
-          { takeScreenshot: 'tab-t2q' },
-          { tapOn: { text: 'Beranda' } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'dashboard-restored' }
-        ])
-      },
-
-      // ── Flow 4: Eksplorasi Konten Beranda & Aksi Cepat ───────────────────
-      {
-        id: 'android-home-explore',
-        name: '4. Eksplorasi Konten Beranda & Aksi Cepat',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '4. Eksplorasi Konten Beranda & Aksi Cepat', [
-          { tapOn: { text: 'Beranda' } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'home-top' },
-          { swipe: { start: "50%,75%", end: "50%,25%", duration: 400 } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'home-middle' },
-          { swipe: { start: "50%,75%", end: "50%,25%", duration: 400 } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'home-bottom' },
-          { swipe: { start: "50%,25%", end: "50%,75%", duration: 400 } },
-          { waitForAnimationToEnd: { timeout: 1000 } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 } },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { takeScreenshot: 'home-restored-top' }
-        ])
-      },
-
-      // ── Flow 5: CRUD Mutasi Amal Siswa Harian (Create & Double Entry Guard)
-      {
-        id: 'android-crud-amal',
-        name: '5. CRUD Mutasi Amal Siswa Harian',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '5. CRUD Mutasi Amal Siswa Harian', [
-          { tapOn: { text: 'Beranda' } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { tapOn: { text: 'Amal Siswa Harian', optional: true } },
-          { tapOn: { text: 'Isi Sekarang', optional: true } },
-          { tapOn: { text: 'Sudah Diisi', optional: true } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { takeScreenshot: 'amal-form-opened' },
-          { tapOn: { text: 'Iya', optional: true } },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { takeScreenshot: 'amal-form-filled' },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'amal-completed-return' }
-        ])
-      },
-
-      // ── Flow 6: CRUD Tab Absensi & Formulir Pengajuan Izin ────────────────
-      {
-        id: 'android-crud-izin',
-        name: '6. CRUD Tab Absensi & Formulir Pengajuan Izin',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '6. CRUD Tab Absensi & Formulir Pengajuan Izin', [
-          { tapOn: { text: 'Absensi' } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { assertVisible: { text: 'Ajukan Izin' } },
-          { takeScreenshot: 'absensi-loaded' },
-          { tapOn: { text: 'Ajukan Izin' } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { assertVisible: { text: 'Pengajuan Izin' } },
-          { takeScreenshot: 'izin-form-opened' },
-          { tapOn: { text: 'Tulis keterangan izin', optional: true } },
-          { inputText: 'Izin Sakit Demam dan Kontrol Dokter' },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { takeScreenshot: 'izin-form-filled' },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { assertVisible: { text: 'Ajukan Izin' } },
-          { tapOn: { text: 'Riwayat Pengajuan', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { takeScreenshot: 'absensi-riwayat-pengajuan' },
-          { tapOn: { text: 'Riwayat Kehadiran', optional: true } },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { takeScreenshot: 'absensi-riwayat-kehadiran' }
-        ])
-      },
-
-      // ── Flow 7: Eksplorasi Tab Keuangan, Invoice & Pembayaran ─────────────
-      {
-        id: 'android-tab-keuangan',
-        name: '7. Eksplorasi Tab Keuangan & Invoice Pembayaran',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '7. Eksplorasi Tab Keuangan & Invoice Pembayaran', [
-          { tapOn: { text: 'Keuangan' } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { assertVisible: { text: 'Belum Dibayar' } },
-          { takeScreenshot: 'keuangan-loaded' },
-          { tapOn: { text: 'Belum Dibayar', optional: true } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { takeScreenshot: 'keuangan-tagihan-unpaid' },
-          { tapOn: { text: 'Bayar Sekarang', optional: true } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { takeScreenshot: 'keuangan-struk-pembayaran' },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { takeScreenshot: 'keuangan-restored' }
-        ])
-      },
-
-      // ── Flow 8: Eksplorasi Tab Informasi, Kedisiplinan & Berita Sekolah ───
-      {
-        id: 'android-tab-informasi',
-        name: '8. Eksplorasi Tab Informasi & Kedisiplinan',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '8. Eksplorasi Tab Informasi & Kedisiplinan', [
-          { tapOn: { text: 'Informasi' } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { assertVisible: { text: 'Kedisiplinan' } },
-          { takeScreenshot: 'informasi-kedisiplinan' },
-          { tapOn: { text: 'Berita Sekolah', optional: true } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { takeScreenshot: 'informasi-berita-sekolah' },
-          { swipe: { start: "50%,75%", end: "50%,25%", duration: 400 } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'informasi-berita-scrolled' },
-          { tapOn: { text: 'Kedisiplinan', optional: true } },
-          { waitForAnimationToEnd: { timeout: 1500 } }
-        ])
-      },
-
-      // ── Flow 9: Eksplorasi Tab T2Q (Tahfidz, Tahsin, Tilawah) ─────────────
-      {
-        id: 'android-tab-t2q',
-        name: '9. Eksplorasi Tab T2Q (Hafalan & Tilawah)',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '9. Eksplorasi Tab T2Q (Hafalan & Tilawah)', [
-          { tapOn: { text: 'T2Q' } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { assertVisible: { text: 'Tahfidz' } },
-          { takeScreenshot: 't2q-loaded' },
-          { tapOn: { text: 'Tahsin', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { takeScreenshot: 't2q-tahsin' },
-          { tapOn: { text: 'Tilawah', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { takeScreenshot: 't2q-tilawah' },
-          { tapOn: { text: 'Tahfidz', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 't2q-scrolled' }
-        ])
-      },
-
-      // ── Flow 10: Menu Samping (Drawer): Profil Siswa & Ekskul ─────────────
-      {
-        id: 'android-drawer-profile',
-        name: '10. Menu Samping (Drawer): Profil Siswa & Ekskul',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '10. Menu Samping (Drawer): Profil Siswa & Ekskul', [
-          { tapOn: { text: 'Beranda' } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { takeScreenshot: 'drawer-menu-opened' },
-          { tapOn: { text: 'Profil Siswa', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { takeScreenshot: 'profil-siswa-screen' },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { tapOn: { text: 'Ekstrakurikuler', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { takeScreenshot: 'ekskul-screen' },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 1500 } }
-        ])
-      },
-
-      // ── Flow 11: Quick Actions Beranda: Kalender & Detail Berita ──────────
-      {
-        id: 'android-beranda-actions',
-        name: '11. Quick Actions Beranda: Kalender & Detail Berita',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '11. Quick Actions Beranda: Kalender & Detail Berita', [
-          { tapOn: { text: 'Beranda' } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { tapOn: { text: 'Kegiatan Mendatang', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { takeScreenshot: 'kalender-kegiatan-screen' },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { swipe: { start: "50%,75%", end: "50%,25%", duration: 400 } },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { tapOn: { text: 'Baca Selengkapnya', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { takeScreenshot: 'berita-detail-screen' },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true }
-        ])
-      },
-
-      // ── Flow 12: Pusat Notifikasi Aplikasi ────────────────────────────────
-      {
-        id: 'android-notifications',
-        name: '12. Pusat Notifikasi Aplikasi',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '12. Pusat Notifikasi Aplikasi', [
-          { tapOn: { text: 'Beranda' } },
-          { swipe: { start: "50%,20%", end: "50%,85%", duration: 400 }, optional: true },
-          { waitForAnimationToEnd: { timeout: 1500 } },
-          { tapOn: { point: "92%,7%", optional: true } },
-          { waitForAnimationToEnd: { timeout: 2500 } },
-          { takeScreenshot: 'notifikasi-screen' },
-          { pressKey: 'BACK' },
-          { waitForAnimationToEnd: { timeout: 1500 } }
-        ])
-      },
-
-      // ── Flow 13: Switch Role & Akses Dashboard Dewan Guru ─────────────────
-      {
-        id: 'android-role-guru',
-        name: '13. Switch Role & Akses Dashboard Dewan Guru',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '13. Switch Role & Akses Dashboard Dewan Guru', [
-          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 }, optional: true },
-          { tapOn: { text: 'Logout', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { tapOn: { text: 'Dewan Guru', optional: true } },
-          { tapOn: { text: 'Masuk', optional: true } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { assertVisible: { text: 'Ustadzah Khadijah', optional: true } },
-          { takeScreenshot: 'role-guru-dashboard' }
-        ])
-      },
-
-      // ── Flow 14: Switch Role & Akses Dashboard Manager Sarpras ───────────
-      {
-        id: 'android-role-manager',
-        name: '14. Switch Role & Akses Dashboard Manager Sarpras',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '14. Switch Role & Akses Dashboard Manager Sarpras', [
-          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 }, optional: true },
-          { tapOn: { text: 'Logout', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { tapOn: { text: 'Manager Sarpras', optional: true } },
-          { tapOn: { text: 'Masuk', optional: true } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { assertVisible: { text: 'Syarifuddin', optional: true } },
-          { takeScreenshot: 'role-manager-dashboard' }
-        ])
-      },
-
-      // ── Flow 15: Switch Role & Akses Dashboard Staff Teknisi ─────────────
-      {
-        id: 'android-role-teknisi',
-        name: '15. Switch Role & Akses Dashboard Staff Teknisi',
-        platform: 'android',
-        status: 'READY',
-        source: buildRawMaestroYaml(appId, '15. Switch Role & Akses Dashboard Staff Teknisi', [
-          { swipe: { start: "0%,50%", end: "75%,50%", duration: 400 }, optional: true },
-          { tapOn: { text: 'Logout', optional: true } },
-          { waitForAnimationToEnd: { timeout: 2000 } },
-          { tapOn: { text: 'Staff Teknisi', optional: true } },
-          { tapOn: { text: 'Masuk', optional: true } },
-          { waitForAnimationToEnd: { timeout: 3000 } },
-          { assertVisible: { text: 'Ahmad Rian', optional: true } },
-          { takeScreenshot: 'role-teknisi-dashboard' }
-        ])
-      }
-    ];
-
-    return androidFlows;
+    return buildGenericAndroidFlows(inventory, config);
   }
+
   const flows: GeneratedFlow[] = [];
-  const rules: Partial<DiscoveryConfig['rules']> = config.rules || {};
-  const capabilityProfile = inventory.capabilities ?? detectCapabilities({ pages: inventory.pages, routes: inventory.routes, api: inventory.api });
-  const authenticationDetected = capabilityProfile.capabilities.some((capability) => capability.id === 'authentication');
-  
-  // ── Ambil route statis dari inventory routes & pages ──────────────────────
-  const allRoutes = new Set<string>();
-  if (inventory.routes) {
-    for (const r of inventory.routes) {
-      if (r.method === 'GET' && !r.path.includes('{') && !/api|logout|delete|destroy/i.test(r.path)) {
-        allRoutes.add(r.path.startsWith('/') ? r.path : `/${r.path}`);
-      }
-    }
-  }
-  if (inventory.pages) {
-    for (const p of inventory.pages) {
-      if (!p.path.includes('{') && !/api|logout|delete|destroy/i.test(p.path)) {
-        allRoutes.add(p.path.startsWith('/') ? p.path : `/${p.path}`);
-      }
-    }
-  }
-  const staticRoutes = Array.from(allRoutes);
+  const staticRoutes = inventory.pages.map((p) => p.path).filter((r) => !/\/api(?:\/|$)/i.test(r));
+  const loginPath = config.rules?.loginPath || staticRoutes.find((r) => /\/(?:login|signin|auth\/login)/i.test(r)) || '/login';
+  const successUrl = config.rules?.successUrl || '/dashboard';
+  const emailSelector = config.rules?.emailSelector || "input[name='email'], input[name='username'], #email, input[type='email'], input[type='text']";
+  const passwordSelector = config.rules?.passwordSelector || "input[type='password'], #password";
+  const submitSelector = config.rules?.submitSelector || "button[type='submit'], input[type='submit']";
 
-  const loginPath = rules.loginPath || '/login';
-  const emailSelector = rules.emailSelector || "input[name='email'], #email, input[type='email'], input[name='username']";
-  const passwordSelector = rules.passwordSelector || "input[name='password'], #password, input[type='password']";
-  const submitSelector = rules.submitSelector || "button[type='submit'], .btn-primary, button:has-text('Masuk'), button:has-text('Login')";
-  const successUrl = rules.successUrl || '/dashboard';
-
-  const hasAuthNeed = authenticationDetected ||
-    staticRoutes.some(r => /login|auth|dashboard|admin|user/i.test(r)) ||
+  const capabilityProfile = inventory.capabilities ?? detectCapabilities(inventory);
+  const hasAuthNeed = staticRoutes.some((r) => /login|auth|dashboard|admin|user|portal/i.test(r)) ||
     Boolean(config.accounts && config.accounts.length > 0);
 
-  const loginSteps = (): FlowStep[] => hasAuthNeed ? [
-    { id: 'login-page', action: 'open', url: loginPath },
-    { id: 'login-email', action: 'input', target: { selector: emailSelector }, value: '${QC_EMAIL}' },
-    { id: 'login-password', action: 'input', target: { selector: passwordSelector }, value: '${QC_PASSWORD}' },
-    { id: 'login-submit', action: 'click', target: { selector: submitSelector } },
-    { id: 'login-success', action: 'assertUrl', value: successUrl },
-    { id: 'login-screenshot', action: 'screenshot', name: 'dashboard-after-login' }
-  ] : [];
-
-  const defaultVars: Record<string, string> = {
-    QC_EMAIL: config.accounts?.[0]?.email || 'admin@zannora.com',
-    QC_PASSWORD: config.accounts?.[0]?.password || 'password'
-  };
+  const defaultAccount = config.accounts?.[0];
+  const defaultVars: Record<string, string> = defaultAccount?.email
+    ? { QC_EMAIL: defaultAccount.email, QC_PASSWORD: defaultAccount.password || '' }
+    : {};
 
   const toSource = (name: string, steps: FlowStep[]) => stringify({
     schemaVersion: '1.0',
@@ -442,227 +109,71 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
     target: { platform: 'web', baseUrl: config.baseUrl },
     variables: defaultVars,
     execution: { timeoutMs: 45000, retries: 0, screenshot: 'always', trace: 'retain-on-failure', video: 'on' },
-    steps
+    steps,
   });
 
-  // Filter kategori
-  const publicRoutes = staticRoutes.filter(r => /^\/(?:about|contact|flights|home|info|search|pricing|faq)?$/i.test(r) && r !== loginPath);
-  const adminResourceRoutes = staticRoutes.filter(r => /^\/admin\/(?:airlines|airplanes|airports|flights|seats|masters?)/i.test(r));
-  const adminOpsRoutes = staticRoutes.filter(r => /^\/admin\/(?:bookings|payments|tickets|users|reports|contact-messages|profile)/i.test(r));
-  const customerRoutes = staticRoutes.filter(r => /^\/(?:user\/dashboard|my-bookings|booking|passengers|notifications|tickets)/i.test(r));
+  const loginSteps = (): FlowStep[] => (hasAuthNeed && defaultAccount?.email) ? [
+    { id: 'login-page', action: 'open', url: loginPath },
+    { id: 'login-email', action: 'input', target: { selector: emailSelector }, value: '${QC_EMAIL}' },
+    { id: 'login-password', action: 'input', target: { selector: passwordSelector }, value: '${QC_PASSWORD}' },
+    { id: 'login-submit', action: 'click', target: { selector: submitSelector } },
+    { id: 'login-success', action: 'assertUrl', value: successUrl },
+  ] : [];
 
-  // ── Flow 1: Eksplorasi Halaman Publik & Landing ────────────────────────────
-  const publicSteps: FlowStep[] = [
-    { id: 'home-open', action: 'open', url: '/' },
-    { id: 'home-body', action: 'assertVisible', target: { selector: 'body' } },
-    { id: 'home-screenshot', action: 'screenshot', name: 'public-home' }
-  ];
-  const targetPublic = publicRoutes.filter(r => r !== '/' && r !== '/home').slice(0, 3);
-  for (const [idx, r] of targetPublic.entries()) {
-    const slug = r.replace(/[^a-z0-9]/gi, '-').replace(/^-+|-+$/g, '') || `page-${idx}`;
-    publicSteps.push({ id: `pub-${idx}-open`, action: 'open', url: r });
-    publicSteps.push({ id: `pub-${idx}-body`, action: 'assertVisible', target: { selector: 'body' } });
-    publicSteps.push({ id: `pub-${idx}-snap`, action: 'screenshot', name: `public-${slug}` });
-  }
-  flows.push({
-    id: 'web-public',
-    name: '1. Eksplorasi Halaman Publik & Landing',
-    source: toSource('1. Eksplorasi Halaman Publik & Landing', publicSteps),
-    platform: 'web',
-    status: 'READY'
-  });
-
-  // ── Flow 2: Login Akun & Validasi Sesi Dashboard ──────────────────────────
-  if (loginSteps().length) {
-    flows.push({
-      id: 'login',
-      name: '2. Login Akun & Validasi Dashboard',
-      source: toSource('2. Login Akun & Validasi Dashboard', loginSteps()),
-      platform: 'web',
-      status: 'READY'
-    });
+  // Group observed & candidate pages by role generically
+  const roleGroups = new Map<string, typeof inventory.pages>();
+  for (const page of inventory.pages) {
+    if (/\/api(?:\/|$)/i.test(page.path)) continue;
+    const role = page.role || (page.authentication === 'auth-required' ? 'authenticated' : 'public');
+    const list = roleGroups.get(role) ?? [];
+    list.push(page);
+    roleGroups.set(role, list);
   }
 
-  // ── Flow 3: Eksplorasi Data Master & Armada (Admin) ────────────────────────
-  if (loginSteps().length && adminResourceRoutes.length > 0) {
-    const masterSteps: FlowStep[] = [...loginSteps()];
-    const selectedMasters = adminResourceRoutes.slice(0, 4);
-    for (const [idx, r] of selectedMasters.entries()) {
-      const slug = r.replace(/[^a-z0-9]/gi, '-').replace(/^-+|-+$/g, '') || `master-${idx}`;
-      masterSteps.push({ id: `m-${idx}-open`, action: 'open', url: r });
-      masterSteps.push({ id: `m-${idx}-url`, action: 'assertUrl', value: r });
-      masterSteps.push({ id: `m-${idx}-body`, action: 'assertVisible', target: { selector: 'body' } });
-      masterSteps.push({ id: `m-${idx}-snap`, action: 'screenshot', name: slug });
+  for (const [role, pages] of roleGroups.entries()) {
+    const steps: FlowStep[] = role !== 'public' ? [...loginSteps()] : [];
+    for (const [idx, page] of pages.slice(0, 40).entries()) {
+      const targetPath = (page.resolvedConcretePath || page.path).replace(/:[a-zA-Z_]\w*/g, '1').replace(/\{[^}]+\}/g, '1');
+      const slug = targetPath.replace(/[^a-z0-9]/gi, '-').replace(/^-+|-+$/g, '') || `page-${idx}`;
+      steps.push({ id: `${role}-${idx}-open`, action: 'open', url: targetPath });
+      steps.push({ id: `${role}-${idx}-body`, action: 'assertVisible', target: { selector: 'body' } });
+      for (const [fIdx, feat] of (page.interactiveFeatures || []).slice(0, 10).entries()) {
+        if (feat.selector) {
+          steps.push({ id: `${role}-${idx}-feat-${fIdx}`, action: 'click', target: { selector: feat.selector } });
+        }
+      }
+      steps.push({ id: `${role}-${idx}-snap`, action: 'screenshot', name: `${role}__${slug}__full` });
     }
-    flows.push({
-      id: 'web-master-data',
-      name: '3. Eksplorasi Modul Data Admin',
-      source: toSource('3. Eksplorasi Modul Data Admin', masterSteps),
-      platform: 'web',
-      status: 'READY'
-    });
-  }
-
-  // ── Flow 4: Manajemen Operasional, Transaksi & Laporan (Admin) ─────────────
-  if (loginSteps().length && adminOpsRoutes.length > 0) {
-    const opsSteps: FlowStep[] = [...loginSteps()];
-    const selectedOps = adminOpsRoutes.slice(0, 4);
-    for (const [idx, r] of selectedOps.entries()) {
-      const slug = r.replace(/[^a-z0-9]/gi, '-').replace(/^-+|-+$/g, '') || `ops-${idx}`;
-      opsSteps.push({ id: `o-${idx}-open`, action: 'open', url: r });
-      opsSteps.push({ id: `o-${idx}-url`, action: 'assertUrl', value: r });
-      opsSteps.push({ id: `o-${idx}-body`, action: 'assertVisible', target: { selector: 'body' } });
-      opsSteps.push({ id: `o-${idx}-snap`, action: 'screenshot', name: slug });
-    }
-    flows.push({
-      id: 'web-operations',
-      name: '4. Manajemen Operasional & Transaksi',
-      source: toSource('4. Manajemen Operasional & Transaksi', opsSteps),
-      platform: 'web',
-      status: 'READY'
-    });
-  }
-
-  // ── Flow 5: Eksplorasi Layanan Pelanggan (Customer / User) ────────────────
-  if (loginSteps().length && customerRoutes.length > 0) {
-    const custSteps: FlowStep[] = [...loginSteps()];
-    const selectedCust = customerRoutes.slice(0, 4);
-    for (const [idx, r] of selectedCust.entries()) {
-      const slug = r.replace(/[^a-z0-9]/gi, '-').replace(/^-+|-+$/g, '') || `cust-${idx}`;
-      custSteps.push({ id: `c-${idx}-open`, action: 'open', url: r });
-      custSteps.push({ id: `c-${idx}-body`, action: 'assertVisible', target: { selector: 'body' } });
-      custSteps.push({ id: `c-${idx}-snap`, action: 'screenshot', name: slug });
-    }
-    flows.push({
-      id: 'web-customer-portal',
-      name: '5. Eksplorasi Portal Layanan Pelanggan',
-      source: toSource('5. Eksplorasi Portal Layanan Pelanggan', custSteps),
-      platform: 'web',
-      status: 'READY'
-    });
-  }
-
-  // New projects use the capability profile instead of product-specific route
-  // names. These flows are intentionally read-only: they map the feature
-  // surface and collect evidence without inventing destructive business data.
-  const pageByRoute = new Map(inventory.pages.map((page) => [page.path, page]));
-  const generatedCapabilityIds = new Set<string>(['public-navigation', 'authentication']);
-  let capabilityIndex = flows.length + 1;
-  for (const capability of capabilityProfile.capabilities) {
-    if (generatedCapabilityIds.has(capability.id)) continue;
-    const routes = [...new Set(capability.evidence.routes)]
-      .filter((route) => route.startsWith('/') && !route.includes('{') && !/\/api(?:\/|$)/i.test(route) && route !== loginPath)
-      .slice(0, 8);
-    if (!routes.length) continue;
-    const slug = capability.id.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
-    const requiresAuth = routes.some((route) => {
-      const page = pageByRoute.get(route);
-      return page?.authentication?.startsWith('authenticated:') || /(?:^|\/)admin(?:\/|$)|(?:^|\/)dashboard(?:\/|$)/i.test(route);
-    });
-    const steps: FlowStep[] = requiresAuth && loginSteps().length ? [...loginSteps()] : [];
-    routes.forEach((route, index) => {
-      const routeSlug = route.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || `route-${index}`;
-      steps.push({ id: `${slug}-${index}-open`, action: 'open', url: route });
-      steps.push({ id: `${slug}-${index}-url`, action: 'assertUrl', value: route });
-      steps.push({ id: `${slug}-${index}-body`, action: 'assertVisible', target: { selector: 'body' } });
-      steps.push({ id: `${slug}-${index}-snap`, action: 'screenshot', name: `${slug}-${routeSlug}` });
-    });
-    flows.push({
-      id: `web-capability-${slug}`,
-      name: `${String(capabilityIndex++).padStart(2, '0')}. Capability · ${capability.label}`,
-      source: toSource(`Capability · ${capability.label}`, steps),
-      platform: 'web',
-      status: capability.status === 'detected' ? 'READY' : 'REVIEW_REQUIRED',
-      reason: `${capability.rationale} Pemeriksaan lanjutan: ${capability.recommendedChecks.join(', ')}.`,
-    });
-  }
-
-  // Comprehensive CRUD Coverage: Read (Daftar/Detail), Create (Form Tambah), Update (Form Ubah), Delete Guard (Proteksi Hapus)
-  for (const resource of inventory.crudPlan?.resources ?? []) {
-    const listRoute = resource.routes.find((candidate) => !/\/(?:create|new|tambah|edit|ubah|\d+|:[a-zA-Z0-9_]+|riwayat|detail)/i.test(candidate)) ?? resource.routes[0];
-    if (!listRoute || /\/api(?:\/|$)/i.test(listRoute)) continue;
-    const resourceSlug = resource.id || `resource-${flows.length}`;
-
-    // 1. CRUD Read (Daftar & Tabel)
-    const readSteps: FlowStep[] = [...(listRoute.startsWith('/') && loginSteps().length ? loginSteps() : [])];
-    readSteps.push(
-      { id: `crud-${resourceSlug}-list`, action: 'open', url: listRoute },
-      { id: `crud-${resourceSlug}-url`, action: 'assertUrl', value: listRoute },
-      { id: `crud-${resourceSlug}-body`, action: 'assertVisible', target: { selector: 'body' } },
-      { id: `crud-${resourceSlug}-screenshot`, action: 'screenshot', name: `crud-${resourceSlug}-list` },
-    );
-    flows.push({
-      id: `crud-read-${resourceSlug}`,
-      name: `${String(capabilityIndex++).padStart(2, '0')}. CRUD Read · ${resource.name}`,
-      source: toSource(`CRUD Read · ${resource.name}`, readSteps),
-      platform: 'web',
-      status: 'READY',
-      reason: `Verifikasi daftar data & tabel pada modul ${resource.name}.`,
-    });
-
-    // 2. CRUD Create (Form Tambah)
-    let createRoute = resource.routes.find((candidate) => /\/(?:create|new|tambah)$/i.test(candidate));
-    if (!createRoute && listRoute.startsWith('/master/')) {
-      createRoute = `${listRoute}/tambah`;
-    }
-    if (createRoute) {
-      const createSteps: FlowStep[] = [...(createRoute.startsWith('/') && loginSteps().length ? loginSteps() : [])];
-      createSteps.push(
-        { id: `crud-${resourceSlug}-create-open`, action: 'open', url: createRoute },
-        { id: `crud-${resourceSlug}-create-url`, action: 'assertUrl', value: createRoute },
-        { id: `crud-${resourceSlug}-create-body`, action: 'assertVisible', target: { selector: 'body' } },
-        { id: `crud-${resourceSlug}-create-screenshot`, action: 'screenshot', name: `crud-${resourceSlug}-create-form` },
-      );
+    if (steps.length > 0) {
       flows.push({
-        id: `crud-create-${resourceSlug}`,
-        name: `${String(capabilityIndex++).padStart(2, '0')}. CRUD Create · Form ${resource.name}`,
-        source: toSource(`CRUD Create · Form ${resource.name}`, createSteps),
+        id: `web-role-${role}`,
+        name: `Audit Cakupan Halaman Role ${role} (${pages.length} halaman)`,
+        source: toSource(`Audit Role ${role}`, steps),
         platform: 'web',
         status: 'READY',
-        reason: `Inspeksi form tambah ${resource.name}, verifikasi kelengkapan input dan validasi formulir.`,
       });
     }
+  }
 
-    // 3. CRUD Update (Form Ubah/Edit)
-    let editRoute = resource.routes.find((candidate) => /\/(?:edit|ubah)/i.test(candidate));
-    if (!editRoute && listRoute.startsWith('/master/')) {
-      editRoute = `${listRoute}/edit/1`;
-    }
-    if (editRoute) {
-      const concreteEditRoute = editRoute.replace(/:id/g, '1').replace(/\{id\}/g, '1');
-      const editSteps: FlowStep[] = [...(concreteEditRoute.startsWith('/') && loginSteps().length ? loginSteps() : [])];
-      editSteps.push(
-        { id: `crud-${resourceSlug}-edit-open`, action: 'open', url: concreteEditRoute },
-        { id: `crud-${resourceSlug}-edit-url`, action: 'assertUrl', value: concreteEditRoute },
-        { id: `crud-${resourceSlug}-edit-body`, action: 'assertVisible', target: { selector: 'body' } },
-        { id: `crud-${resourceSlug}-edit-screenshot`, action: 'screenshot', name: `crud-${resourceSlug}-edit-form` },
-      );
+  // Fallback capability map flows (read-only phase 1, zero destructive submissions)
+  if (flows.length === 0) {
+    for (const capability of capabilityProfile.capabilities.slice(0, 6)) {
+      const routes = [...new Set(capability.evidence.routes)]
+        .filter((route) => route.startsWith('/') && !route.includes('{') && !/\/api(?:\/|$)/i.test(route) && route !== loginPath)
+        .slice(0, 6);
+      if (!routes.length) continue;
+      const slug = capability.id.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+      const steps: FlowStep[] = routes.flatMap((route, index) => [
+        { id: `${slug}-${index}-open`, action: 'open', url: route },
+        { id: `${slug}-${index}-body`, action: 'assertVisible', target: { selector: 'body' } },
+        { id: `${slug}-${index}-snap`, action: 'screenshot', name: `public__${slug}-${index}__full` },
+      ]);
       flows.push({
-        id: `crud-update-${resourceSlug}`,
-        name: `${String(capabilityIndex++).padStart(2, '0')}. CRUD Update · Form ${resource.name}`,
-        source: toSource(`CRUD Update · Form ${resource.name}`, editSteps),
+        id: `web-capability-${slug}`,
+        name: `Capability · ${capability.label}`,
+        source: toSource(`Capability · ${capability.label}`, steps),
         platform: 'web',
-        status: 'READY',
-        reason: `Inspeksi form ubah ${resource.name}, verifikasi nilai pre-fill dan konsistensi form edit.`,
-      });
-    }
-
-    // 4. CRUD Delete Guard (Proteksi Hapus)
-    const hasDeleteSignal = resource.operations.delete === 'AVAILABLE' || resource.operations.delete === 'PLANNED' || resource.evidenceElements.some(e => /hapus|delete|remove/i.test(e)) || listRoute.startsWith('/master/');
-    if (hasDeleteSignal) {
-      const deleteSteps: FlowStep[] = [...(listRoute.startsWith('/') && loginSteps().length ? loginSteps() : [])];
-      deleteSteps.push(
-        { id: `crud-${resourceSlug}-del-list`, action: 'open', url: listRoute },
-        { id: `crud-${resourceSlug}-del-body`, action: 'assertVisible', target: { selector: 'body' } },
-        { id: `crud-${resourceSlug}-del-screenshot`, action: 'screenshot', name: `crud-${resourceSlug}-delete-guard` },
-      );
-      flows.push({
-        id: `crud-delete-guard-${resourceSlug}`,
-        name: `${String(capabilityIndex++).padStart(2, '0')}. CRUD Delete Guard · ${resource.name}`,
-        source: toSource(`CRUD Delete Guard · ${resource.name}`, deleteSteps),
-        platform: 'web',
-        status: 'READY',
-        reason: `Pemeriksaan tombol aksi hapus dan proteksi modal konfirmasi dialog pada ${resource.name}.`,
+        status: capability.status === 'detected' ? 'READY' : 'REVIEW_REQUIRED',
       });
     }
   }

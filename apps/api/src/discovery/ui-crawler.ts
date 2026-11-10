@@ -1,14 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
-import type { InventoryPage } from './source-scanner.js';
+import type { InteractiveFeatureItem, InventoryPage } from './source-scanner.ts';
 
 type CrawlRules = {
   maxPages?: number; maxDepth?: number; includePaths?: string[]; excludePaths?: string[];
   loginPath?: string; emailSelector?: string; passwordSelector?: string; submitSelector?: string; successUrl?: string;
 };
-type Account = { email: string; password: string; role?: string };
+export type CrawlAccount = { email: string; password: string; role?: string; token?: string; identifierField?: string };
 const dangerous = /(?:^|[^a-z])(?:delete|remove|destroy|logout|logoff|signout|sign-out|log-out|unsubscribe|deactivate|terminate|truncate|purge|drop|revoke|reset|checkout|purchase|pay|confirm|activate|verify)(?:$|[^a-z])/i;
 const dynamicPath = /(?:\[[^\]]+\]|\{[^}]+\}|:[a-z_]\w*|<[^>]+>|\*)/i;
 const idFor = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 16);
@@ -26,8 +26,7 @@ function decoded(value: string) {
 }
 
 /**
- * Keep browser-evaluated functions as named declarations. Transpilers can wrap
- * inline callbacks with helpers that do not exist in the browser context.
+ * Keep browser-evaluated functions as named declarations.
  */
 function collectInteractiveDom() {
   function visible(element: Element) {
@@ -36,6 +35,22 @@ function collectInteractiveDom() {
   }
   function unique(selector: string) { try { return document.querySelectorAll(selector).length === 1; } catch { return false; } }
   function text(value: string | null | undefined) { return (value || '').replace(/\s+/g, ' ').trim().slice(0, 160); }
+  function cssPath(element: Element): string {
+    const testId = element.getAttribute('data-testid');
+    if (testId && unique(`[data-testid=${JSON.stringify(testId)}]`)) return `[data-testid=${JSON.stringify(testId)}]`;
+    if (element.id && unique('#' + CSS.escape(element.id))) return '#' + CSS.escape(element.id);
+    const parts: string[] = [];
+    let current: Element | null = element;
+    while (current) {
+      const parent: Element | null = current.parentElement;
+      const index = parent ? Array.prototype.indexOf.call(parent.children, current) + 1 : 1;
+      parts.unshift(`${current.tagName.toLowerCase()}:nth-child(${index})`);
+      const candidate = parts.join(' > ');
+      if (unique(candidate)) return candidate;
+      current = parent;
+    }
+    return parts.join(' > ');
+  }
   function nameOf(element: Element) {
     const referenceIds = (element.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
     const referenceTexts: string[] = [];
@@ -53,15 +68,18 @@ function collectInteractiveDom() {
   function roleOf(element: Element) {
     const tagRoles: Record<string, string> = { BUTTON: 'button', A: 'link', TEXTAREA: 'textbox', SELECT: 'combobox' };
     const inputRoles: Record<string, string> = { checkbox: 'checkbox', radio: 'radio', submit: 'button', button: 'button', search: 'searchbox', password: '' };
-    return element.getAttribute('role') || tagRoles[element.tagName] || (element.tagName === 'INPUT' ? (inputRoles[(element as HTMLInputElement).type] ?? 'textbox') : '');
+    return element.getAttribute('role') || tagRoles[element.tagName] || (element.getAttribute('type') && element.tagName === 'INPUT' ? (inputRoles[(element as HTMLInputElement).type] ?? 'textbox') : '');
   }
-  const nodeList = document.querySelectorAll('button,input:not([type="hidden"]),textarea,select,form,a[href],[role="button"],[role="link"],[role="tab"],[role="checkbox"],[role="dialog"],[contenteditable="true"],dialog');
+  const nodeList = document.querySelectorAll('button,input:not([type="hidden"]),textarea,select,form,a[href],[role="button"],[role="link"],[role="tab"],[role="checkbox"],[role="dialog"],[data-bs-toggle="tab"],[data-toggle="tab"],[data-tab],[aria-selected],.nav-tabs button,.nav-tabs a,.tabs button,.tabs a,summary,[aria-expanded],[contenteditable="true"],dialog');
   const nodes: Element[] = [];
   for (const element of Array.from(nodeList)) {
     if (nodes.length >= 500) break;
     if (visible(element)) nodes.push(element);
   }
   const elements = [];
+  const interactiveFeatures: Array<{ kind: 'tab' | 'accordion' | 'drawer' | 'filter' | 'modal-trigger' | 'link'; label: string; selector?: string }> = [];
+  const seenFeatureKeys = new Set<string>();
+
   for (const element of nodes) {
     const tag = element.tagName.toLowerCase(), name = nameOf(element), testId = element.getAttribute('data-testid') || undefined;
     let selector = '', confidence = 0.75;
@@ -72,31 +90,62 @@ function collectInteractiveDom() {
       let sameRoleAndName = 0;
       for (const other of nodes) if (roleOf(other) === role && nameOf(other) === name) sameRoleAndName++;
       if (role && name && sameRoleAndName === 1) { selector = `role=${role}[name=${JSON.stringify(name)}s]`; confidence = 0.85; }
-      else {
-        const parts: string[] = [];
-        let current: Element | null = element;
-        while (current) {
-          const parent: Element | null = current.parentElement;
-          const index = parent ? Array.prototype.indexOf.call(parent.children, current) + 1 : 1;
-          parts.unshift(`${current.tagName.toLowerCase()}:nth-child(${index})`);
-          selector = parts.join(' > ');
-          if (unique(selector)) break;
-          current = parent;
-        }
-      }
+      else selector = cssPath(element);
     }
     elements.push({ type: tag === 'a' ? 'link' : element.getAttribute('role') || tag, tag, name, testId: confidence === 0.99 ? testId : undefined, selector, confidence });
+
+    // Feature/Tab Trigger extraction for Phase-1 Recon & Batch Video Playback
+    const elRole = element.getAttribute('role') || '';
+    const isTabTrigger =
+      elRole === 'tab' ||
+      element.hasAttribute('data-bs-toggle') ||
+      element.hasAttribute('data-toggle') ||
+      element.hasAttribute('data-tab') ||
+      element.hasAttribute('aria-selected') ||
+      Boolean(element.closest('[role="tablist"], .nav-tabs, [data-tabs], .tabs'));
+    const isAccordion = tag === 'summary' || element.hasAttribute('aria-expanded');
+    const isModal = element.hasAttribute('aria-haspopup') || element.getAttribute('data-bs-toggle') === 'modal';
+
+    if ((isTabTrigger || isAccordion || isModal) && name && name.length <= 64) {
+      const kind = isTabTrigger ? 'tab' : (isAccordion ? 'accordion' : 'modal-trigger');
+      const key = `${kind}:${name.toLowerCase()}`;
+      if (!seenFeatureKeys.has(key)) {
+        seenFeatureKeys.add(key);
+        interactiveFeatures.push({ kind, label: name, selector: cssPath(element) });
+      }
+    }
   }
+
+  // Also detect scrollable container geometry
+  const viewportHeight = window.innerHeight || 900;
+  const docScroll = Math.max(document.documentElement?.scrollHeight || 0, document.body?.scrollHeight || 0);
+  let scrollHeight = docScroll;
+  let scrollContainerSelector = '';
+  const containerSelectors = ['main', '.main-area', '.layout-content', '.page-content', '[role="main"]', '.overflow-y-auto', '[data-scroll-container]'];
+  for (const sel of containerSelectors) {
+    const el = document.querySelector(sel);
+    if (el && (el.scrollHeight - el.clientHeight) > 80 && el.scrollHeight >= scrollHeight) {
+      scrollHeight = el.scrollHeight;
+      scrollContainerSelector = sel;
+    }
+  }
+
   const links: string[] = [];
   for (const anchor of Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
     if (links.length >= 1_000) break;
     if (visible(anchor) && !anchor.hasAttribute('download') && !anchor.hasAttribute('data-method') && !anchor.hasAttribute('data-turbo-method') && !anchor.hasAttribute('onclick')) links.push(anchor.href);
   }
-  return { elements, links };
-}
-
-function clearFormValues() {
-  for (const element of Array.from(document.querySelectorAll('input,textarea,select,[contenteditable="true"]'))) element.setAttribute('aria-hidden', 'true');
+  return {
+    elements,
+    links,
+    interactiveFeatures,
+    scrollMetrics: {
+      scrollHeight,
+      viewportHeight,
+      isScrollable: scrollHeight > viewportHeight + 60,
+      scrollContainerSelector: scrollContainerSelector || undefined,
+    },
+  };
 }
 
 function loginFormAction(element: Element) {
@@ -105,21 +154,23 @@ function loginFormAction(element: Element) {
 }
 
 function browserFunctionSource(fn: Function) {
-  // esbuild may append __name(...) statements to nested declarations; those
-  // helpers exist in Node, not in the page execution context.
   return fn.toString().replace(/\s*__name\([A-Za-z_$][\w$]*,\s*["'][^"']+["']\);/g, '');
 }
 
-/** Observes pages without clicking discovered UI. Only explicitly configured login may submit a form. */
+/**
+ * FR-05 Stage 1 Reconnaissance:
+ * Discovers pages per role, full scroll depth, and all interactive tabs/triggers
+ * WITHOUT writing final screenshots or recording video yet (postponed until user ACC).
+ */
 export async function crawlUI(
   baseUrl: string, pages: InventoryPage[], artifactDir: string, rules: CrawlRules,
-  accounts: Account[], signal: AbortSignal, onProgress: (message: string) => void
+  accounts: CrawlAccount[], signal: AbortSignal, onProgress: (message: string) => void
 ): Promise<InventoryPage[]> {
   signal.throwIfAborted();
   const base = new URL(baseUrl);
   if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password) throw new Error('Crawler needs an HTTP(S) base URL without embedded credentials.');
-  const maxPages = Math.max(pages.length * 2 + 50, bounded(rules.maxPages, 100, 300)), maxDepth = bounded(rules.maxDepth, 3, 8);
-  const secrets = accounts.flatMap(a => [a.email, a.password]).filter(Boolean).sort((a, b) => b.length - a.length);
+  const maxPages = Math.max(pages.length * 2 + 50, bounded(rules.maxPages, 120, 400)), maxDepth = bounded(rules.maxDepth, 4, 8);
+  const secrets = accounts.flatMap(a => [a.email, a.password, a.token || '']).filter(Boolean).sort((a, b) => b.length - a.length);
   const scrubText = (value: string) => {
     for (const secret of secrets) { value = value.split(secret).join('[redacted]').split(encodeURIComponent(secret)).join('[redacted]'); }
     return value.slice(0, 2_000);
@@ -143,51 +194,48 @@ export async function crawlUI(
   }
   function materializePath(rawPath: string): string {
     return rawPath
-      .replace(/:id\b/g, '1')
-      .replace(/:judul\b/g, 'berita')
       .replace(/:page\b/g, '1')
-      .replace(/:token\b/g, 'test')
+      .replace(/:id\b/g, '1')
       .replace(/:slug\b/g, 'demo')
-      .replace(/:id_user\b/g, '42')
+      .replace(/:token\b/g, 'demo')
       .replace(/:[a-zA-Z_]\w*/g, '1')
       .replace(/\[\.\.\.\w+\]/g, '1')
-      .replace(/\[\w+\]/g, '1');
+      .replace(/\[\w+\]/g, '1')
+      .replace(/\{[^}]+\}/g, '1');
   }
   function permitted(url: URL, applyFilters = true) {
     const target = decoded(url.pathname + url.search);
     if (dangerous.test(target)) return false;
-    // Never follow credential-bearing, signed, or action URLs found in an application.
     if ([...url.searchParams.keys()].some(key => /token|secret|password|credential|auth|signature|session|api.?key|action|command|method/i.test(key))) return false;
     if (applyFilters && rules.excludePaths?.some(p => matchesPath(decoded(url.pathname), p))) return false;
     return !applyFilters || !rules.includePaths?.length || rules.includePaths.some(p => matchesPath(decoded(url.pathname), p));
   }
-  const loginUrl = rules.loginPath ? resolve(rules.loginPath) : undefined;
+  const loginUrl = rules.loginPath ? resolve(rules.loginPath) : resolve('/login');
   const successUrl = rules.successUrl ? resolve(rules.successUrl) : undefined;
-  const loginConfigured = !!(loginUrl && permitted(loginUrl, false) && rules.emailSelector && rules.passwordSelector && rules.submitSelector);
   const candidates = pages.slice(0, 5_000).map(p => ({ ...p, elements: p.elements.map(e => ({ ...e })), errors: p.errors ? [...p.errors] : undefined }));
   const output = new Map<string, InventoryPage>();
+  const visitedCanonicalPaths = new Set<string>();
+
   for (const candidate of candidates) {
     const concrete = materializePath(candidate.path);
     const url = resolve(concrete);
     if (!url || !permitted(url)) {
       candidate.state = 'blocked';
-      candidate.errors = [...(candidate.errors ?? []), 'URL is outside crawl rules or unsafe.'];
+      candidate.errors = [...(candidate.errors ?? []), 'URL berada di luar cakupan aturan crawl.'];
     } else {
       candidate.state = 'candidate';
       candidate.status = undefined;
       candidate.screenshot = undefined;
       candidate.network = undefined;
     }
-    output.set(candidate.path, candidate);
+    output.set(`candidate::${candidate.path}`, candidate);
   }
   if (!maxPages) return [...output.values()];
   const artifactRoot = path.resolve(artifactDir);
   await mkdir(artifactRoot, { recursive: true });
   const rootStat = await lstat(artifactRoot);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error('Artifact root must be a real directory.');
-  const screenshots = path.join(artifactRoot, 'screenshots');
-  await mkdir(screenshots, { recursive: true });
-  if ((await lstat(screenshots)).isSymbolicLink() || path.dirname(await realpath(screenshots)) !== await realpath(artifactRoot)) throw new Error('Screenshot directory must stay inside artifact root.');
+
   const runKey = randomUUID().slice(0, 8);
   let browser: Browser | undefined, currentContext: BrowserContext | undefined;
   let visitedCount = 0, expired = false;
@@ -195,103 +243,60 @@ export async function crawlUI(
   signal.addEventListener('abort', abort, { once: true });
   const deadline = setTimeout(() => { expired = true; abort(); }, 900_000);
   const check = () => { signal.throwIfAborted(); };
+
   try {
     browser = await chromium.launch({ headless: true, timeout: 20_000 });
     check();
 
-    // Auto-discover backend API token for travel-agent authenticated crawl sessions if applicable
-    let autoToken: string | undefined;
-    let autoUserId = '42';
-    const isTravelAgent = process.env.PROJECT_TYPE === 'travel-agent' ||
-      base.href.includes('travel') ||
-      base.href.includes('jamaahku') ||
-      accounts.some(a => a.role === 'travel-agent');
+    const effectiveAccounts: CrawlAccount[] = accounts.filter(a => Boolean(a.email && (a.password || a.token))).slice(0, 8);
+    const sessions: Array<CrawlAccount | undefined> = effectiveAccounts.length > 0
+      ? [...effectiveAccounts, undefined]
+      : [undefined];
 
-    if (isTravelAgent) {
-      const authEndpoint = new URL('/api/v1/web/auth/login', process.env.BACKEND_URL || base.origin).toString();
-      const authCredentials = [
-        ...accounts.map(a => ({ username: a.email, password: a.password, role: a.role })),
-        { username: 'QC_PATCH_TA', password: 'password123', role: 'travel-agent' }
-      ];
-
-      for (const cred of authCredentials) {
-        if (!cred.username || !cred.password) continue;
-        try {
-          const authRes = await fetch(authEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: cred.username, password: cred.password }),
-            signal: AbortSignal.timeout(15000),
-          });
-          if (authRes.ok) {
-            const authData = await authRes.json() as any;
-            autoToken = authData.token || authData.data?.token || authData.access_token;
-            const user = authData.data || authData.user || { id_user: 42 };
-            autoUserId = String(user.id_user || 42);
-            if (autoToken) {
-              progress(`Auto-auth: Backend session acquired for user '${cred.username}' (ID ${autoUserId}).`);
-              break;
-            }
-          }
-        } catch (e) {
-          progress(`Auto-auth attempt for '${cred.username}' note: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    }
-
-    // Prioritize direct token-authenticated session if available, otherwise fallback to form login
-    const effectiveAccounts: Account[] = (autoToken && isTravelAgent)
-      ? [{ email: 'QC_PATCH_TA', password: 'password123', role: 'travel-agent' }]
-      : (loginConfigured ? accounts.slice(0, 5) : []);
-    const sessions: Array<Account | undefined> = [...effectiveAccounts, undefined];
-    const sessionBudget = Math.max(pages.length + 25, 80);
-    if (accounts.length && !loginConfigured && !autoToken) progress('Login skipped: provide a same-origin login path and all three login selectors.');
-    if (accounts.length > 5) progress('Account limit: only the first five configured accounts can be explored.');
+    const sessionBudget = Math.max(pages.length + 30, 100);
     for (const [sessionIndex, account] of sessions.entries()) {
       check();
       if (visitedCount >= maxPages) break;
-      const sessionKey = account ? `account-${sessionIndex}` : 'public';
+      const roleName = account?.role?.trim() || (account ? `role-${sessionIndex + 1}` : 'public');
       let authentication = account ? 'login-unverified' : 'public';
       let loginActive = false;
       let loginStatus = 0;
       let sessionVisited = 0;
+
       const context = currentContext = await browser.newContext({
-        viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block', acceptDownloads: false,
+        viewport: { width: 1440, height: 900 }, serviceWorkers: 'block', acceptDownloads: false,
       });
       context.setDefaultTimeout(20_000);
       context.setDefaultNavigationTimeout(35_000);
       await context.addInitScript(() => {
-        // Discovery never opens extra browsing contexts or transmits background beacons.
         window.open = () => null;
         navigator.sendBeacon = () => false;
-        window.WebSocket = class { constructor() { throw new Error('WebSockets disabled during discovery'); } } as unknown as typeof WebSocket;
       });
       const page = await context.newPage();
       page.on('dialog', dialog => { void dialog.dismiss().catch(() => {}); });
       page.on('download', download => { void download.cancel().catch(() => {}); });
       context.on('page', other => { if (other !== page) void other.close().catch(() => {}); });
+
       let errors: string[] = [], network: NonNullable<InventoryPage['network']> = [], blockedNavigation = false;
       const error = (message: string) => { if (errors.length < 50 && !errors.includes(message)) errors.push(scrubText(message)); };
-      page.on('console', message => { if (message.type() === 'error') error(`Browser console error at ${scrubUrl(message.location().url || page.url())} (message omitted to protect application secrets).`); });
-      page.on('pageerror', () => error('Uncaught browser script error (message omitted to protect application secrets).'));
+      page.on('console', message => { if (message.type() === 'error') error(`Browser console error at ${scrubUrl(message.location().url || page.url())}`); });
+      page.on('pageerror', err => error(`Uncaught page error: ${scrubText(err.message)}`));
       page.on('response', response => {
         if (network.length < 150) network.push({ url: scrubUrl(response.url()), status: response.status(), method: response.request().method() });
         if (loginActive && response.request().method() === 'POST') loginStatus = response.status();
         if (response.status() >= 400) error(`HTTP ${response.status()}: ${scrubUrl(response.url())}`);
       });
       page.on('requestfailed', request => error(`Request failed: ${scrubUrl(request.url())}`));
-      // Allow essential subresources and localhost API traffic while restricting unauthorized navigation.
+
       await context.route('**/*', async route => {
         const request = route.request();
         const rawUrl = request.url();
         const rType = request.resourceType();
-
-        // Subresources: styles, scripts, images, fonts, Vite/Webpack virtual modules
         const isSubresource = ['stylesheet', 'image', 'media', 'font', 'script'].includes(rType) ||
           rawUrl.includes('/@vite/') || rawUrl.includes('/@id/') || rawUrl.includes('/@fs/') ||
           /\.(?:css|js|mjs|cjs|vue|svg|png|jpe?g|gif|webp|woff2?|ttf|eot)(?:[?#]|$)/i.test(rawUrl);
 
-        if (isSubresource) {
+        if (isSubresource || rType === 'fetch' || rType === 'xhr') {
           try {
             const parsed = new URL(rawUrl);
             if (parsed.origin === base.origin || parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
@@ -301,108 +306,117 @@ export async function crawlUI(
           } catch {}
         }
 
-        // Backend API requests from same host/localhost
-        if (rType === 'fetch' || rType === 'xhr') {
-          try {
-            const parsed = new URL(rawUrl);
-            if (parsed.origin === base.origin || parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
-              await route.continue();
-              return;
-            }
-          } catch {}
-        }
-
-        // Navigation requests
         let ownFrame = false;
-        try { ownFrame = request.frame() === page.mainFrame(); } catch { /* workers are not allowed */ }
+        try { ownFrame = request.frame() === page.mainFrame(); } catch {}
         const url = resolve(rawUrl);
         if (!ownFrame || !url || !permitted(url, false)) await route.abort();
         else await route.continue();
       });
-      if (account && autoToken) {
-        await context.addCookies([
-          { name: 'session-travel-agent', value: autoToken, url: base.origin },
-          { name: 'id_user', value: autoUserId, url: base.origin },
-        ]);
-        await context.addInitScript(({ token, uid }) => {
-          try {
-            document.cookie = `session-travel-agent=${token}; path=/;`;
-            document.cookie = `id_user=${uid}; path=/;`;
-            localStorage.setItem('session-travel-agent', token);
-            localStorage.setItem('id_user', uid);
-          } catch {}
-        }, { token: autoToken, uid: autoUserId });
-        authentication = `authenticated:${account.role || 'user'}`;
-        progress(`Authenticated session ready via session cookies (${authentication}).`);
-      } else if (account) {
-        progress(`Preparing configured login for account ${sessionIndex}.`);
+
+      if (account) {
+        progress(`[Recon] Login sesi role "${roleName}" (${account.email})...`);
         loginActive = true;
         try {
-          await page.goto(loginUrl!.href, { waitUntil: 'domcontentloaded' });
-          if (blockedNavigation) throw new Error('Login navigation blocked.');
-          const submit = page.locator(rules.submitSelector!);
-          // Determine the only permitted mutation endpoint from the configured form.
-          const action = await submit.evaluate(browserFunctionSource(loginFormAction));
-          const postUrl = resolve(action, page.url());
-          if (!postUrl || !permitted(postUrl, false)) throw new Error('Login form action is outside crawl policy.');
-          await page.locator(rules.emailSelector!).fill(account.email);
-          await page.locator(rules.passwordSelector!).fill(account.password);
-          // Let the explicit waitForURL below own the slow Laravel redirect;
-          // Playwright's implicit click-navigation wait can time out first.
-          await submit.click({ noWaitAfter: true });
-          if (successUrl && permitted(successUrl, false)) {
-            await page.waitForURL(url => {
-              const u = url.pathname.replace(/\/$/, '');
-              const s = successUrl.pathname.replace(/\/$/, '');
-              return url.href === successUrl.href || (s.length > 1 && u.includes(s)) || (url.pathname !== loginUrl!.pathname && !url.pathname.includes('login'));
-            }, { waitUntil: 'domcontentloaded', timeout: 20_000 });
-            // URL match alone must not count if the login page was already that URL,
-            // a request failed, or credentials are still presented for entry.
-            const passwordVisible = await page.locator(rules.passwordSelector!).isVisible().catch(() => true);
-            const leftLoginPage = page.url() !== loginUrl!.href && !page.url().includes('/login');
-            const postSucceededOrWasNotObserved = loginStatus === 0 || loginStatus < 400;
-            if (leftLoginPage && !passwordVisible && postSucceededOrWasNotObserved) {
-              authentication = `authenticated:${account.role || `account-${sessionIndex}`}`;
-              progress(`Configured login success URL reached for account ${sessionIndex} (${page.url()}).`);
-            } else progress(`Login for account ${sessionIndex} remains unverified (path=${new URL(page.url()).pathname}, passwordVisible=${passwordVisible}, blocked=${blockedNavigation}, postStatus=${loginStatus}).`);
-          } else progress(`Login submitted for account ${sessionIndex}; no valid success URL was configured, so success is unverified.`);
+          if (account.token) {
+            await context.addInitScript(({ token }) => {
+              try {
+                localStorage.setItem('token', token);
+                localStorage.setItem('access_token', token);
+                localStorage.setItem('auth_token', token);
+              } catch {}
+            }, { token: account.token });
+          }
+
+          if (loginUrl && permitted(loginUrl, false)) {
+            await page.goto(loginUrl.href, { waitUntil: 'domcontentloaded' });
+            const emailSel = rules.emailSelector || "input[name='email'], input[name='username'], input[type='email'], input[type='text']";
+            const passSel = rules.passwordSelector || "input[name='password'], input[type='password']";
+            const submitSel = rules.submitSelector || "button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Masuk')";
+
+            const hasEmailInput = await page.locator(emailSel).first().isVisible({ timeout: 3000 }).catch(() => false);
+            const hasPassInput = await page.locator(passSel).first().isVisible({ timeout: 2000 }).catch(() => false);
+
+            if (hasEmailInput && hasPassInput) {
+              await page.locator(emailSel).first().fill(account.email);
+              await page.locator(passSel).first().fill(account.password);
+              await page.locator(submitSel).first().click({ noWaitAfter: true });
+
+              await page.waitForURL(url => {
+                const u = url.pathname.replace(/\/$/, '');
+                const s = successUrl?.pathname.replace(/\/$/, '') || '';
+                return (successUrl && url.href === successUrl.href) || (s.length > 1 && u.includes(s)) || !url.pathname.includes('login');
+              }, { waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
+              await page.waitForTimeout(500);
+
+              const stillHasPwd = await page.locator(passSel).first().isVisible().catch(() => false);
+              if (!stillHasPwd && (loginStatus === 0 || loginStatus < 400)) {
+                authentication = `authenticated:${roleName}`;
+                progress(`[Recon] Login role "${roleName}" berhasil (${page.url()}).`);
+              } else if (account.token) {
+                authentication = `authenticated:${roleName}`;
+                progress(`[Recon] Menggunakan token API fallback untuk role "${roleName}".`);
+              }
+            } else if (account.token) {
+              authentication = `authenticated:${roleName}`;
+            }
+          }
         } catch (err) {
           check();
           const reason = err instanceof Error ? scrubText(err.message) : 'unknown error';
-          progress(`Login for account ${sessionIndex} failed or could not be verified (${reason}).`);
+          progress(`[Recon] Login role "${roleName}" gagal/tidak terverifikasi (${reason}).`);
           authentication = 'login-unverified';
         } finally { loginActive = false; }
-        // Never label an unverified session as public/authenticated evidence.
-        if (!authentication.startsWith('authenticated:')) { await context.close(); currentContext = undefined; continue; }
+
+        if (!authentication.startsWith('authenticated:')) {
+          // Catat halaman kegagalan login untuk role agar terlihat di Coverage Gaps
+          output.set(`${roleName}::/login`, {
+            id: idFor(`${roleName}:/login`),
+            path: loginUrl?.pathname || '/login',
+            title: `Login (${roleName})`,
+            url: loginUrl?.href || base.href,
+            status: loginStatus || 401,
+            state: 'blocked',
+            role: roleName,
+            authentication: 'login-unverified',
+            elements: [],
+            errors: [`Autentikasi gagal untuk role "${roleName}".`],
+            network: [...network],
+          });
+          await context.close().catch(() => {});
+          currentContext = undefined;
+          continue;
+        }
       }
+
       type QueueItem = { url: URL; depth: number; candidate?: InventoryPage };
       const queue: QueueItem[] = [], queued = new Set<string>();
       const enqueue = (url: URL | undefined, depth: number, candidate?: InventoryPage) => {
         if (!url || !permitted(url) || depth > maxDepth || queued.has(url.href) || queue.length >= 1_000) return;
-        // Query variants are unbounded in many applications; visit a pathname only once per session.
         const routeKey = url.origin + url.pathname;
         if (queued.has(routeKey)) return;
         queued.add(url.href); queued.add(routeKey); queue.push({ url, depth, candidate });
       };
+
       if (account) {
-        // Authenticated session: start from dashboard or successUrl, then visit auth-required pages
-        enqueue(resolve(successUrl?.href || '/dashboard'), 0, candidates.find(p => p.path === '/dashboard'));
+        const landedUrl = resolve(page.url());
+        if (landedUrl && landedUrl.pathname !== (loginUrl?.pathname || '/login')) {
+          enqueue(landedUrl, 0);
+        }
+        if (successUrl) enqueue(successUrl, 0, candidates.find(p => p.path === successUrl.pathname));
         for (const candidate of candidates) {
-          if (candidate.authentication === 'auth-required' || candidate.path === '/dashboard') {
-            const concrete = materializePath(candidate.path);
-            enqueue(resolve(concrete), 0, candidate);
+          if (candidate.authentication === 'auth-required' || !candidate.path.includes('login')) {
+            enqueue(resolve(materializePath(candidate.path)), 0, candidate);
           }
         }
       } else {
-        // Public session: visit public / landing pages
-        enqueue(resolve(base.href), 0, candidates.find(p => resolve(materializePath(p.path))?.href === base.href));
+        enqueue(resolve(base.href), 0, candidates.find(p => p.path === '/'));
         for (const candidate of candidates) {
-          if (candidate.authentication !== 'auth-required' && candidate.path !== '/dashboard') {
-            const concrete = materializePath(candidate.path);
-            enqueue(resolve(concrete), 0, candidate);
+          if (candidate.authentication !== 'auth-required') {
+            enqueue(resolve(materializePath(candidate.path)), 0, candidate);
           }
         }
       }
+
       while (queue.length && visitedCount < maxPages && sessionVisited < sessionBudget && !expired) {
         check();
         const item = queue.shift()!;
@@ -411,117 +425,95 @@ export async function crawlUI(
         errors = []; network = []; blockedNavigation = false;
         const canonicalPath = item.candidate?.path || item.url.pathname;
         const observed: InventoryPage = {
-          ...item.candidate, id: idFor(`${sessionKey}:${canonicalPath}`), path: canonicalPath,
-          title: item.candidate?.title || canonicalPath, url: scrubUrl(item.url.href),
-          state: 'candidate', elements: [], authentication, screenshot: undefined, status: undefined, links: [], errors: [], network: [],
+          ...item.candidate,
+          id: idFor(`${runKey}:${roleName}:${canonicalPath}`),
+          path: canonicalPath,
+          resolvedConcretePath: item.url.pathname,
+          title: item.candidate?.title || canonicalPath,
+          url: scrubUrl(item.url.href),
+          state: 'candidate',
+          role: roleName,
+          elements: [],
+          authentication,
+          screenshot: undefined, // FR-05: NO final screenshot captured during Stage 1 Recon!
+          status: undefined,
+          links: [],
+          errors: [],
+          network: [],
+          interactiveFeatures: [],
         };
-        progress(`Inspecting ${visitedCount}/${maxPages}: ${scrubUrl(item.url.href)}`);
+        progress(`[Recon ${roleName}] Memetakan ${visitedCount}/${maxPages}: ${canonicalPath}`);
+
         try {
           const response = await page.goto(item.url.href, { waitUntil: 'domcontentloaded' });
-          await page.waitForSelector('#app > *, main, .app-main-content, body > div', { timeout: 4000 }).catch(() => {});
-          await page.waitForTimeout(500);
+          await page.waitForSelector('#app > *, main, body > div', { timeout: 3500 }).catch(() => {});
+          await page.waitForTimeout(350);
           await page.waitForLoadState('networkidle', { timeout: 1500 }).catch(() => {});
           check();
           const finalUrl = resolve(page.url());
           if (!finalUrl || !permitted(finalUrl) || blockedNavigation) throw new Error('Navigation blocked by crawl policy.');
           observed.url = scrubUrl(finalUrl.href);
           observed.status = response?.status() ?? 200;
-          observed.state = observed.status === 401 || observed.status === 403 ? 'blocked' : (observed.status >= 400) ? 'error' : 'observed';
-          if (finalUrl.href !== item.url.href) {
-            if (account && (finalUrl.pathname.includes('/landing-page') || finalUrl.pathname.includes('/login'))) {
-              error(`Redirected to ${scrubUrl(finalUrl.href)}; access unauthorized.`);
-              observed.state = 'blocked';
-            } else {
-              observed.state = 'observed';
-            }
+          observed.state = (observed.status === 401 || observed.status === 403) ? 'blocked' : (observed.status >= 400 ? 'error' : 'observed');
+          if (finalUrl.href !== item.url.href && account && finalUrl.pathname.includes('/login')) {
+            error(`Dialihkan ke ${scrubUrl(finalUrl.href)}; akses ditolak untuk role "${roleName}".`);
+            observed.state = 'blocked';
           }
+
           observed.title = scrubText(await page.title()) || observed.title;
-          // Passing source explicitly avoids Playwright serializing a transpiler-generated wrapper.
-          const dom = await page.evaluate(`(${browserFunctionSource(collectInteractiveDom)})()`);
+          const dom = await page.evaluate(`(${browserFunctionSource(collectInteractiveDom)})()`) as {
+            elements: InventoryPage['elements'];
+            links: string[];
+            interactiveFeatures: InteractiveFeatureItem[];
+            scrollMetrics: { scrollHeight: number; viewportHeight: number; isScrollable: boolean; scrollContainerSelector?: string };
+          };
+
           for (const element of dom.elements) {
-            // Validate the browser's role/name approximation against Playwright's actual engine.
-            if (element.selector.startsWith('role=') && await page.locator(element.selector).count().catch(() => 0) !== 1) { element.selector = ''; element.confidence = 0.4; }
-          }
-          observed.elements = dom.elements.map(element => ({ ...element, name: scrubText(element.name), selector: element.selector ? scrubText(element.selector) : undefined, testId: element.testId ? scrubText(element.testId) : undefined }));
-          const links = dom.links.map(link => resolve(link, finalUrl.href)).filter((url): url is URL => !!url && permitted(url));
-          observed.links = Array.from(new Set(links.map(url => scrubUrl(url.href)))) as string[];
-          if (observed.state === 'observed') for (const link of links) enqueue(link, item.depth + 1);
-          try {
-            const stem = `${runKey}-${observed.id}`;
-            await page.screenshot({ path: path.join(screenshots, `${stem}.png`), fullPage: true, animations: 'disabled', timeout: 12_000 }).catch(async () => {
-              await page.screenshot({ path: path.join(screenshots, `${stem}.png`), fullPage: false, animations: 'disabled', timeout: 5_000 }).catch(() => {});
-            });
-            observed.screenshot = `screenshots/${stem}.png`;
-
-            // Auto-detect scroll overflow for any web application layout and capture scrolled view
-            try {
-              const scrollTarget = await page.evaluate(() => {
-                const mainContainer = document.querySelector('main, .main-area, .layout-content, .page-content, [role="main"], .overflow-y-auto');
-                if (mainContainer && (mainContainer.scrollHeight - mainContainer.clientHeight) > 120) {
-                  return { type: 'container', maxScroll: mainContainer.scrollHeight - mainContainer.clientHeight };
-                }
-                const docScroll = Math.max(document.documentElement?.scrollHeight || 0, document.body?.scrollHeight || 0);
-                if ((docScroll - window.innerHeight) > 120) {
-                  return { type: 'window', maxScroll: docScroll - window.innerHeight };
-                }
-                return { type: 'none', maxScroll: 0 };
-              }).catch(() => ({ type: 'none', maxScroll: 0 }));
-
-              if (scrollTarget.type !== 'none' && scrollTarget.maxScroll > 120) {
-                await page.evaluate((target, maxScroll) => {
-                  if (target === 'container') {
-                    const el = document.querySelector('main, .main-area, .layout-content, .page-content, [role="main"], .overflow-y-auto');
-                    if (el) el.scrollTo({ top: maxScroll, behavior: 'smooth' });
-                  } else {
-                    window.scrollTo({ top: maxScroll, behavior: 'smooth' });
-                  }
-                }, scrollTarget.type, scrollTarget.maxScroll);
-
-                await new Promise(r => setTimeout(r, 600));
-                const scrolledStem = `${stem}-scrolled`;
-                await page.screenshot({ path: path.join(screenshots, `${scrolledStem}.png`), fullPage: false, animations: 'disabled', timeout: 8_000 }).catch(() => {});
-
-                // Restore to top
-                await page.evaluate((target) => {
-                  if (target === 'container') {
-                    const el = document.querySelector('main, .main-area, .layout-content, .page-content, [role="main"], .overflow-y-auto');
-                    if (el) el.scrollTo({ top: 0, behavior: 'smooth' });
-                  } else {
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }
-                }, scrollTarget.type);
-                await new Promise(r => setTimeout(r, 300));
-              }
-            } catch {}
-
-            // Optional accessibility evidence without clearing form values
-            const body = page.locator('body');
-            if (typeof body.ariaSnapshot === 'function') {
-              const snapshot = await body.ariaSnapshot({ timeout: 2_000 }).catch(() => '');
-              if (snapshot) await writeFile(path.join(screenshots, `${stem}.aria.txt`), scrubText(snapshot.replace(/https?:\/\/[^\s"<>]+/g, raw => scrubUrl(raw)))).catch(() => {});
+            if (element.selector?.startsWith('role=') && await page.locator(element.selector).count().catch(() => 0) !== 1) {
+              element.selector = '';
+              element.confidence = 0.4;
             }
-          } catch {
-            // Screenshot is best-effort evidence; inspection remains valid.
+          }
+          observed.elements = dom.elements.map(element => ({
+            ...element,
+            name: scrubText(element.name),
+            selector: element.selector ? scrubText(element.selector) : undefined,
+            testId: element.testId ? scrubText(element.testId) : undefined,
+          }));
+          observed.interactiveFeatures = dom.interactiveFeatures;
+          observed.scrollHeight = dom.scrollMetrics.scrollHeight;
+          observed.viewportHeight = dom.scrollMetrics.viewportHeight;
+          observed.isScrollable = dom.scrollMetrics.isScrollable;
+          observed.scrollContainerSelector = dom.scrollMetrics.scrollContainerSelector;
+
+          const links = dom.links.map(link => resolve(link, finalUrl.href)).filter((url): url is URL => !!url && permitted(url));
+          observed.links = Array.from(new Set(links.map(url => scrubUrl(url.href))));
+          if (observed.state === 'observed') {
+            for (const link of links) enqueue(link, item.depth + 1);
+          }
+          // Avoid duplicating static candidate path with empty dynamic `:id` placeholder when observed directly
+          if (dynamicPath.test(canonicalPath) && finalUrl.pathname !== canonicalPath) {
+            observed.resolvedConcretePath = finalUrl.pathname;
           }
         } catch (err) {
           check();
           const msg = err instanceof Error ? err.message : String(err);
           observed.state = blockedNavigation ? 'blocked' : 'error';
-          error(blockedNavigation ? 'Navigation blocked by crawl policy.' : `Page inspection failed: ${msg}`);
-          try {
-            const stem = `${runKey}-${observed.id}-error`;
-            await page.screenshot({ path: path.join(screenshots, `${stem}.png`), fullPage: false, animations: 'disabled', timeout: 5_000 }).catch(() => {});
-            observed.screenshot = `screenshots/${stem}.png`;
-          } catch {
-            // Error screenshot is best-effort
-          }
+          error(blockedNavigation ? 'Navigation blocked by crawl policy.' : `Gagal memuat halaman saat Recon: ${msg}`);
         }
-        observed.errors = [...errors]; observed.network = [...network];
-        output.set(canonicalPath, observed);
+
+        observed.errors = [...errors];
+        observed.network = [...network];
+        visitedCanonicalPaths.add(canonicalPath);
+        output.delete(`candidate::${canonicalPath}`);
+        output.set(`${roleName}::${canonicalPath}`, observed);
       }
-      await context.close().catch(() => {}); currentContext = undefined;
+
+      await context.close().catch(() => {});
+      currentContext = undefined;
     }
-    if (visitedCount >= maxPages) progress(`Page budget reached (${maxPages}); unvisited source pages remain candidates.`);
+
+    if (visitedCount >= maxPages) progress(`Page budget reached (${maxPages}); sebagian rute tetap berstatus candidate.`);
     return [...output.values()];
   } finally {
     clearTimeout(deadline); signal.removeEventListener('abort', abort);

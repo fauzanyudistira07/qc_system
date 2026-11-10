@@ -6,6 +6,8 @@ import path from 'node:path';
 import type { NormalizedFlow } from '@qc/flow-schema';
 import { executeWebFlow, type RunStepResult, type WebRunResult } from './playwright-adapter.ts';
 import { detectProjectRuntime, ensureRuntimeImage } from './runtimes/index.ts';
+import { provisionEnvFiles } from './env-provisioner.ts';
+import type { EnvProvisionResult } from './discovery/types.ts';
 
 export function resolveGitToken(root?: string): string | undefined {
   if (process.env.GITHUB_TOKEN?.trim()) return process.env.GITHUB_TOKEN.trim();
@@ -47,6 +49,13 @@ export type ManagedProject = {
   repositoryUrl?: string;
   ref: string;
   baseUrl: string;
+  backendUrl?: string;
+  backendRepositoryUrl?: string;
+  backendRef?: string;
+  mobileRepositoryUrl?: string;
+  mobileRef?: string;
+  sameRepoAsFrontend?: boolean;
+  platform?: 'web' | 'android';
   environment: string;
   stack?: 'laravel' | 'custom' | 'auto';
   envFilePath?: string;
@@ -70,7 +79,16 @@ export type RunnerUpdate = {
 };
 
 export type RunnerContext = { runId: string; sourceDir: string; workspace: string; networkName: string; services: ManagedService[]; containers: Map<string, { name: string; workdir: string }> };
-export type RunnerHooks = { update: (update: RunnerUpdate) => void; signal?: AbortSignal; onSource?: (sourceDir: string) => Promise<void>; prepare?: (context: RunnerContext) => Promise<Record<string, string>>; beforeStart?: (context: RunnerContext) => Promise<void>; execute?: (sourceDir: string) => Promise<WebRunResult>; cleanup?: () => Promise<void> };
+export type RunnerHooks = {
+  update: (update: RunnerUpdate) => void;
+  signal?: AbortSignal;
+  onSource?: (sourceDir: string) => Promise<void>;
+  onEnvProvisioned?: (result: EnvProvisionResult) => Promise<void> | void;
+  prepare?: (context: RunnerContext) => Promise<Record<string, string>>;
+  beforeStart?: (context: RunnerContext) => Promise<void>;
+  execute?: (sourceDir: string) => Promise<WebRunResult>;
+  cleanup?: () => Promise<void>;
+};
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -184,14 +202,26 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
   for (const directory of composerDirs) if (await exists(path.join(directory, 'artisan'))) laravelDirs.push(directory);
 
   const packageDirs = await findManifestDirectories(sourceDir, 'package.json');
-  const nodeServices: ManagedService[] = [];
+  const rawNodeServices: Array<ManagedService & { isBackendNode: boolean }> = [];
   for (const [index, directory] of packageDirs.entries()) {
+    const rel = relativeWorkingDir(sourceDir, directory).toLowerCase();
+    if (project.platform === 'android' && (rel.startsWith('mobile') || await exists(path.join(directory, 'pubspec.yaml')))) {
+      continue;
+    }
     const packageJson = await readJson<{ scripts?: Record<string, string>; dependencies?: Record<string, string>; devDependencies?: Record<string, string>; packageManager?: string }>(path.join(directory, 'package.json'));
     const scripts = packageJson?.scripts ?? {};
     const script = scripts.dev ? 'dev' : scripts.start ? 'start' : scripts.serve ? 'serve' : undefined;
     if (!script) continue;
+    const allDeps = { ...(packageJson?.dependencies ?? {}), ...(packageJson?.devDependencies ?? {}) };
+    const isFrontendFramework = Boolean(allDeps.vite || allDeps.next || allDeps.nuxt || allDeps.react || allDeps.vue || allDeps['@angular/core'] || allDeps.svelte);
+    const isBackendNode = !isFrontendFramework && (
+      rel === 'backend' || rel.startsWith('backend/') ||
+      Boolean(allDeps.express || allDeps.fastify || allDeps['@nestjs/core'] || allDeps.hono || allDeps.koa)
+    );
     const isRoot = directory === sourceDir;
-    const port = isRoot && laravelDirs.length > 0 ? 5173 : basePort(project.baseUrl, script === 'dev' ? 5173 + index : 3000 + index);
+    const port = isBackendNode
+      ? basePort(project.backendUrl || 'http://127.0.0.1:8000', 8000 + index)
+      : (isRoot && laravelDirs.length > 0 ? 5173 : basePort(project.baseUrl, script === 'dev' ? 5173 + index : 3000 + index));
     const packageManager = packageJson?.packageManager ?? '';
     const hasPnpmLock = await exists(path.join(directory, 'pnpm-lock.yaml'));
     const hasYarnLock = await exists(path.join(directory, 'yarn.lock'));
@@ -212,27 +242,30 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
     if (!hasNodeModules && hasPrisma) {
       installCommand = `${installCommand} && npx prisma generate`;
     }
-    const startCommand = isNext
-      ? `${tool} run ${script}${tool === 'yarn' ? '' : ' --'} -p ${port}`
-      : `${tool} run ${script}${tool === 'yarn' ? '' : ' --'} --host 0.0.0.0 --port=${port}`;
+    const startCommand = isBackendNode
+      ? `${tool} run ${script}`
+      : (isNext
+        ? `${tool} run ${script}${tool === 'yarn' ? '' : ' --'} -p ${port}`
+        : `${tool} run ${script}${tool === 'yarn' ? '' : ' --'} --host 0.0.0.0 --port=${port}`);
     const detectedNode = await detectProjectRuntime(directory);
-    nodeServices.push({
+    rawNodeServices.push({
+      isBackendNode,
       id: isRoot ? 'node-app' : `node-${serviceSlug(sourceDir, directory)}`,
       name: isRoot ? 'node-app' : `node-${relativeWorkingDir(sourceDir, directory)}`,
-      kind: laravelDirs.length > 0 ? 'frontend' : 'custom',
+      kind: isBackendNode ? 'backend' : (laravelDirs.length > 0 ? 'frontend' : 'custom'),
       workingDir: relativeWorkingDir(sourceDir, directory),
       installCommand,
       startCommand,
-      healthCheck: laravelDirs.length > 0 ? '' : (port ? `http://127.0.0.1:${port}` : project.baseUrl),
+      healthCheck: port ? `http://127.0.0.1:${port}/` : project.baseUrl,
       port,
       runtimeImage: detectedNode.recommendedImage,
-      dependsOn: laravelDirs.length > 0 ? laravelDirs.map((directory) => `laravel-${serviceSlug(sourceDir, directory)}`) : []
+      dependsOn: [],
     });
   }
 
   const services: ManagedService[] = [];
   for (const [index, directory] of laravelDirs.entries()) {
-    const port = index === 0 ? basePort(project.baseUrl, 5000) : 5000 + index;
+    const port = index === 0 ? basePort(project.backendUrl || 'http://127.0.0.1:8000', 8000) : 8000 + index;
     const detectedPhp = await detectProjectRuntime(directory);
     services.push({
       id: `laravel-${serviceSlug(sourceDir, directory)}`,
@@ -241,29 +274,48 @@ async function detectServices(sourceDir: string, project: ManagedProject) {
       workingDir: relativeWorkingDir(sourceDir, directory),
       installCommand: detectedPhp.installCommand,
       startCommand: `php artisan serve --host=0.0.0.0 --port=${port}`,
-      healthCheck: index === 0 ? project.baseUrl : `http://127.0.0.1:${port}/`,
+      healthCheck: `http://127.0.0.1:${port}/`,
       port,
       runtimeImage: detectedPhp.recommendedImage,
       dependsOn: []
     });
   }
-  if (services.length > 0) return [...services, ...nodeServices];
-  if (nodeServices.length > 0) return nodeServices;
+
+  const backendIds = [
+    ...services.map((s) => s.id),
+    ...rawNodeServices.filter((s) => s.isBackendNode).map((s) => s.id),
+  ];
+  const finalizedNode: ManagedService[] = rawNodeServices.map(({ isBackendNode, ...svc }) => ({
+    ...svc,
+    kind: isBackendNode ? 'backend' : (backendIds.length > 0 ? 'frontend' : svc.kind),
+    dependsOn: isBackendNode ? [] : backendIds.filter((id) => id !== svc.id),
+  }));
+
+  if (services.length > 0 || finalizedNode.length > 0) {
+    return [...services, ...finalizedNode.filter((s) => s.kind === 'backend'), ...finalizedNode.filter((s) => s.kind !== 'backend')];
+  }
 
   const pythonRequirements = await findManifestDirectories(sourceDir, 'requirements.txt');
   const pythonProjects = pythonRequirements.length > 0 ? pythonRequirements : await findManifestDirectories(sourceDir, 'pyproject.toml');
   const djangoDirs = await findManifestDirectories(sourceDir, 'manage.py');
   if (pythonProjects.length > 0 || djangoDirs.length > 0) {
     const directory = djangoDirs[0] ?? pythonProjects[0];
-    const port = basePort(project.baseUrl, 5000);
+    const port = basePort(project.backendUrl || project.baseUrl, 8000);
     const hasRequirements = await exists(path.join(directory, 'requirements.txt'));
-    return [{ id: 'python-app', name: 'python-app', kind: 'backend', workingDir: relativeWorkingDir(sourceDir, directory), installCommand: hasRequirements ? 'python -m pip install -r requirements.txt' : 'python -m pip install -e .', startCommand: djangoDirs.length > 0 ? `python manage.py runserver 0.0.0.0:${port}` : `python -m uvicorn app:app --host 0.0.0.0 --port ${port}`, healthCheck: project.baseUrl, port, runtimeImage: 'python:3.12-slim', dependsOn: [] }];
+    return [{ id: 'python-app', name: 'python-app', kind: 'backend', workingDir: relativeWorkingDir(sourceDir, directory), installCommand: hasRequirements ? 'python -m pip install -r requirements.txt' : 'python -m pip install -e .', startCommand: djangoDirs.length > 0 ? `python manage.py runserver 0.0.0.0:${port}` : `python -m uvicorn app:app --host 0.0.0.0 --port ${port}`, healthCheck: `http://127.0.0.1:${port}/`, port, runtimeImage: 'python:3.12-slim', dependsOn: [] }];
   }
 
   const goDirs = await findManifestDirectories(sourceDir, 'go.mod');
   if (goDirs.length > 0) {
     const directory = goDirs[0];
-    return [{ id: 'go-app', name: 'go-app', kind: 'backend', workingDir: relativeWorkingDir(sourceDir, directory), installCommand: 'go mod download', startCommand: 'go run .', healthCheck: project.baseUrl, port: basePort(project.baseUrl, 5000), runtimeImage: 'golang:1.27-bookworm', dependsOn: [] }];
+    const port = basePort(project.backendUrl || project.baseUrl, 8000);
+    return [{ id: 'go-app', name: 'go-app', kind: 'backend', workingDir: relativeWorkingDir(sourceDir, directory), installCommand: 'go mod download', startCommand: 'go run .', healthCheck: `http://127.0.0.1:${port}/`, port, runtimeImage: 'golang:1.27-bookworm', dependsOn: [] }];
+  }
+
+  // Mobile-only Flutter / native Android repository without local backend containers
+  const flutterDirs = await findManifestDirectories(sourceDir, 'pubspec.yaml');
+  if (project.platform === 'android' && (flutterDirs.length > 0 || await exists(path.join(sourceDir, 'android')) || await exists(path.join(sourceDir, 'mobile')))) {
+    return [];
   }
 
   const composeFiles = [...await findManifestDirectories(sourceDir, 'docker-compose.yml'), ...await findManifestDirectories(sourceDir, 'docker-compose.yaml')];
@@ -568,52 +620,50 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
       hooks.update({ phase: 'COPYING_SOURCE', progress: 5, message: `Menyalin folder kerja ke workspace QC: ${localPath}` });
       await copySourceDirectory(localPath, sourceDir);
     } else {
-      if (!project.repositoryUrl?.trim()) throw new Error('repository GitHub wajib diisi untuk source github.');
-      const repository = new URL(project.repositoryUrl);
-      if (!['http:', 'https:'].includes(repository.protocol)) throw new Error('repository URL harus memakai HTTP(S)');
-      if (repository.username || repository.password) throw new Error('repository URL tidak boleh menyimpan username/password; gunakan GITHUB_TOKEN di secret store lokal.');
-      await cloneRepository(project.repositoryUrl, project.ref, sourceDir, root, gitEnv, gitToken, (message) => hooks.update({ message: `Git: ${message}` }));
+      const clientRepo = (project.platform === 'android' ? (project.mobileRepositoryUrl || project.repositoryUrl) : project.repositoryUrl)?.trim() || '';
+      const backendRepo = project.backendRepositoryUrl?.trim() || '';
+      const clientRef = (project.platform === 'android' ? (project.mobileRef || project.ref) : project.ref) || 'main';
+      const backendRef = project.backendRef || project.ref || 'main';
+
+      const validateRepo = (rawUrl: string) => {
+        const parsed = new URL(rawUrl);
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('repository URL harus memakai HTTP(S)');
+        if (parsed.username || parsed.password) throw new Error('repository URL tidak boleh menyimpan username/password; gunakan GITHUB_TOKEN di secret store lokal.');
+      };
+
+      if (!clientRepo && !backendRepo) {
+        throw new Error('repository GitHub wajib diisi untuk source github.');
+      }
+      if (clientRepo) validateRepo(clientRepo);
+      if (backendRepo) validateRepo(backendRepo);
+
+      const isDualDistinctRepos = Boolean(clientRepo && backendRepo && !project.sameRepoAsFrontend && clientRepo !== backendRepo);
+      if (isDualDistinctRepos) {
+        const clientSubdir = project.platform === 'android' ? 'mobile' : 'frontend';
+        await cloneRepository(backendRepo, backendRef, path.join(sourceDir, 'backend'), root, gitEnv, gitToken, (message) => hooks.update({ message: `Git BE: ${message}` }));
+        await cloneRepository(clientRepo, clientRef, path.join(sourceDir, clientSubdir), root, gitEnv, gitToken, (message) => hooks.update({ message: `Git ${project.platform === 'android' ? 'Mobile' : 'FE'}: ${message}` }));
+      } else if (backendRepo && !clientRepo) {
+        await cloneRepository(backendRepo, backendRef, path.join(sourceDir, 'backend'), root, gitEnv, gitToken, (message) => hooks.update({ message: `Git BE: ${message}` }));
+      } else {
+        await cloneRepository(clientRepo || backendRepo, clientRepo ? clientRef : backendRef, sourceDir, root, gitEnv, gitToken, (message) => hooks.update({ message: `Git: ${message}` }));
+      }
     }
     hooks.signal?.throwIfAborted();
     await hooks.onSource?.(sourceDir);
 
+    let resolvedEnvUploadPath: string | undefined;
     if (project.envFilePath?.trim()) {
       const envPath = path.isAbsolute(project.envFilePath) ? project.envFilePath : path.resolve(root, project.envFilePath);
       const envInfo = await stat(envPath).catch(() => undefined);
       if (!envInfo?.isFile()) throw new Error(`file environment tidak ditemukan: ${project.envFilePath}`);
       if (!/^\.env(?:\.[a-z0-9_-]+)?$/i.test(path.basename(envPath))) throw new Error('file environment harus bernama .env atau .env.<environment>.');
-      await copyFile(envPath, path.join(sourceDir, '.env'));
-      environmentSource = path.join(sourceDir, '.env');
-      projectSecrets.push(...await secretValuesFromEnvFile(environmentSource));
-      hooks.update({ phase: 'ENVIRONMENT_READY', progress: 15, message: 'File environment project dipasang.' });
-    } else {
-      if (!await exists(path.join(sourceDir, '.env')) && await exists(path.join(sourceDir, '.env.example'))) {
-        await copyFile(path.join(sourceDir, '.env.example'), path.join(sourceDir, '.env'));
-        environmentSource = path.join(sourceDir, '.env');
-        projectSecrets.push(...await secretValuesFromEnvFile(environmentSource));
-        hooks.update({ phase: 'ENVIRONMENT_READY', progress: 15, message: '`.env` dibuat dari `.env.example`; gunakan env file project untuk kredensial nyata.' });
-      } else {
-        environmentSource = await exists(path.join(sourceDir, '.env')) ? path.join(sourceDir, '.env') : undefined;
-        if (environmentSource) projectSecrets.push(...await secretValuesFromEnvFile(environmentSource));
-        hooks.update({ phase: 'ENVIRONMENT_READY', progress: 15, message: 'Menggunakan environment yang tersedia di repository.' });
-      }
+      resolvedEnvUploadPath = envPath;
     }
 
-    hooks.update({ phase: 'DETECTING_STACK', progress: 18, message: 'Mendeteksi stack dan service repository…' });
+    hooks.update({ phase: 'DETECTING_STACK', progress: 15, message: 'Mendeteksi stack dan service repository…' });
     ordered = orderServices(await detectServices(sourceDir, project));
     serviceStates = ordered.map((service) => ({ id: service.id, name: service.name, status: 'PENDING' }));
     updateServices();
-    for (const service of ordered.filter((item) => /artisan|composer/i.test(`${item.installCommand} ${item.startCommand}`))) {
-      const serviceDir = safeWorkingDirectory(sourceDir, service.workingDir);
-      const serviceEnv = path.join(serviceDir, '.env');
-      if (await exists(serviceEnv)) {
-        projectSecrets.push(...await secretValuesFromEnvFile(serviceEnv));
-        continue;
-      }
-      if (environmentSource && await exists(environmentSource)) await copyFile(environmentSource, serviceEnv);
-      else if (await exists(path.join(serviceDir, '.env.example'))) await copyFile(path.join(serviceDir, '.env.example'), serviceEnv);
-      if (await exists(serviceEnv)) projectSecrets.push(...await secretValuesFromEnvFile(serviceEnv));
-    }
 
     const unsupportedDockerCommand = ordered.find((service) => /\bdocker\s+(?:compose|build|run)\b/i.test(`${service.installCommand} ${service.startCommand}`));
     if (unsupportedDockerCommand) throw new Error(`service ${unsupportedDockerCommand.name} meminta Docker/Compose di dalam repo. Nested Docker belum diizinkan pada sandbox; isi image runtime dan command aplikasi biasa.`);
@@ -625,6 +675,23 @@ export async function runManagedProject(flow: NormalizedFlow, runId: string, pro
     const runnerContext = { runId, sourceDir, workspace, networkName, services: ordered, containers: containerByService };
     const additionalEnvironment = await hooks.prepare?.(runnerContext) ?? {};
     projectSecrets.push(...Object.entries(additionalEnvironment).filter(([key]) => /password|token|secret|accounts/i.test(key)).map(([, value]) => value));
+
+    hooks.update({ phase: 'PROVISIONING_ENV', progress: 18, message: 'Mengonfigurasi .env demo otomatis dari .env.example / example.env…' });
+    const envProvisionResult = await provisionEnvFiles({
+      sourceDir,
+      platform: project.platform || 'web',
+      frontendUrl: project.baseUrl,
+      backendUrl: project.backendUrl || project.baseUrl,
+      dbEnv: additionalEnvironment,
+      uploadedEnvFilePath: resolvedEnvUploadPath,
+      rootDir: root,
+    });
+    projectSecrets.push(...envProvisionResult.secretsToRedact);
+    await hooks.onEnvProvisioned?.(envProvisionResult);
+    environmentSource = await exists(path.join(sourceDir, '.env'))
+      ? path.join(sourceDir, '.env')
+      : (await exists(path.join(sourceDir, 'backend', '.env')) ? path.join(sourceDir, 'backend', '.env') : undefined);
+    hooks.update({ phase: 'ENVIRONMENT_READY', progress: 20, message: `.env demo berhasil disiapkan untuk ${envProvisionResult.entries.length} direktori.` });
     for (const service of ordered) {
       hooks.signal?.throwIfAborted();
       const rawImage = safeContainerImage(service);

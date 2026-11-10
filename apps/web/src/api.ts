@@ -49,6 +49,38 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const send = <T,>(path: string, body: unknown = {}, method = 'POST') => request<T>(path, { method, body: JSON.stringify(body) });
+
+export async function approvePhase1Job<T = unknown>(id: string): Promise<T> {
+  return send<T>(`${jobPath(id)}/approve`, {}, 'POST');
+}
+
+export async function uploadApkFile(file: File): Promise<{
+  id: string;
+  filename: string;
+  size: number;
+  path?: string;
+  packageId?: string;
+  appName?: string;
+  versionName?: string;
+}> {
+  const token = getAuthToken();
+  const res = await fetch(`/api/v1/uploads/apk?filename=${encodeURIComponent(file.name)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'x-filename': encodeURIComponent(file.name),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: file,
+  });
+  const text = await res.text();
+  let parsed: any;
+  try { parsed = text ? JSON.parse(text) : undefined; } catch {}
+  if (!res.ok) {
+    throw new Error(parsed?.error || parsed?.message || `Gagal upload APK (${res.status})`);
+  }
+  return parsed;
+}
 export const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 export const active = (status: string) => !['COMPLETED', 'COMPLETE', 'PASSED', 'FAILED', 'CANCELLED', 'CANCELED', 'INFRA_ERROR', 'ERROR', 'READY', 'PARTIAL'].includes(status.toUpperCase());
 
@@ -225,7 +257,7 @@ export async function downloadMediaZip(payload: {
 
 export interface GenerationStatus {
   enabled: boolean;
-  provider: 'gemini' | 'solu-ai';
+  provider: 'gemini';
   model: string;
   keyMasked?: string;
   status: 'configured' | 'waiting-for-key';

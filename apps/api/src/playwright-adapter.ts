@@ -26,30 +26,6 @@ export type WebRunResult = {
 type Target = { strategy: string; value: string; role?: string; name?: string; exact?: boolean };
 const activePages = new Map<string, Page>();
 
-let cachedAuthToken: { token: string; id_user: number; expiresAt: number } | null = null;
-async function getCachedAuthToken(backendBase: string) {
-  if (cachedAuthToken && Date.now() < cachedAuthToken.expiresAt) {
-    return cachedAuthToken;
-  }
-  try {
-    const authRes = await fetch(`${backendBase}/api/v1/web/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ username: 'QC_PATCH_TA', password: 'password123' }),
-      signal: AbortSignal.timeout(15000)
-    }).then(r => r.json()).catch(() => null);
-    if (authRes?.data?.token) {
-      cachedAuthToken = {
-        token: authRes.data.token,
-        id_user: authRes.data.id_user || 42,
-        expiresAt: Date.now() + 3600_000
-      };
-      return cachedAuthToken;
-    }
-  } catch {}
-  return null;
-}
-
 async function closeWithTimeout(action: Promise<void> | undefined, timeoutMs = 8_000): Promise<void> {
   if (!action) return;
   await Promise.race([
@@ -275,33 +251,6 @@ export async function createWebRecordingSession(baseUrl: string, rawVideoDir: st
     recordVideo: { dir: rawVideoDir, ...VIDEO_RECORDING.recordVideo }
   });
 
-  try {
-    const backendBase = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
-    const authData = await getCachedAuthToken(backendBase);
-    if (authData?.token) {
-      await context.addCookies([
-        {
-          name: 'session-travel-agent',
-          value: authData.token,
-          url: baseUrl
-        },
-        {
-          name: 'id_user',
-          value: String(authData.id_user || 42),
-          url: baseUrl
-        }
-      ]);
-      await context.addInitScript(({ token, uid }) => {
-        try {
-          document.cookie = `session-travel-agent=${token}; path=/;`;
-          document.cookie = `id_user=${uid}; path=/;`;
-          localStorage.setItem('session-travel-agent', token);
-          localStorage.setItem('id_user', uid);
-        } catch {}
-      }, { token: authData.token, uid: String(authData.id_user || 42) });
-    }
-  } catch {}
-
   const page = await context.newPage();
   return { browser, context, page, rawVideoDir };
 }
@@ -367,44 +316,6 @@ export async function executeWebFlow(
         viewport: flow.target.viewport ?? VIDEO_RECORDING.viewport,
         recordVideo: flow.execution.video === 'off' ? undefined : { dir: videoDir, ...VIDEO_RECORDING.recordVideo }
       });
-
-      // Auto-authenticate session cookies for local projects when running authenticated flows
-      const flowKey = ((flow as any).id || flow.name || '').toLowerCase();
-      const isPublicFlow = flowKey === 'web-public' || flowKey.includes('landing') || flowKey.includes('public');
-      if (!isPublicFlow) {
-        try {
-          const isTravelAgent = process.env.PROJECT_TYPE === 'travel-agent' ||
-            baseUrl.includes('travel') ||
-            baseUrl.includes('jamaahku');
-          if (isTravelAgent) {
-            const backendBase = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
-            const authData = await getCachedAuthToken(backendBase);
-
-            if (authData?.token) {
-              await context.addCookies([
-                {
-                  name: 'session-travel-agent',
-                  value: authData.token,
-                  url: baseUrl
-                },
-                {
-                  name: 'id_user',
-                  value: String(authData.id_user || 42),
-                  url: baseUrl
-                }
-              ]);
-              await context.addInitScript(({ token, uid }) => {
-                try {
-                  document.cookie = `session-travel-agent=${token}; path=/;`;
-                  document.cookie = `id_user=${uid}; path=/;`;
-                  localStorage.setItem('session-travel-agent', token);
-                  localStorage.setItem('id_user', uid);
-                } catch {}
-              }, { token: authData.token, uid: String(authData.id_user || 42) });
-            }
-          }
-        } catch {}
-      }
 
       if (flow.execution.trace !== 'off') await context.tracing.start({ screenshots: true, snapshots: true });
       page = await context.newPage();

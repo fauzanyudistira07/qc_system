@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Job, ZannoraEvidence, Artifact } from './types';
-import { Icon, Empty } from './ui';
+import { Job, QualityEvidence, Artifact } from './types';
+import { Icon, Empty, Notice } from './ui';
 import {
   request,
   download,
   artifactUrl,
+  getNextcloudConfig,
   checkNextcloudFolder,
   uploadToNextcloud,
   downloadMediaZip,
@@ -20,8 +21,12 @@ export interface MediaItem {
   flowName: string;
   groupTitle?: string;
   route?: string;
+  role?: string;
   size?: number;
   updatedAt?: string;
+  isLongScreenshot?: boolean;
+  dimensions?: string;
+  chapters?: Array<{ startSec: number; page: string; feature?: string }>;
 }
 
 function formatBytes(bytes?: number) {
@@ -30,9 +35,16 @@ function formatBytes(bytes?: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatTimeMMSS(sec: number): string {
+  const safe = Math.max(0, Math.floor(sec));
+  const mm = String(Math.floor(safe / 60)).padStart(2, '0');
+  const ss = String(safe % 60).padStart(2, '0');
+  return `${mm}:${ss}`;
+}
+
 interface LiveViewportProps {
   job?: Job | null;
-  evidence?: ZannoraEvidence | null;
+  evidence?: QualityEvidence | null;
   hideHeader?: boolean;
 }
 
@@ -42,51 +54,6 @@ function readableFlowName(flowId?: string, knownFlows?: Array<{ id: string; name
     const directMatch = knownFlows.find(f => f.id === flowId || f.name.toLowerCase().includes(flowId.toLowerCase()));
     if (directMatch) return { name: directMatch.name };
   }
-  if (flowId.includes('launch') || flowId.includes('smoke') || flowId.includes('01')) {
-    return { name: '1. Clean Install & Launch' };
-  }
-  if (flowId.includes('login') || flowId.includes('auth') || flowId.includes('02')) {
-    return { name: '2. Login Siswa (SISWA001) & Masuk Dashboard' };
-  }
-  if (flowId.includes('tabs-all') || flowId.includes('semua-tab') || flowId.includes('03')) {
-    return { name: '3. Navigasi Semua Tab Dashboard Utama' };
-  }
-  if (flowId.includes('home-explore') || flowId.includes('beranda') || flowId.includes('04')) {
-    return { name: '4. Eksplorasi Widget Beranda & Telemetri Siswa' };
-  }
-  if (flowId.includes('crud-amal') || flowId.includes('amal') || flowId.includes('05')) {
-    return { name: '5. CRUD Mutasi Ibadah Amal Siswa Harian' };
-  }
-  if (flowId.includes('crud-izin') || flowId.includes('absensi') || flowId.includes('06')) {
-    return { name: '6. CRUD Pengajuan Izin & Riwayat Absensi' };
-  }
-  if (flowId.includes('keuangan') || flowId.includes('invoice') || flowId.includes('07')) {
-    return { name: '7. Eksplorasi Tagihan Keuangan & Rincian Pembayaran' };
-  }
-  if (flowId.includes('informasi') || flowId.includes('disiplin') || flowId.includes('08')) {
-    return { name: '8. Tab Informasi Sekolah, Kedisiplinan & Pengumuman' };
-  }
-  if (flowId.includes('t2q') || flowId.includes('tahfidz') || flowId.includes('09')) {
-    return { name: '9. Eksplorasi Tab T2Q (Tahfidz, Tahsin, Tilawah)' };
-  }
-  if (flowId.includes('drawer') || flowId.includes('profil') || flowId.includes('10')) {
-    return { name: '10. Navigasi Menu Samping (Drawer): Profil & Ekskul' };
-  }
-  if (flowId.includes('kalender') || flowId.includes('berita') || flowId.includes('11')) {
-    return { name: '11. Quick Actions: Kalender Kegiatan & Detail Berita' };
-  }
-  if (flowId.includes('notifikasi') || flowId.includes('broadcast') || flowId.includes('12')) {
-    return { name: '12. Pusat Notifikasi & Broadcast Pesan Sekolah' };
-  }
-  if (flowId.includes('role-guru') || flowId.includes('13')) {
-    return { name: '13. Switch Role & Akses Dashboard Dewan Guru' };
-  }
-  if (flowId.includes('role-manager') || flowId.includes('14')) {
-    return { name: '14. Switch Role & Akses Dashboard Manager Sarpras' };
-  }
-  if (flowId.includes('role-teknisi') || flowId.includes('15')) {
-    return { name: '15. Switch Role & Akses Dashboard Staff Teknisi' };
-  }
   const clean = flowId
     .replace(/^(android|web|app)-/i, '')
     .replace(/[-_]+/g, ' ')
@@ -95,7 +62,7 @@ function readableFlowName(flowId?: string, knownFlows?: Array<{ id: string; name
 }
 
 function humanizeMediaTitle(raw: string, isVid: boolean, flowId?: string, knownFlows?: Array<{ id: string; name: string }>): string {
-  if (raw.startsWith('Rekaman:')) return raw;
+  if (raw.startsWith('Rekaman:') || raw.startsWith('[')) return raw;
   if (flowId && isVid) {
     const f = readableFlowName(flowId, knownFlows);
     return `Rekaman: ${f.name}`;
@@ -103,6 +70,19 @@ function humanizeMediaTitle(raw: string, isVid: boolean, flowId?: string, knownF
 
   let name = (raw.split('/').pop() || raw).replace(/\\/g, '/').split('/').pop() || raw;
   name = name.replace(/\.(png|jpg|jpeg|webm|mp4)$/i, '');
+
+  // Phase 1 role video naming: <role>__full_journey
+  const roleVidMatch = name.match(/^([a-z0-9_-]+)__full[-_]?journey$/i);
+  if (isVid && roleVidMatch) {
+    return `Rekaman Full Flow: Role ${roleVidMatch[1]}`;
+  }
+
+  // Phase 1 long screenshot naming: <role>__<slug>__full
+  const longSsMatch = name.match(/^([a-z0-9_-]+)__(.+)__full$/i);
+  if (!isVid && longSsMatch) {
+    const slugTitle = longSsMatch[2].replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    return `[${longSsMatch[1]}] Long SS: ${slugTitle}`;
+  }
 
   if (isVid) {
     if (name.includes('rekaman flow') || name === 'flow-recording') {
@@ -117,80 +97,6 @@ function humanizeMediaTitle(raw: string, isVid: boolean, flowId?: string, knownF
     return `Rekaman: ${cleanVidName}`;
   }
 
-  // Friendly name replacements
-  if (name.includes('01_01_install') || name.includes('permission') || name.includes('install-launch')) return 'Izin Sistem & Instalasi APK Berhasil';
-  if (name.includes('00_splash_screen') || name.includes('splash')) return 'Splash Screen Logo Al-Hikmah Digital';
-  if (name.includes('launch-screen') || name.includes('01_login_screen') || name.includes('login_ready')) return 'Layar Login & Pemilihan Role Demo';
-  if (name.includes('step-02-02-input-nis') || name.includes('role_siswa')) return 'Otentikasi Akun Siswa (SISWA001)';
-  if (name.includes('dashboard-beranda') || name.includes('02_dashboard')) return 'Dashboard Beranda Siswa (Ahmad Farhan)';
-  if (name.includes('dashboard-restored')) return 'Beranda Setelah Navigasi Tab';
-  if (name.includes('tab-beranda') || name.includes('live_tab_beranda')) return 'Navigasi Tab: Beranda';
-  if (name.includes('tab-absensi') || name.includes('live_tab_absensi')) return 'Navigasi Tab: Absensi Siswa';
-  if (name.includes('tab-keuangan') || name.includes('live_tab_keuangan')) return 'Navigasi Tab: Rincian Keuangan';
-  if (name.includes('tab-informasi') || name.includes('live_tab_informasi')) return 'Navigasi Tab: Informasi & Kedisiplinan';
-  if (name.includes('tab-t2q') || name.includes('live_tab_t2q')) return 'Navigasi Tab: Hafalan & Tilawah T2Q';
-  if (name.includes('home-top') || name.includes('step-12-01-beranda-top')) return 'Beranda: Header & Status Presensi Siswa';
-  if (name.includes('home-middle') || name.includes('step-11-01-beranda-actions')) return 'Beranda: Widget Presensi & Aksi Cepat';
-  if (name.includes('home-bottom')) return 'Beranda: Agenda & Mutasi Amal';
-  if (name.includes('home-restored-top')) return 'Beranda: Kembali ke Posisi Atas';
-  if (name.includes('amal-form-opened')) return 'Formulir Mutasi Amal Siswa Terbuka';
-  if (name.includes('amal-form-filled')) return 'Pengisian Checklist Mutasi Amal (Selesai)';
-  if (name.includes('amal-completed-return')) return 'Beranda Siswa Setelah Simpan Amal';
-  if (name.includes('absensi-loaded') || name.includes('live_absensi_form')) return 'Absensi: Rekap Presensi & Formulir Izin';
-  if (name.includes('izin-form-opened')) return 'Formulir Pengajuan Izin Siswa Terbuka';
-  if (name.includes('izin-form-filled')) return 'Formulir Pengajuan Izin Diisi Lengkap';
-  if (name.includes('absensi-riwayat-pengajuan')) return 'Tab Absensi: Riwayat Pengajuan Izin';
-  if (name.includes('absensi-riwayat-kehadiran')) return 'Tab Absensi: Riwayat Presensi Siswa';
-  if (name.includes('keuangan-loaded') || name.includes('live_keuangan_detail')) return 'Keuangan: Rincian Tagihan SPP Siswa';
-  if (name.includes('keuangan-tagihan-unpaid')) return 'Keuangan: Rincian Tagihan Belum Dibayar';
-  if (name.includes('keuangan-struk-pembayaran')) return 'Keuangan: Struk Bukti Pembayaran';
-  if (name.includes('keuangan-restored')) return 'Keuangan: Kembali ke Tampilan Normal';
-  if (name.includes('informasi-kedisiplinan')) return 'Informasi: Rekap Catatan Kedisiplinan';
-  if (name.includes('informasi-berita-sekolah') || name.includes('step-11-03-berita-sekolah') || name.includes('detail-beranda-artikel-berita')) return 'Informasi: Pengumuman & Berita Sekolah';
-  if (name.includes('informasi-berita-scrolled')) return 'Informasi: Feed Berita Lengkap';
-  if (name.includes('t2q-loaded')) return 'T2Q: Riwayat Hafalan Tahfidz';
-  if (name.includes('t2q-tahsin') || name.includes('live_t2q_tahsin')) return 'T2Q: Rekap Pembelajaran Tahsin';
-  if (name.includes('t2q-tilawah') || name.includes('live_t2q_tilawah')) return 'T2Q: Catatan & Setoran Tilawah';
-  if (name.includes('t2q-scrolled')) return 'T2Q: Riwayat Hafalan Lengkap';
-  if (name.includes('step-10-01-dashboard')) return 'Dashboard Beranda Sebelum Buka Menu';
-  if (name.includes('step-10-02-drawer-menu') || name.includes('drawer-menu-opened')) return 'Menu Samping (Drawer): Profil, Ekskul & Versi';
-  if (name.includes('step-10-03-ekskul-list') || name.includes('ekskul-screen')) return 'Daftar Kegiatan Ekstrakurikuler (Kehadiran & Ajuan)';
-  if (name.includes('step-10-04-profil-siswa') || name.includes('detail-beranda-profil-siswa') || name.includes('profil-siswa-screen')) return 'Profil Siswa & Pengaturan Akun (Ahmad Farhan)';
-  if (name.includes('step-10-05-data-lengkap-siswa')) return 'Data Lengkap Siswa, Rombel & Wali Santri';
-  if (name.includes('step-10-06-ubah-kata-sandi')) return 'Modal Form Ubah Kata Sandi Akun Siswa';
-  if (name.includes('step-10-07-manual-book')) return 'Buku Panduan Aplikasi Resmi (PDF SOPAN)';
-  if (name.includes('step-10-08-feedback-form')) return 'Formulir Kirim Masukan & Saran Sekolah';
-  if (name.includes('step-10-09-dashboard-kembali')) return 'Beranda Siswa Setelah Eksplorasi Menu';
-  if (name.includes('step-11-02-kalender-kegiatan') || name.includes('kalender-kegiatan-screen')) return 'Kalender Akademik & Agenda Kegiatan';
-  if (name.includes('step-11-03-kalender-detail-event')) return 'Detail Rincian Event Kalender Akademik';
-  if (name.includes('step-11-05-berita-sekolah') || name.includes('informasi-berita-sekolah') || name.includes('detail-beranda-artikel-berita')) return 'Informasi: Pengumuman & Berita Sekolah';
-  if (name.includes('step-12-02-notifikasi-list') || name.includes('notifikasi-screen') || name.includes('detail-beranda-pusat-notifikasi')) return 'Pusat Notifikasi: PTS, SPP & Setoran';
-  if (name.includes('step-12-03-notifikasi-pengumuman')) return 'Filter Notifikasi: Kategori Pengumuman';
-  if (name.includes('step-12-04-notifikasi-agenda')) return 'Filter Notifikasi: Kategori Agenda';
-  if (name.includes('step-13-01-login-screen') || name.includes('step-14-01-login-screen') || name.includes('step-15-01-login-screen')) return 'Layar Login: Pemilihan Peran Demo';
-  if (name.includes('step-13-02-role-guru-selected')) return 'Pilih Peran: Dewan Guru (GURU001)';
-  if (name.includes('step-13-03-guru-dashboard') || name.includes('role-guru-dashboard') || name.includes('detail-role-guru-dashboard')) return 'Dashboard Dewan Guru (Ustadzah Khadijah, S.Pd)';
-  if (name.includes('step-13-04-guru-absensi') || name.includes('detail-role-guru-presensi')) return 'Tab Absensi: Rekap Bulanan & Riwayat Guru';
-  if (name.includes('step-13-05-guru-sarpras-riwayat')) return 'Tab Sarpras: Monitoring Riwayat Laporan Guru';
-  if (name.includes('step-13-06-guru-sarpras-form')) return 'Formulir Input Pelaporan Kerusakan Sarpras';
-  if (name.includes('step-13-07-guru-akun')) return 'Profil & Pengaturan Akun Dewan Guru';
-  if (name.includes('step-13-08-guru-data-lengkap')) return 'Data Lengkap Kepegawaian & NIP Guru';
-  if (name.includes('step-13-09-guru-ubah-password')) return 'Modal Form Ubah Kata Sandi Akun Guru';
-  if (name.includes('step-14-02-role-manager-selected')) return 'Pilih Peran: Manager Sarpras (MGR001)';
-  if (name.includes('step-14-03-manager-dashboard') || name.includes('role-manager-dashboard') || name.includes('detail-role-manager-dashboard')) return 'Dashboard Manager Sarpras (Ir. H. Syarifuddin, M.T.)';
-  if (name.includes('step-14-04-manager-filter-kategori')) return 'Statistik Sarpras: Distribusi Kategori Kerusakan';
-  if (name.includes('step-14-05-manager-antrean') || name.includes('step-14-04-manager-tiket')) return 'Monitoring Antrean Tiket & Status Keluhan';
-  if (name.includes('step-14-06-manager-detail-tiket')) return 'Detail Tiket Sarpras: Timeline & Foto Before/After';
-  if (name.includes('step-14-07-manager-approval-card')) return 'Approval Workflow Sarpras: Tombol ACC & Recheck';
-  if (name.includes('step-15-02-role-teknisi-selected')) return 'Pilih Peran: Staff Teknisi (STF001)';
-  if (name.includes('step-15-03-teknisi-dashboard') || name.includes('role-teknisi-dashboard') || name.includes('detail-role-teknisi-dashboard')) return 'Dashboard Staff Teknisi (Ahmad Rian - STF001)';
-  if (name.includes('step-15-04-teknisi-detail-tiket')) return 'Detail Work Order Lapangan Teknisi';
-  if (name.includes('step-15-05-teknisi-laporan-selesai') || name.includes('step-15-04-teknisi-form-laporan')) return 'Formulir Laporan Selesai & Upload Bukti Foto';
-  if (name.includes('step-15-06-teknisi-dashboard-selesai')) return 'Dashboard Teknisi Pasca Penanganan Tiket';
-  if (name.includes('step-13-scroll')) return 'Dashboard Beranda: Aksi Cepat & Agenda';
-  if (name.includes('step-16-scroll')) return 'Detail Berita: Hari Santri Nasional';
-
-  // Step formatting: step-04-tap-NIS---NISN -> Langkah 04: Tekan NIS / NISN
   const stepMatch = name.match(/^step-(\d+)-(tap|input|scroll|assert)-(.*)$/i);
   if (stepMatch) {
     const num = stepMatch[1];
@@ -207,7 +113,6 @@ function humanizeMediaTitle(raw: string, isVid: boolean, flowId?: string, knownF
     return `Langkah ${num}: ${rest}`;
   }
 
-  // Detect hex hashes e.g. "510917a4-17c093686c41d556" or "510917a417c093686c41d556"
   const strippedHex = name.replace(/[-_\s]/g, '');
   if (/^[0-9a-fA-F]{10,}$/.test(strippedHex)) {
     const shortRef = strippedHex.slice(0, 8);
@@ -226,18 +131,24 @@ function extractFlowFromItem(item: {
   knownFlows?: Array<{ id: string; name: string }>;
 }): { flowName: string; cleanTitle: string } {
   const cleanTitle = humanizeMediaTitle(item.rawName, item.isVid, item.flowId, item.knownFlows);
+  const baseName = (item.rawName.split('/').pop() || item.rawName).replace(/\.(png|jpg|jpeg|webm|mp4)$/i, '');
 
-  // 1. If label contains explicit flow name
+  const longSsMatch = baseName.match(/^([a-z0-9_-]+)__(.+)__full$/i);
+  if (!item.isVid && longSsMatch) {
+    return { flowName: `Batch 1 · Role: ${longSsMatch[1]}`, cleanTitle };
+  }
+
+  const roleVidMatch = baseName.match(/^([a-z0-9_-]+)__full[-_]?journey$/i);
+  if (item.isVid && roleVidMatch) {
+    return { flowName: `Batch 2 · Video Role: ${roleVidMatch[1]}`, cleanTitle };
+  }
+
   if (item.label) {
     let clean = item.label.replace(/^Rekaman:\s*/i, '').trim();
     if (clean.includes(' · ')) {
       clean = clean.split(' · ')[0].trim();
     }
-    // Match numbered flow e.g. "1. Launch & Smoke Check"
-    if (/^\d+\.\s+/.test(clean)) {
-      return { flowName: clean, cleanTitle };
-    }
-    if (/^Tahap\s*\d+/i.test(clean)) {
+    if (/^\d+\.\s+/.test(clean) || /^Tahap\s*\d+/i.test(clean) || /^Batch\s*\d+/i.test(clean)) {
       return { flowName: clean, cleanTitle };
     }
     if (clean.length > 3 && !clean.includes('.png') && !clean.includes('.webm') && !clean.includes('.mp4')) {
@@ -245,7 +156,6 @@ function extractFlowFromItem(item: {
     }
   }
 
-  // 2. Direct match with known flows from job
   if (item.flowId && item.knownFlows?.length) {
     const match = item.knownFlows.find(f => f.id === item.flowId || f.name.toLowerCase().includes(item.flowId!.toLowerCase()));
     if (match) {
@@ -253,96 +163,12 @@ function extractFlowFromItem(item: {
     }
   }
 
-  // 3. Match from groupTitle if it represents a specific flow run
-  if (item.groupTitle) {
-    const gt = item.groupTitle;
-    if (gt.includes('Tahap 1') || gt.includes('Negative Edge Cases') || gt.includes('Form Validations')) {
-      return { flowName: 'Tahap 1 · Form Validations & Negative Cases', cleanTitle };
-    }
-    if (gt.includes('Tahap 2') || gt.includes('CRUD Verification') || gt.includes('Full CRUD')) {
-      return { flowName: 'Tahap 2 · Full CRUD Verification', cleanTitle };
-    }
-    if (gt.includes('Tahap 3') || gt.includes('Search') || gt.includes('Download Excel')) {
-      return { flowName: 'Tahap 3 · Search, Filter & Download Excel', cleanTitle };
-    }
-    if (gt.includes('Autonomous E2E')) {
-      return { flowName: 'Autonomous E2E Engine', cleanTitle };
-    }
-  }
-
-  // 4. File name prefix patterns
-  if (item.rawName) {
-    const raw = item.rawName.toLowerCase();
-    if (raw.includes('01_auth')) {
-      return { flowName: 'Flow 1 · Autentikasi & Login', cleanTitle };
-    }
-    if (raw.includes('02_negative') || raw.includes('negative')) {
-      return { flowName: 'Flow 2 · Validasi Form & Negative Cases', cleanTitle };
-    }
-    if (raw.includes('03_crud_create') || raw.includes('crud_create')) {
-      return { flowName: 'Flow 3 · CRUD Create Resource', cleanTitle };
-    }
-    if (raw.includes('04_crud_read') || raw.includes('crud_read')) {
-      return { flowName: 'Flow 4 · CRUD Read & Table Verification', cleanTitle };
-    }
-
-    // Numbered Android E2E flows (1 to 15)
-    if (raw.startsWith('step-15') || raw.includes('video-15') || raw.includes('role-teknisi') || raw.includes('teknisi-')) {
-      return { flowName: '15. Switch Role & Akses Dashboard Staff Teknisi', cleanTitle };
-    }
-    if (raw.startsWith('step-14') || raw.includes('video-14') || raw.includes('role-manager') || raw.includes('manager-')) {
-      return { flowName: '14. Switch Role & Akses Dashboard Manager Sarpras', cleanTitle };
-    }
-    if (raw.startsWith('step-13') || raw.includes('video-13') || raw.includes('role-guru') || raw.includes('guru-')) {
-      return { flowName: '13. Switch Role & Akses Dashboard Dewan Guru', cleanTitle };
-    }
-    if (raw.startsWith('step-12') || raw.includes('video-12') || raw.includes('notifikasi')) {
-      return { flowName: '12. Pusat Notifikasi & Broadcast Pesan Sekolah', cleanTitle };
-    }
-    if (raw.startsWith('step-11') || raw.includes('video-11') || raw.includes('kalender')) {
-      return { flowName: '11. Quick Actions: Kalender Kegiatan & Detail Berita', cleanTitle };
-    }
-    if (raw.startsWith('step-10') || raw.includes('video-10') || raw.includes('drawer') || raw.includes('profil-siswa') || raw.includes('ekskul')) {
-      return { flowName: '10. Navigasi Menu Samping (Drawer): Profil & Ekskul', cleanTitle };
-    }
-    if (raw.startsWith('step-09') || raw.includes('flow_09') || raw.includes('t2q')) {
-      return { flowName: '9. Eksplorasi Tab T2Q (Tahfidz, Tahsin, Tilawah)', cleanTitle };
-    }
-    if (raw.startsWith('step-08') || raw.includes('flow_08') || raw.includes('kedisiplinan') || (raw.includes('informasi') && !raw.includes('live_tab'))) {
-      return { flowName: '8. Tab Informasi Sekolah, Kedisiplinan & Pengumuman', cleanTitle };
-    }
-    if (raw.startsWith('step-07') || raw.includes('flow_07') || (raw.includes('keuangan') && !raw.includes('live_tab'))) {
-      return { flowName: '7. Eksplorasi Tagihan Keuangan & Rincian Pembayaran', cleanTitle };
-    }
-    if (raw.startsWith('step-06') || raw.includes('flow_06') || raw.includes('izin') || (raw.includes('absensi') && !raw.includes('live_tab'))) {
-      return { flowName: '6. CRUD Pengajuan Izin & Riwayat Absensi', cleanTitle };
-    }
-    if (raw.startsWith('step-05') || raw.includes('flow_05') || raw.includes('amal')) {
-      return { flowName: '5. CRUD Mutasi Ibadah Amal Siswa Harian', cleanTitle };
-    }
-    if (raw.startsWith('step-04') || raw.includes('flow_04') || raw.startsWith('home-')) {
-      return { flowName: '4. Eksplorasi Widget Beranda & Telemetri Siswa', cleanTitle };
-    }
-    if (raw.startsWith('step-03') || raw.includes('flow_03') || raw.startsWith('tab-') || raw.startsWith('live_tab_')) {
-      return { flowName: '3. Navigasi Semua Tab Dashboard Utama', cleanTitle };
-    }
-    if (raw.startsWith('step-02') || raw.includes('flow_02') || raw.includes('login') || raw.includes('dashboard-beranda')) {
-      return { flowName: '2. Login Siswa (SISWA001) & Masuk Dashboard', cleanTitle };
-    }
-    if (raw.startsWith('step-01') || raw.includes('flow_01') || raw.includes('launch') || raw.includes('permission')) {
-      return { flowName: '1. Clean Install & Launch', cleanTitle };
-    }
-  }
-
-  // 5. Fallback from flowId mapping
-  if (item.flowId) {
-    const parsed = readableFlowName(item.flowId);
-    return { flowName: parsed.name, cleanTitle };
-  }
-
-  // 6. Descriptive group title
-  if (item.groupTitle && !item.groupTitle.includes('Flow Executions & Feature Captures') && !item.groupTitle.includes('UI Quality Audit')) {
+  if (item.groupTitle && !item.groupTitle.includes('Flow Executions') && !item.groupTitle.includes('UI Quality Audit')) {
     return { flowName: item.groupTitle, cleanTitle };
+  }
+
+  if (item.flowId) {
+    return { flowName: readableFlowName(item.flowId).name, cleanTitle };
   }
 
   return { flowName: 'Discovery & Inventori Halaman', cleanTitle };
@@ -354,9 +180,12 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isZoomed, setIsZoomed] = useState(false);
-  const [fetchedEvidence, setFetchedEvidence] = useState<ZannoraEvidence | null>(null);
+  const [fetchedEvidence, setFetchedEvidence] = useState<QualityEvidence | null>(null);
   const [isZipping, setIsZipping] = useState(false);
+  const [zipError, setZipError] = useState('');
+  const [nextcloudBaseFolder, setNextcloudBaseFolder] = useState('QC-Maestro/Media');
   const stageRef = useRef<HTMLDivElement>(null);
+  const stageVideoRef = useRef<HTMLVideoElement>(null);
 
   interface NcModalState {
     isOpen: boolean;
@@ -435,6 +264,15 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
       errorMessage: null
     });
 
+    let activeBaseFolder = nextcloudBaseFolder;
+    try {
+      const ncCfg = await getNextcloudConfig();
+      if (ncCfg?.baseFolder) {
+        activeBaseFolder = ncCfg.baseFolder;
+        setNextcloudBaseFolder(ncCfg.baseFolder);
+      }
+    } catch {}
+
     try {
       const check = await checkNextcloudFolder(projectName);
       setNcModal(prev => ({
@@ -456,7 +294,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
           exists: false,
           projectName,
           targetFolder: projectName,
-          fullPath: `CMM Service/Timbang Image and Video/${projectName}`,
+          fullPath: `${activeBaseFolder}/${projectName}`,
           suggestedNewFolder: fallbackSuggested,
           webUrl: ''
         },
@@ -563,11 +401,11 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
     const fetchJobEvidence = async () => {
       if (!job?.id) return;
       try {
-        const ev = await request<ZannoraEvidence>(`/api/v1/discovery/jobs/${job.id}/quality-evidence`);
+        const ev = await request<QualityEvidence>(`/api/v1/discovery/jobs/${job.id}/quality-evidence`);
         if (!cancelled && ev) setFetchedEvidence(ev);
       } catch {
         try {
-          const evAlt = await request<ZannoraEvidence>(`/api/v1/discovery/jobs/${job.id}/evidence`);
+          const evAlt = await request<QualityEvidence>(`/api/v1/discovery/jobs/${job.id}/evidence`);
           if (!cancelled && evAlt) setFetchedEvidence(evAlt);
         } catch {
           // ignore error if evidence endpoint not yet populated
@@ -620,6 +458,47 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
     }
 
     const effectiveEvidence = evidence || fetchedEvidence;
+
+    // 0A. Phase-1 First-Class Batch 1 Long Screenshots (1 tall full-page image per accessible page per role)
+    if (job?.longScreenshots?.length) {
+      for (const s of job.longScreenshots) {
+        if (s.status !== 'CAPTURED') continue;
+        const resolvedUrl = artifactUrl(job.id, s.url || s.path);
+        if (!resolvedUrl) continue;
+        pushItem({
+          id: resolvedUrl,
+          type: 'photo',
+          title: `[${s.role}] ${s.pageTitle || s.pagePath}`,
+          url: resolvedUrl,
+          route: s.pagePath,
+          role: s.role,
+          flowName: `Batch 1 · Role: ${s.role}`,
+          groupTitle: `Batch 1 · Long Screenshots (${s.role})`,
+          isLongScreenshot: true,
+          dimensions: `${s.width}×${s.height}px (${s.segmentCount} segmen)`
+        });
+      }
+    }
+
+    // 0B. Phase-1 First-Class Batch 2 Role Videos (1 continuous journey video per role with interactive chapters)
+    if (job?.roleVideos?.length) {
+      for (const v of job.roleVideos) {
+        if (v.status !== 'RECORDED') continue;
+        const resolvedUrl = artifactUrl(job.id, v.url || v.path);
+        if (!resolvedUrl) continue;
+        pushItem({
+          id: resolvedUrl,
+          type: 'video',
+          title: `Rekaman Full Flow · Role: ${v.role} (${v.durationSec}s)`,
+          url: resolvedUrl,
+          role: v.role,
+          size: v.sizeBytes,
+          chapters: v.chapters,
+          flowName: `Batch 2 · Video Role: ${v.role}`,
+          groupTitle: `Batch 2 · Video Role (${v.role})`
+        });
+      }
+    }
 
     // 1. From Job Results Artifacts (Most accurate & flow-mapped)
     if (job?.results) {
@@ -715,21 +594,9 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
       validPages.forEach((page) => {
         const resolved = artifactUrl(job.id, page.screenshot!);
         if (resolved) {
-          const sName = (page.screenshot || '').toLowerCase();
-          let pageFlow = 'Discovery & Inventori Halaman';
-          if (sName.includes('login')) pageFlow = '01. Autentikasi & Login';
-          else if (sName.includes('dashboard') || sName.includes('notifikasi') || sName.includes('notifications') || sName.includes('ringkasan') || sName.includes('overview')) pageFlow = '02. Dashboard & Ringkasan';
-          else if (sName.includes('academic_years') || sName.includes('classes') || sName.includes('grade_levels') || sName.includes('students_') || sName.includes('guardians') || sName.includes('warehouses') || sName.includes('master_') || sName.includes('pengelola') || sName.includes('guru_list') || sName.includes('siswa_list') || sName.includes('mapel') || sName.includes('jadwal') || sName.includes('ekskul') || sName.includes('kelas') || sName.includes('tahun_ajaran')) pageFlow = '03. Master Data';
-          else if (sName.includes('payment_reports') || sName.includes('financial_reports') || sName.includes('journal') || sName.includes('coa') || sName.includes('chart_of_accounts') || sName.includes('accounting')) pageFlow = '04. Akuntansi & Buku Besar';
-          else if (sName.includes('absensi') || sName.includes('presensi')) pageFlow = '04. Absensi & Presensi';
-          else if (sName.includes('fee_components') || sName.includes('billing') || sName.includes('invoices') || sName.includes('discount') || sName.includes('bank_transfer') || sName.includes('payment_method')) pageFlow = '05. Tagihan & Invoicing';
-          else if (sName.includes('penilaian') || sName.includes('rapor') || sName.includes('report_generator')) pageFlow = '05. Penilaian & Rapor';
-          else if (sName.includes('cashier') || sName.includes('pos_')) pageFlow = '06. Meja Kasir POS';
-          else if (sName.includes('kurikulum') || sName.includes('rpp') || sName.includes('modul_ajar')) pageFlow = '06. Kurikulum Merdeka';
-          else if (sName.includes('deposits') || sName.includes('tabungan') || sName.includes('savings')) pageFlow = '07. Setoran & Tabungan Siswa';
-          else if (sName.includes('sarpras') || sName.includes('agenda_sekolah') || sName.includes('pengumuman')) pageFlow = '07. Sarpras & Agenda';
-          else if (sName.includes('hafalan') || sName.includes('agenda_kelas') || sName.includes('jurnal_guru')) pageFlow = '08. Detail Akademik Khusus';
-          else if (sName.includes('rbac')) pageFlow = '08. Keamanan & Hak Akses RBAC';
+          const pageFlow = page.role
+            ? `Discovery · Role: ${page.role}`
+            : 'Discovery & Inventori Halaman';
 
           pushItem({
             id: resolved,
@@ -737,6 +604,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
             title: page.title || page.path || 'Screenshot Halaman',
             url: resolved,
             route: page.path,
+            role: page.role,
             flowName: pageFlow,
             groupTitle: pageFlow
           });
@@ -885,6 +753,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
 
   const handleDownloadAllZip = async () => {
     if (allMediaItems.length === 0 || isZipping) return;
+    setZipError('');
     setIsZipping(true);
     try {
       const items = allMediaItems.map(item => {
@@ -897,7 +766,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
           featureName: item.flowName || 'General',
           type: item.type,
           title: item.title,
-          fileName: `${(item.title || 'media').replace(/[\\/:*?"<>|]+/g, '_').trim()}.${item.type === 'video' ? 'mp4' : 'png'}`,
+          fileName: `${(item.title || 'media').replace(/[\\/:*?"<>|]+/g, '_').trim()}.${item.type === 'video' ? (item.url.endsWith('.webm') ? 'webm' : 'mp4') : 'png'}`,
           viewport: vp
         };
       });
@@ -907,8 +776,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
         jobId: job?.id
       });
     } catch (err) {
-      console.error('Gagal mengunduh ZIP:', err);
-      alert(`Gagal mengunduh ZIP: ${err instanceof Error ? err.message : String(err)}`);
+      setZipError(`Gagal mengunduh ZIP: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsZipping(false);
     }
@@ -1018,7 +886,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
             className="tool-btn primary"
             onClick={() => openNextcloudModal(allMediaItems)}
             disabled={allMediaItems.length === 0}
-            title="Sinkronisasi seluruh hasil screenshot dan video ke Nextcloud SOLU"
+            title="Sinkronisasi seluruh hasil screenshot dan video ke Nextcloud"
             style={{ gap: 6, padding: '7px 14px' }}
           >
             <Icon name="cloud" size={14} />
@@ -1026,6 +894,15 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
           </button>
         </div>
       </div>
+
+      {zipError && (
+        <Notice error>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <span>{zipError}</span>
+            <button type="button" className="quiet" onClick={() => setZipError('')} style={{ fontSize: 11 }}>Tutup</button>
+          </div>
+        </Notice>
+      )}
 
       {allMediaItems.length === 0 ? (
         <Empty title="Belum Ada Rekaman Video &amp; Foto">
@@ -1098,11 +975,12 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
               )}
             </div>
 
-            <div className="qc-stage-screen">
+            <div className={`qc-stage-screen ${activeItem?.isLongScreenshot && !isZoomed ? 'is-long-scroll' : ''}`}>
               {activeItem ? (
                 <>
                   {activeItem.type === 'video' ? (
                     <video
+                      ref={stageVideoRef}
                       key={activeItem.url}
                       src={activeItem.url}
                       controls
@@ -1127,11 +1005,36 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
               )}
             </div>
 
+            {activeItem?.type === 'video' && activeItem.chapters && activeItem.chapters.length > 0 && (
+              <div className="qc-video-chapters-bar">
+                <span className="chapters-kicker">Chapter Timeline:</span>
+                {activeItem.chapters.map((ch, cIdx) => (
+                  <button
+                    key={`${ch.startSec}-${cIdx}`}
+                    type="button"
+                    className="qc-chapter-chip"
+                    onClick={() => {
+                      const video = stageVideoRef.current;
+                      if (video) {
+                        video.currentTime = ch.startSec;
+                        void video.play().catch(() => {});
+                      }
+                    }}
+                    title={`Lompat ke ${formatTimeMMSS(ch.startSec)}`}
+                  >
+                    <span className="chapter-time">{formatTimeMMSS(ch.startSec)}</span>
+                    <span>{ch.page}{ch.feature ? ` · ${ch.feature}` : ''}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {activeItem && (
               <div className="qc-stage-footer">
                 <div>
                   <span>Flow: </span>
                   <strong style={{ color: 'var(--text-main)' }}>{activeItem.flowName}</strong>
+                  {activeItem.dimensions ? <span> · {activeItem.dimensions}</span> : null}
                   {activeItem.size ? <span> · {formatBytes(activeItem.size)}</span> : null}
                 </div>
                 <div className="qc-stage-progress">
@@ -1438,7 +1341,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
             <div className="qc-nc-modal-header">
               <h3>
                 <span style={{ color: 'var(--cyan)', display: 'inline-flex' }}><Icon name="cloud" size={18} /></span>
-                <span>Unggah ke Nextcloud SOLU</span>
+                <span>Unggah ke Nextcloud</span>
               </h3>
               <button
                 type="button"
@@ -1466,7 +1369,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
                   }} />
                   <strong>Memeriksa direktori di Nextcloud...</strong>
                   <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-                    Menghubungi WebDAV Nextcloud di <code>CMM Service/Timbang Image and Video/{projectName}</code>
+                    Menghubungi WebDAV Nextcloud di <code>{nextcloudBaseFolder}/{projectName}</code>
                   </span>
                 </div>
               )}
@@ -1480,7 +1383,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
                       <div>
                         <strong>Folder Proyek Sudah Ditemukan di Nextcloud</strong>
                         <p style={{ margin: '4px 0 0 0' }}>
-                          Folder <code>{ncModal.checkResult.targetFolder}</code> sudah ada di <code>CMM Service/Timbang Image and Video</code> karena pengujian pernah diminta sebelumnya.
+                          Folder <code>{ncModal.checkResult.targetFolder}</code> sudah ada di <code>{nextcloudBaseFolder}</code> karena pengujian pernah diminta sebelumnya.
                         </p>
                       </div>
                     </div>
@@ -1490,7 +1393,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
                       <div>
                         <strong>Siap Membuat Folder Baru di Nextcloud</strong>
                         <p style={{ margin: '4px 0 0 0' }}>
-                          Folder <code>{ncModal.checkResult?.targetFolder || projectName}</code> akan otomatis dibuat di <code>CMM Service/Timbang Image and Video</code>.
+                          Folder <code>{ncModal.checkResult?.targetFolder || projectName}</code> akan otomatis dibuat di <code>{nextcloudBaseFolder}</code>.
                         </p>
                       </div>
                     </div>
@@ -1600,7 +1503,7 @@ export function LiveViewport({ job, evidence, hideHeader }: LiveViewportProps) {
                       Struktur Hierarki Folder Nextcloud
                     </span>
                     <div className="qc-nc-tree" style={{ marginTop: 8 }}>
-                      {`📁 All files > CMM Service > Timbang Image and Video > ${ncModal.folderMode === 'new' ? (ncModal.customFolderName || ncModal.checkResult?.suggestedNewFolder || projectName) : (ncModal.checkResult?.targetFolder || projectName)}/
+                      {`📁 ${nextcloudBaseFolder} > ${ncModal.folderMode === 'new' ? (ncModal.customFolderName || ncModal.checkResult?.suggestedNewFolder || projectName) : (ncModal.checkResult?.targetFolder || projectName)}/
 ${Array.from(new Set(ncModal.items.map(i => i.flowName || 'General'))).slice(0, 4).map((f, idx, arr) => {
   const isLast = idx === arr.length - 1 && arr.length <= 4;
   const branch = isLast ? '└──' : '├──';
@@ -1620,21 +1523,21 @@ ${Array.from(new Set(ncModal.items.map(i => i.flowName || 'General'))).slice(0, 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span className="led-dot running" style={{ width: 8, height: 8 }} />
-                      <strong style={{ fontSize: 13.5, color: 'var(--text-main, #14181D)' }}>
+                      <strong style={{ fontSize: 13.5, color: 'var(--text-main)' }}>
                         Mengunggah Media ke Nextcloud...
                       </strong>
                     </div>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 800, color: '#0284c7', fontVariantNumeric: 'tabular-nums' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 800, color: 'var(--cyan)', fontVariantNumeric: 'tabular-nums' }}>
                       {ncModal.uploadProgress.current} / {ncModal.uploadProgress.total} file ({Math.round((ncModal.uploadProgress.current / Math.max(1, ncModal.uploadProgress.total)) * 100)}%)
                     </span>
                   </div>
 
-                  <div className="qc-nc-progress-wrap" style={{ height: 8, background: '#E2E8F0', borderRadius: 999, overflow: 'hidden' }}>
+                  <div className="qc-nc-progress-wrap" style={{ height: 8, background: 'var(--bg-panel-sub)', borderRadius: 999, overflow: 'hidden' }}>
                     <div
                       className="qc-nc-progress-bar"
                       style={{
                         height: '100%',
-                        background: 'linear-gradient(90deg, #0284c7, #38bdf8)',
+                        background: 'var(--cyan)',
                         borderRadius: 999,
                         width: `${ncModal.uploadProgress.total > 0 ? Math.min(100, Math.max(5, (ncModal.uploadProgress.current / ncModal.uploadProgress.total) * 100)) : 10}%`,
                         transition: 'width 220ms cubic-bezier(0.16, 1, 0.3, 1)'
@@ -1642,16 +1545,16 @@ ${Array.from(new Set(ncModal.items.map(i => i.flowName || 'General'))).slice(0, 
                     />
                   </div>
 
-                  <div style={{ padding: '10px 14px', background: '#F8FAFC', borderRadius: 8, border: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <span style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+                  <div style={{ padding: '10px 14px', background: 'var(--bg-panel-sub)', borderRadius: 8, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
                       Berkas Sedang Ditransfer:
                     </span>
-                    <span style={{ fontSize: 12, color: '#0F172A', fontFamily: 'var(--font-mono)', fontWeight: 650, wordBreak: 'break-all' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-main)', fontFamily: 'var(--font-mono)', fontWeight: 650, wordBreak: 'break-all' }}>
                       {ncModal.uploadProgress.currentFileName}
                     </span>
                   </div>
 
-                  <p style={{ color: '#64748B', fontSize: 11.5, margin: 0 }}>
+                  <p style={{ color: 'var(--text-dim)', fontSize: 11.5, margin: 0 }}>
                     Mohon tunggu sejenak, berkas dikirim bertahap via WebDAV langsung ke Nextcloud agar tidak membebani koneksi server.
                   </p>
                 </div>

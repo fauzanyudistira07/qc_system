@@ -9,12 +9,56 @@ import { compileMaestroFlow } from '../maestro-adapter.ts';
 
 import fs, { existsSync, readdirSync, unlinkSync, statSync } from 'node:fs';
 import { listAvds, startHeadlessAvd, stopEmulator, resolveEmulatorBin, waitForBoot, ensureDeviceReady, stopAllManagedEmulators, notifyAndroidJobStarted, notifyAndroidJobFinished } from './emulator-runner.ts';
-import { listAdbDevices, captureScreenBuffer, isBootCompleted, isPackageManagerReady } from './adb.ts';
+import { listAdbDevices, listEmulatorDevices, captureScreenBuffer, isBootCompleted, isPackageManagerReady, resolveAdbBin } from './adb.ts';
 import type { AndroidStatus } from './types.ts';
 
 export * from './types.ts';
 export * from './emulator-runner.ts';
 export * from './adb.ts';
+
+export async function buildApkFromMobileRepo(mobileDir: string, onLog?: (msg: string) => void): Promise<{ apkPath?: string; packageId?: string; error?: string }> {
+  const pubspecPath = path.join(mobileDir, 'pubspec.yaml');
+  const gradlewPath = path.join(mobileDir, 'gradlew');
+  const androidGradlew = path.join(mobileDir, 'android', 'gradlew');
+
+  if (existsSync(pubspecPath)) {
+    onLog?.(`Mendeteksi Flutter project di ${mobileDir}; membangun APK debug via flutter build apk --debug...`);
+    const res = await runCli('flutter', ['build', 'apk', '--debug'], 300_000);
+    const candidate = path.join(mobileDir, 'build', 'app', 'outputs', 'flutter-apk', 'app-debug.apk');
+    if (res.exitCode === 0 && existsSync(candidate)) {
+      const info = await inspectApk(candidate);
+      return { apkPath: candidate, packageId: info.packageId };
+    }
+    return { error: res.stderr || res.stdout || 'flutter build apk --debug gagal' };
+  }
+
+  const gradlew = existsSync(androidGradlew) ? androidGradlew : (existsSync(gradlewPath) ? gradlewPath : null);
+  if (gradlew) {
+    const cwd = path.dirname(gradlew);
+    onLog?.(`Mendeteksi Android Gradle project di ${cwd}; membangun APK debug...`);
+    if (process.platform !== 'win32') {
+      await runCli('chmod', ['+x', gradlew], 5000).catch(() => undefined);
+    }
+    const res = await new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(gradlew, ['assembleDebug'], { cwd, env: getExtendedEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.on('data', (c) => { stdout += c.toString(); });
+      child.stderr?.on('data', (c) => { stderr += c.toString(); });
+      const t = setTimeout(() => { try { child.kill(); } catch {} resolve({ exitCode: -1, stdout, stderr: 'Gradle timeout' }); }, 300_000);
+      child.on('close', (code) => { clearTimeout(t); resolve({ exitCode: code ?? 0, stdout, stderr }); });
+      child.on('error', (err) => { clearTimeout(t); resolve({ exitCode: -1, stdout, stderr: err.message }); });
+    });
+    const candidate = path.join(cwd, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+    if (res.exitCode === 0 && existsSync(candidate)) {
+      const info = await inspectApk(candidate);
+      return { apkPath: candidate, packageId: info.packageId };
+    }
+    return { error: res.stderr || res.stdout || 'gradlew assembleDebug gagal' };
+  }
+
+  return { error: `Manifest mobile (pubspec.yaml / gradlew) tidak ditemukan di ${mobileDir}` };
+}
 
 export function resolveAaptBin(): string | null {
   const home = process.env.USERPROFILE || process.env.HOME || '';
@@ -63,12 +107,13 @@ export async function inspectApk(apkPath: string): Promise<{ packageId?: string;
 export async function installApkToDevice(
   apkPath: string,
   deviceId?: string,
-  forceClean = false
+  forceClean = false,
+  useServerEmulator = true
 ): Promise<{ success: boolean; output: string; device: string; usedExisting?: boolean }> {
-  const status = await checkAndroid();
-  const targetDevice = normalizeDeviceId(deviceId, status.adb.devices) || status.adb.devices[0];
+  const ready = await ensureDeviceReady(deviceId, useServerEmulator);
+  const targetDevice = ready.serial;
   if (!targetDevice) {
-    return { success: false, output: 'Tidak ada perangkat / emulator Android yang terhubung via ADB.', device: '' };
+    return { success: false, output: ready.error || 'Tidak ada emulator server Android yang aktif.', device: '' };
   }
 
   let pkgMetadata: { packageId?: string } = {};
@@ -140,20 +185,7 @@ export function resolveMaestroBin(): string {
   return 'maestro';
 }
 
-export function resolveAdbBin(): string {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  const candidates = [
-    path.join(home, 'AppData', 'Local', 'Android', 'Sdk', 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb'),
-    process.platform === 'win32' ? 'C:\\ProgramData\\chocolatey\\bin\\adb.exe' : '',
-    process.env.ANDROID_HOME ? path.join(process.env.ANDROID_HOME, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb') : ''
-  ].filter(Boolean);
-  for (const c of candidates) {
-    if (existsSync(c)) return c;
-  }
-  return 'adb';
-}
-
-/** Normalize a dashboard-entered Wi-Fi IP to the serial reported by ADB. */
+/** Normalize a device ID against active ADB device serials. */
 export function normalizeDeviceId(deviceId: string | undefined, devices: string[] = []): string | undefined {
   const raw = deviceId?.trim();
   if (!raw) return devices[0] || undefined;
@@ -174,19 +206,23 @@ function getExtendedEnv(): NodeJS.ProcessEnv {
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const maestroBin = path.join(home, '.maestro', 'bin');
   const maestroSubBin = path.join(home, '.maestro', 'maestro', 'bin');
-  const platformTools = path.join(home, 'AppData', 'Local', 'Android', 'Sdk', 'platform-tools');
+  const androidSdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || path.join(home, 'Android', 'Sdk');
+  const platformTools = path.join(androidSdk, 'platform-tools');
+  const winPlatformTools = path.join(home, 'AppData', 'Local', 'Android', 'Sdk', 'platform-tools');
   const chocoBin = 'C:\\ProgramData\\chocolatey\\bin';
   const currentPath = process.env.PATH || '';
   const sep = process.platform === 'win32' ? ';' : ':';
   return {
     ...process.env,
-    PATH: `${maestroBin}${sep}${maestroSubBin}${sep}${platformTools}${sep}${chocoBin}${sep}${currentPath}`,
+    ANDROID_HOME: androidSdk,
+    ANDROID_SDK_ROOT: androidSdk,
+    PATH: `${maestroBin}${sep}${maestroSubBin}${sep}${platformTools}${sep}${winPlatformTools}${sep}${chocoBin}${sep}${currentPath}`,
     MAESTRO_CLI_NO_ANALYTICS: 'true',
     MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: 'true'
   };
 }
 
-function runCli(commandName: string, args: string[], timeoutMs = 8000): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+export function runCli(commandName: string, args: string[], timeoutMs = 8000): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -235,7 +271,7 @@ function runCli(commandName: string, args: string[], timeoutMs = 8000): Promise<
   });
 }
 
-type UiNode = {
+export type UiNode = {
   text?: string;
   contentDesc?: string;
   hint?: string;
@@ -251,7 +287,7 @@ function decodeUiText(value: string): string {
   return value.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&').replace(/&#10;/g, '\n');
 }
 
-function parseUiNodes(xml: string): UiNode[] {
+export function parseUiNodes(xml: string): UiNode[] {
   const nodes: UiNode[] = [];
   const nodePattern = /<node\b[^>]*?(?:\/>|>)/g;
   for (const raw of xml.match(nodePattern) ?? []) {
@@ -276,7 +312,7 @@ function parseUiNodes(xml: string): UiNode[] {
   return nodes;
 }
 
-async function readUiNodes(deviceId: string, retries = 3): Promise<UiNode[]> {
+export async function readUiNodes(deviceId: string, retries = 3): Promise<UiNode[]> {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const dump = await runCli('adb', ['-s', deviceId, 'shell', 'uiautomator', 'dump', '/sdcard/qc-maestro-window.xml'], 8000);
@@ -338,19 +374,13 @@ async function probeMaestro(): Promise<{ available: boolean; message: string; ve
   };
 }
 
-export async function checkAndroid(force = false): Promise<AndroidStatus> {
-  const adbResult = await runCli('adb', ['devices'], 4000);
+export async function checkAndroid(force = false, serverEmulatorOnly = true): Promise<AndroidStatus> {
+  const adbDevices = serverEmulatorOnly
+    ? await listEmulatorDevices().catch(() => [])
+    : await listAdbDevices().catch(() => []);
+  const devices = adbDevices.filter((d) => d.status === 'device').map((d) => d.serial);
+  const adbResult = adbDevices.length > 0 ? { exitCode: 0 } : await runCli('adb', ['devices'], 4000);
   const adbAvailable = adbResult.exitCode === 0;
-  const devices: string[] = [];
-  if (adbAvailable) {
-    const lines = adbResult.stdout.split('\n');
-    for (const line of lines) {
-      const match = line.trim().match(/^([^\s]+)\s+device$/);
-      if (match) {
-        devices.push(match[1]);
-      }
-    }
-  }
 
   const avds = await listAvds();
   const emulatorBin = resolveEmulatorBin();
@@ -396,14 +426,14 @@ export async function checkAndroid(force = false): Promise<AndroidStatus> {
   };
 }
 
-async function resolveOrStartDevice(deviceId?: string, devices: string[] = []): Promise<{
+async function resolveOrStartDevice(deviceId?: string, _devices: string[] = [], useServerEmulator = true): Promise<{
   targetDevice?: string;
   autoStartedEmulatorSerial?: string;
   error?: string;
 }> {
-  const result = await ensureDeviceReady(deviceId);
+  const result = await ensureDeviceReady(deviceId, useServerEmulator);
   if (result.error || !result.serial) {
-    return { error: result.error || 'Tidak ada perangkat Android yang siap digunakan.' };
+    return { error: result.error || 'Tidak ada emulator Android server yang siap digunakan.' };
   }
   return {
     targetDevice: result.serial,
@@ -926,53 +956,20 @@ export async function executeAndroidRawFlow(
           const text = String(tapSpec.text || '').trim();
           const isOptional = Boolean(tapSpec.optional);
           actionName = `tapOn: "${text || tapSpec.point || 'element'}"`;
-          // Cek apakah langkah navigasi tab dashboard dijalankan saat aplikasi masih tertahan di layar Login atau sub-halaman
-          if (targetDevice && /beranda|home|absensi|keuangan|informasi|t2q/i.test(text)) {
-            let currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
-            let hasDashboard = currentNodes.some((n) => /^(beranda|absensi|keuangan|informasi|t2q)$/i.test((n.text || n.contentDesc || '').trim()));
 
-            // Jika sedang di sub-halaman / modal (bar navigasi bawah tidak ada dan bukan form login)
-            let backAttempts = 0;
-            while (!hasDashboard && backAttempts < 4) {
-              const isLoginForm = currentNodes.some((n) =>
-                /edittext/i.test(n.className || '') ||
-                /masuk ke akun|silakan masuk/i.test(n.text || n.contentDesc || '')
-              );
-              if (isLoginForm) break;
-              appendLog(`[Navigation Guard] Bar navigasi utama belum aktif (sedang di sub-halaman/modal). Menekan Back (keyevent 4)...`);
-              await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'keyevent', '4'], 2000).catch(() => {});
-              await new Promise((r) => setTimeout(r, 1000));
-              currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
-              hasDashboard = currentNodes.some((n) => n.top >= screenHeight * 0.75 && /^(beranda|absensi|keuangan|informasi|t2q)$/i.test((n.text || n.contentDesc || '').trim()));
-              backAttempts++;
-            }
-
-            // Validasi apakah benar-benar masih di layar Login (ada input field EditText username/password)
-            const hasRealLoginForm = currentNodes.some((n) =>
-              /edittext/i.test(n.className || '') ||
-              /masuk ke akun|silakan masuk/i.test(n.text || n.contentDesc || '')
-            );
-            if (hasRealLoginForm && !hasDashboard) {
-              appendLog(`[Navigation Guard] Tidak dapat membuka tab "${text}" karena aplikasi masih tertahan di layar Login.`);
-              if (isOptional) continue;
-              throw new Error(`Navigasi ke "${text}" dibatalkan: aplikasi belum berhasil login.`);
-            }
-          }
-
-          // Cek apakah langkah login perlu dilewati jika aplikasi sudah berada di Beranda/Dashboard
-          if (targetDevice && /nis|nisn|password|sandi|masuk/i.test(text) && isOptional) {
+          // Skip login field tap if already past login (no EditText on screen and optional)
+          if (targetDevice && isOptional && /username|email|password|sandi|login|masuk/i.test(text)) {
             const currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
             const hasRealLoginForm = currentNodes.some((n) => /edittext/i.test(n.className || ''));
             if (!hasRealLoginForm) {
-              appendLog(`Aplikasi sudah logged in (layar bukan formulir login), langkah login "${text}" dilewati.`);
+              appendLog(`Aplikasi sudah tidak berada pada layar login, langkah "${text}" dilewati.`);
               continue;
             }
           }
 
-          // Tutup keyboard secara aman jika aktif tanpa melakukan klik sembarangan di layar
-          if (targetDevice && /masuk|login|beranda|home|absensi|keuangan|informasi|t2q/i.test(text)) {
+          if (targetDevice) {
             await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'keyevent', '111'], 1500).catch(() => {});
-            await new Promise((r) => setTimeout(r, 200));
+            await new Promise((r) => setTimeout(r, 150));
           }
 
           let tapX = Math.round(screenWidth * 0.5);
@@ -984,124 +981,64 @@ export async function executeAndroidRawFlow(
             try {
               allNodes = await readUiNodes(targetDevice);
               const needle = text.trim().toLowerCase();
-              const isTab = /^(beranda|home|absensi|keuangan|informasi|t2q)$/i.test(needle);
 
-              // 1. Bottom tab bar fast-path: cari elemen di bar navigasi bawah (top >= 75% layar)
-              if (isTab) {
-                const tabNode = allNodes.find((n) =>
-                  n.top >= screenHeight * 0.75 &&
-                  [n.text, n.contentDesc].some((v) => (v || '').trim().toLowerCase() === needle)
-                );
-                if (tabNode) {
-                  tapX = Math.round((tabNode.left + tabNode.right) / 2);
-                  tapY = Math.round((tabNode.top + tabNode.bottom) / 2);
-                  matchedUiNode = true;
-                  appendLog(`[Bottom Tab] Ditemukan tab "${text}" di (${tapX}, ${tapY})`);
+              // If element isn't visible immediately, press BACK up to 2x if we're inside a nested sheet/sub-screen
+              let node = allNodes.find((candidate) =>
+                candidate.clickable &&
+                [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase() === needle)
+              ) || allNodes.find((candidate) =>
+                [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase() === needle)
+              ) || allNodes.find((candidate) =>
+                candidate.clickable &&
+                [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase().startsWith(needle))
+              ) || allNodes.find((candidate) =>
+                candidate.clickable &&
+                [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase().includes(needle))
+              ) || allNodes.find((candidate) => uiNodeMatches(candidate, text));
+
+              if (!node && !/login|masuk|password|sandi|email|username/i.test(needle)) {
+                const hasEditText = allNodes.some((n) => /edittext/i.test(n.className || ''));
+                if (!hasEditText) {
+                  for (let back = 0; back < 2 && !node; back++) {
+                    await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'keyevent', '4'], 2000).catch(() => {});
+                    await new Promise((r) => setTimeout(r, 700));
+                    allNodes = await readUiNodes(targetDevice, 1).catch(() => []);
+                    node = allNodes.find((candidate) => uiNodeMatches(candidate, text));
+                  }
                 }
               }
 
-              // 2. Exact match clickable
-              if (!matchedUiNode) {
-                let node = allNodes.find((candidate) =>
-                  candidate.clickable &&
-                  [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase() === needle)
-                );
-                // 3. Exact match any
-                if (!node) {
-                  node = allNodes.find((candidate) =>
-                    [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase() === needle)
-                  );
-                }
-                // 4. StartsWith clickable
-                if (!node) {
-                  node = allNodes.find((candidate) =>
-                    candidate.clickable &&
-                    [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase().startsWith(needle))
-                  );
-                }
-                // 5. Contains clickable
-                if (!node) {
-                  node = allNodes.find((candidate) =>
-                    candidate.clickable &&
-                    [candidate.text, candidate.contentDesc].some((v) => (v || '').trim().toLowerCase().includes(needle))
-                  );
-                }
-                // 6. Contains any
-                if (!node) {
-                  node = allNodes.find((candidate) => uiNodeMatches(candidate, text));
-                }
-
-                if (node) {
-                  if (/nis|nisn|username|email|password|sandi/i.test(text) && !/edittext/i.test(node.className || '')) {
-                    const nextInput = allNodes.find((n) => /edittext/i.test(n.className || '') && n.top >= node.top && n.top <= node.bottom + 160);
-                    if (nextInput) {
-                      tapX = Math.round((nextInput.left + nextInput.right) / 2);
-                      tapY = Math.round((nextInput.top + nextInput.bottom) / 2);
-                    } else {
-                      tapX = Math.round(screenWidth * 0.5);
-                      tapY = Math.round(node.bottom + 70);
-                    }
+              if (node) {
+                if (/username|email|identifier|password|sandi/i.test(text) && !/edittext/i.test(node.className || '')) {
+                  const nextInput = allNodes.find((n) => /edittext/i.test(n.className || '') && n.top >= node!.top && n.top <= node!.bottom + 180);
+                  if (nextInput) {
+                    tapX = Math.round((nextInput.left + nextInput.right) / 2);
+                    tapY = Math.round((nextInput.top + nextInput.bottom) / 2);
                   } else {
-                    tapX = Math.round((node.left + node.right) / 2);
-                    tapY = Math.round((node.top + node.bottom) / 2);
+                    tapX = Math.round(screenWidth * 0.5);
+                    tapY = Math.round(node.bottom + 70);
                   }
-                  matchedUiNode = true;
+                } else {
+                  tapX = Math.round((node.left + node.right) / 2);
+                  tapY = Math.round((node.top + node.bottom) / 2);
                 }
+                matchedUiNode = true;
               }
             } catch { /* ignore dump error */ }
           }
 
-          const hasLoginInput = (allNodes || []).some((n) => /edittext/i.test(n.className || '') || /nis|password|sandi|masuk/i.test(n.text || n.contentDesc || n.hint || ''));
-          if (!matchedUiNode && /nis|nisn|username|email/i.test(text)) {
-            if (hasLoginInput) {
-              tapX = Math.round(screenWidth * 0.5);
-              tapY = Math.round(screenHeight * 0.52);
-            } else if (isOptional) {
-              appendLog(`Langkah login "${text}" dilewati karena layar bukan form login.`);
-              continue;
-            }
-          } else if (!matchedUiNode && /password|sandi/i.test(text)) {
-            if (hasLoginInput) {
-              tapX = Math.round(screenWidth * 0.5);
-              tapY = Math.round(screenHeight * 0.63);
-            } else if (isOptional) {
-              appendLog(`Langkah login "${text}" dilewati karena layar bukan form login.`);
-              continue;
-            }
-          } else if (!matchedUiNode && /masuk|login/i.test(text)) {
-            if (hasLoginInput) {
-              tapX = Math.round(screenWidth * 0.5);
-              tapY = Math.round(screenHeight * 0.74);
-            } else if (isOptional) {
-              appendLog(`Langkah login "${text}" dilewati karena layar bukan form login.`);
-              continue;
-            }
-          } else if (!matchedUiNode && /beranda|home/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.173);
-            tapY = Math.round(screenHeight * 0.931);
-          } else if (!matchedUiNode && /absensi|presensi/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.336);
-            tapY = Math.round(screenHeight * 0.931);
-          } else if (!matchedUiNode && /keuangan|tagihan/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.500);
-            tapY = Math.round(screenHeight * 0.931);
-          } else if (!matchedUiNode && /informasi|info/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.663);
-            tapY = Math.round(screenHeight * 0.931);
-          } else if (!matchedUiNode && /t2q|quran|tahfidz/i.test(text)) {
-            tapX = Math.round(screenWidth * 0.826);
-            tapY = Math.round(screenHeight * 0.931);
-          } else if (!matchedUiNode && tapSpec.point) {
+          if (!matchedUiNode && tapSpec.point) {
             const parts = String(tapSpec.point).split(',');
             if (parts.length === 2) {
               const px = parseFloat(parts[0]);
               const py = parseFloat(parts[1]);
               tapX = parts[0].includes('%') ? Math.round(screenWidth * (px / 100)) : Math.round(px);
               tapY = parts[1].includes('%') ? Math.round(screenHeight * (py / 100)) : Math.round(py);
+              matchedUiNode = true;
             }
           }
 
-          if (targetDevice && text && !matchedUiNode && !tapSpec.point && !/masuk|login|beranda|home|absensi|presensi|keuangan|tagihan|informasi|info|t2q|quran|tahfidz|nis|nisn|user|email|pass|sandi/i.test(text)) {
+          if (targetDevice && text && !matchedUiNode) {
             if (isOptional) {
               appendLog(`Elemen UI "${text}" tidak ditemukan tapi bersifat opsional, langkah dilewati.`);
               continue;
@@ -1110,26 +1047,10 @@ export async function executeAndroidRawFlow(
           }
 
           if (targetDevice) {
-            appendLog(`Melakukan tap pada (${tapX}, ${tapY}) untuk "${text}"`);
+            appendLog(`Melakukan tap pada (${tapX}, ${tapY}) untuk "${text || tapSpec.point}"`);
             await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'tap', String(tapX), String(tapY)], 8000);
-            // Tunggu animasi/transisi UI selesai setelah tap
-            await new Promise((r) => setTimeout(r, 1500));
+            await new Promise((r) => setTimeout(r, 1200));
 
-            // Jika tap Masuk/Login, tangani dialog peringatan sinyal lemah jika muncul
-            if (/masuk|login/i.test(text)) {
-              try {
-                const postNodes = await readUiNodes(targetDevice, 1).catch(() => []);
-                const confirmNode = postNodes.find((n) => /tetap kirim|koneksi lemah|lanjutkan|kirim ulang/i.test(n.text || n.contentDesc || ''));
-                if (confirmNode) {
-                  appendLog('Peringatan koneksi/dialog terdeteksi pasca login. Menekan "Tetap Kirim"...');
-                  const cfmX = Math.round((confirmNode.left + confirmNode.right) / 2);
-                  const cfmY = Math.round((confirmNode.top + confirmNode.bottom) / 2);
-                  await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'tap', String(cfmX), String(cfmY)], 5000);
-                  await new Promise((r) => setTimeout(r, 2000));
-                }
-              } catch { /* ignore */ }
-            }
-            // Ambil screenshot otomatis setelah tap HANYA jika flow tidak mendefinisikan screenshot eksplisit
             if (!hasExplicitScreenshots) {
               try {
                 const snap = await captureDeviceScreen(targetDevice);
@@ -1137,7 +1058,7 @@ export async function executeAndroidRawFlow(
                   const snapHash = createHash('sha256').update(snap.buffer).digest('hex');
                   if (snapHash !== lastCapturedHash) {
                     lastCapturedHash = snapHash;
-                    const safeAction = text.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 30);
+                    const safeAction = (text || 'point').replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 30);
                     const snapName = `step-${String(idx + 1).padStart(2, '0')}-tap-${safeAction}`;
                     const snapPath = path.join(runDir, `${snapName}.png`);
                     await writeFile(snapPath, snap.buffer);
@@ -1145,43 +1066,15 @@ export async function executeAndroidRawFlow(
                     appendLog(`Screenshot step ${idx + 1} tersimpan: ${snapName}.png`);
                   }
                 }
-              } catch { /* screenshot opsional, jangan gagalkan step */ }
+              } catch { /* screenshot opsional */ }
             }
           }
         } else if (cmd.inputText) {
           const value = String(cmd.inputText);
-          actionName = `inputText: "${value}"`;
+          actionName = `inputText: "***"`;
           if (targetDevice) {
-            // Jika sudah di dashboard dan ada perintah inputText login berulang, lewati
-            const currentNodes = await readUiNodes(targetDevice).catch(() => []);
-            const hasDashboard = currentNodes.some((n) => /beranda|absensi|keuangan|informasi|t2q/i.test(n.text || n.contentDesc || ''));
-            const hasLoginField = currentNodes.some((n) => /nis|masuk/i.test(n.text || n.contentDesc || ''));
-            if (hasDashboard && !hasLoginField && (value === '12345678' || value === '123456')) {
-              appendLog(`Aplikasi sudah logged in di dashboard, inputText "${value}" dilewati.`);
-              continue;
-            }
-
-            // Masukkan teks ke field yang sedang berfokus
             await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'text', value.replace(/ /g, '%s')], 6000);
             await new Promise((r) => setTimeout(r, 500));
-            // Screenshot setelah input text HANYA jika flow tidak memiliki screenshot eksplisit
-            if (!hasExplicitScreenshots) {
-              try {
-                const snap = await captureDeviceScreen(targetDevice);
-                if (snap.success && snap.buffer) {
-                  const snapHash = createHash('sha256').update(snap.buffer).digest('hex');
-                  if (snapHash !== lastCapturedHash) {
-                    lastCapturedHash = snapHash;
-                    const safeVal = value.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 20);
-                    const snapName = `step-${String(idx + 1).padStart(2, '0')}-input-${safeVal}`;
-                    const snapPath = path.join(runDir, `${snapName}.png`);
-                    await writeFile(snapPath, snap.buffer);
-                    artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
-                    appendLog(`Screenshot step ${idx + 1} (input) tersimpan: ${snapName}.png`);
-                  }
-                }
-              } catch { /* screenshot opsional */ }
-            }
           }
         } else if (cmd.pressKey) {
           const key = String(cmd.pressKey).toUpperCase();
@@ -1196,17 +1089,7 @@ export async function executeAndroidRawFlow(
           if (targetDevice) {
             appendLog(`Melakukan scroll dari (${midX}, ${startY}) ke (${midX}, ${endY})`);
             await runCli('adb', ['-s', targetDevice, 'shell', 'input', 'swipe', String(midX), String(startY), String(midX), String(endY), '400'], 6000);
-            await new Promise((r) => setTimeout(r, 1000));
-            // Screenshot setelah scroll
-            try {
-              const snap = await captureDeviceScreen(targetDevice);
-              if (snap.success && snap.buffer) {
-                const snapName = `step-${String(idx + 1).padStart(2, '0')}-scroll`;
-                const snapPath = path.join(runDir, `${snapName}.png`);
-                await writeFile(snapPath, snap.buffer);
-                artifacts.push({ type: 'screenshot', path: snapPath, name: `${snapName}.png` });
-              }
-            } catch { /* screenshot opsional */ }
+            await new Promise((r) => setTimeout(r, 800));
           }
         } else if (cmd.waitForAnimationToEnd) {
           const timeout = Math.min(cmd.waitForAnimationToEnd.timeout || 1500, 3000);
@@ -1223,19 +1106,11 @@ export async function executeAndroidRawFlow(
             try {
               const nodes = await readUiNodes(targetDevice);
               visible = nodes.some((node) => uiNodeMatches(node, text));
-              if (!visible && /beranda|home/i.test(text)) {
-                visible = nodes.some((node) => /absensi|keuangan|informasi|t2q|halo|selamat|siswa|santri|saldo/i.test(node.text || node.contentDesc || ''));
-              }
             } catch { /* ignore */ }
           }
           if (targetDevice && !visible) {
-            const currentNodes = await readUiNodes(targetDevice, 1).catch(() => []);
-            const hasLoginField = currentNodes.some((n) => /nis|password|sandi|masuk/i.test(n.text || n.contentDesc || ''));
-            if (/beranda|home/i.test(text) && hasLoginField) {
-              throw new Error(`Login belum berhasil: aplikasi masih berada di layar Login (elemen "${text}" tidak muncul).`);
-            }
-            if (isOptional || /beranda|home/i.test(text)) {
-              appendLog(`Assertion "${text}" diverifikasi dengan toleransi navigasi mobile.`);
+            if (isOptional) {
+              appendLog(`Assertion opsional "${text}" belum tampil dan dilewati.`);
             } else {
               throw new Error(`Elemen UI tidak terlihat: "${text}"`);
             }
@@ -1311,11 +1186,11 @@ export async function executeAndroidRawFlow(
   }
 }
 
-export async function captureDeviceScreen(deviceId?: string): Promise<{ success: boolean; buffer?: Buffer; error?: string }> {
-  const status = await checkAndroid();
+export async function captureDeviceScreen(deviceId?: string, useServerEmulator = true): Promise<{ success: boolean; buffer?: Buffer; error?: string }> {
+  const status = await checkAndroid(false, useServerEmulator);
   const targetDevice = normalizeDeviceId(deviceId, status.adb.devices) || status.adb.devices[0];
   if (!targetDevice) {
-    return { success: false, error: 'Tidak ada perangkat Android yang terhubung via ADB.' };
+    return { success: false, error: 'Tidak ada emulator Android server yang terhubung via ADB.' };
   }
 
   return captureScreenBuffer(targetDevice);

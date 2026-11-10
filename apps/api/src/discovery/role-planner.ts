@@ -4,8 +4,9 @@ export type RoleActionExpectation = 'EXPECTED' | 'CANDIDATE' | 'REQUIRES_RUNTIME
 export type RoleActionRow = { role: string; page: string; authentication: string; actions: string[]; expectation: RoleActionExpectation; checks: string[] };
 export type RoleActionPlan = { version: '1.0'; generatedAt: string; roles: string[]; rows: RoleActionRow[]; totals: { rows: number; expected: number; candidate: number; runtime: number }; limitations: string[] };
 
-export function buildRoleActionPlan(input: { pages: InventoryPage[]; accounts: Array<{ role?: string }> }): RoleActionPlan {
-  const roles = [...new Set(input.accounts.map((account) => account.role?.trim()).filter(Boolean) as string[])];
+export function buildRoleActionPlan(input: { pages: InventoryPage[]; accounts?: Array<{ role?: string }> }): RoleActionPlan {
+  const accounts = input.accounts ?? [];
+  const roles = [...new Set(accounts.map((account) => account.role?.trim()).filter(Boolean) as string[])];
   if (!roles.length) roles.push('tester');
   const rows: RoleActionRow[] = [];
   for (const page of input.pages) {

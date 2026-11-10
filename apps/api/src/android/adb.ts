@@ -114,6 +114,55 @@ export async function listAdbDevices(): Promise<AndroidDevice[]> {
   return devices;
 }
 
+export async function listEmulatorDevices(): Promise<AndroidDevice[]> {
+  const all = await listAdbDevices();
+  return all.filter((d) => d.type === 'emulator');
+}
+
+export async function setupAdbReverse(serial: string, port: number): Promise<boolean> {
+  if (!serial || !Number.isInteger(port) || port < 1 || port > 65535) return false;
+  const res = await runAdb(['-s', serial, 'reverse', `tcp:${port}`, `tcp:${port}`], 8000);
+  return res.exitCode === 0;
+}
+
+export async function getScreenResolution(serial: string): Promise<{ width: number; height: number }> {
+  const res = await runAdb(['-s', serial, 'shell', 'wm', 'size'], 5000);
+  const match = /(\d+)x(\d+)/.exec(res.stdout);
+  if (match) {
+    return { width: Number(match[1]), height: Number(match[2]) };
+  }
+  return { width: 1080, height: 2400 };
+}
+
+export async function dumpUiHierarchyXml(serial: string): Promise<string> {
+  await runAdb(['-s', serial, 'shell', 'uiautomator', 'dump', '/sdcard/qc_uidump.xml'], 10000);
+  const res = await runAdb(['-s', serial, 'shell', 'cat', '/sdcard/qc_uidump.xml'], 8000);
+  return res.exitCode === 0 ? res.stdout : '';
+}
+
+export async function tapCoordinate(serial: string, x: number, y: number): Promise<void> {
+  await runAdb(['-s', serial, 'shell', 'input', 'tap', String(Math.round(x)), String(Math.round(y))], 6000);
+}
+
+export async function swipeVertical(serial: string, x: number, fromY: number, toY: number, durationMs = 450): Promise<void> {
+  await runAdb([
+    '-s',
+    serial,
+    'shell',
+    'input',
+    'swipe',
+    String(Math.round(x)),
+    String(Math.round(fromY)),
+    String(Math.round(x)),
+    String(Math.round(toY)),
+    String(durationMs),
+  ], 8000);
+}
+
+export async function pressBackAdb(serial: string): Promise<void> {
+  await runAdb(['-s', serial, 'shell', 'input', 'keyevent', '4'], 5000);
+}
+
 export async function isBootCompleted(serial: string): Promise<boolean> {
   const res = await runAdb(['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], 4000);
   return res.exitCode === 0 && res.stdout.trim() === '1';

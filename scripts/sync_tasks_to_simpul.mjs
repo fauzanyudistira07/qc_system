@@ -1,8 +1,8 @@
 /**
- * Sync QC Maestro Oct 1 - Oct 7, 2026 tasks into Simpul (https://simpul.solu.co.id/)
+ * Sync Timbang / QC Maestro Oct 1 - Oct 7, 2026 tasks into Simpul (https://simpul.solu.co.id/)
  * Project: Lainnya (LCMMS)
- * Module: QC System
- * Cycle: QC System - Automation Engine
+ * Module: Timbang (cmugn2zih003tql0i8fn9zake)
+ * Cycle: Timbang - Automation Engine (cmuh11zas00hzql0inp6il04d)
  * Assignee: Fauzan Yudistira
  */
 

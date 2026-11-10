@@ -48,10 +48,10 @@ export interface UploadBatchResult {
 
 export function getNextcloudConfig(): NextcloudConfig {
   return {
-    url: (process.env.NEXTCLOUD_URL || 'https://158.140.181.43:8443').replace(/\/+$/, ''),
-    username: process.env.NEXTCLOUD_USERNAME || 'fauzan_cmms',
-    password: process.env.NEXTCLOUD_PASSWORD || 'IRR251hf25uo',
-    baseFolder: (process.env.NEXTCLOUD_BASE_DIR || 'CMM Service/Timbang Image and Video').replace(/^\/+|\/+$/g, '')
+    url: (process.env.NEXTCLOUD_URL || '').replace(/\/+$/, ''),
+    username: process.env.NEXTCLOUD_USERNAME || '',
+    password: process.env.NEXTCLOUD_PASSWORD || '',
+    baseFolder: (process.env.NEXTCLOUD_BASE_DIR || 'QC-Maestro/Media').replace(/^\/+|\/+$/g, '')
   };
 }
 
@@ -257,10 +257,10 @@ export async function resolveArtifactBuffer(
     candidates.push(path.join(artifactRoot, rel));
   }
 
-  // /api/v1/zannora-evidence/artifacts/:rel
-  const zannoraMatch = itemUrl.match(/\/api\/v1\/zannora-evidence\/artifacts\/(.+)/);
-  if (zannoraMatch) {
-    const rel = decodeURIComponent(zannoraMatch[1]).replace(/\?.*$/, '');
+  // /api/v1/evidence/artifacts/:rel
+  const evidenceMatch = itemUrl.match(/\/api\/v1\/evidence\/artifacts\/(.+)/);
+  if (evidenceMatch) {
+    const rel = decodeURIComponent(evidenceMatch[1]).replace(/\?.*$/, '');
     candidates.push(path.join(artifactRoot, rel));
   }
 

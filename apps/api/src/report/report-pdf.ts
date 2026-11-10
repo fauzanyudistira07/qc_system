@@ -183,24 +183,88 @@ export async function buildPdfHtml(
   const qualityFailedCount = qualityChecks.length ? checkFailureCount : Number(qualityReport?.failed ?? job.qualityAudit?.failed ?? 0);
   const qualityPassedCount = Number(qualityReport?.passed ?? job.qualityAudit?.passed ?? 0);
   const qualityTotalCount = Number(qualityReport?.total ?? job.qualityAudit?.total ?? 0);
+
+  const jobDir = path.resolve(artifactRoot, 'jobs', job.id);
+  const resolveJobArtifactBase64 = async (rawPathOrUrl?: string): Promise<string | null> => {
+    if (!rawPathOrUrl) return null;
+    let rel = rawPathOrUrl.trim();
+    const apiPrefix = `/api/v1/discovery/jobs/${job.id}/artifacts/`;
+    if (rel.startsWith(apiPrefix)) {
+      rel = rel
+        .slice(apiPrefix.length)
+        .split('/')
+        .map((seg) => {
+          try { return decodeURIComponent(seg); } catch { return seg; }
+        })
+        .join(path.sep);
+    }
+    const candidates = path.isAbsolute(rel)
+      ? [rel]
+      : [
+          path.resolve(jobDir, rel),
+          path.resolve(jobDir, 'screenshots', 'long', path.basename(rel)),
+          path.resolve(jobDir, 'screenshots', path.basename(rel)),
+        ];
+    for (const cand of candidates) {
+      const resolved = path.resolve(cand);
+      if (!resolved.startsWith(jobDir)) continue;
+      const b64 = await fileToBase64(resolved);
+      if (b64) return b64;
+    }
+    return null;
+  };
+
+  const phase1LongScreenshots = await Promise.all(
+    (job.longScreenshots || []).slice(0, 60).map(async (ss) => ({
+      ...ss,
+      base64: ss.status === 'CAPTURED' ? await resolveJobArtifactBase64(ss.path || ss.url) : null,
+    }))
+  );
+  const phase1GapsWithMedia = await Promise.all(
+    (job.coverageGaps || []).map(async (gap) => ({
+      ...gap,
+      errorBase64: await resolveJobArtifactBase64(gap.errorScreenshotUrl),
+    }))
+  );
+
+  const hasPhase1Artifacts = Boolean(
+    job.reconSummary ||
+    (job.longScreenshots && job.longScreenshots.length > 0) ||
+    (job.roleVideos && job.roleVideos.length > 0) ||
+    (job.coverageGaps && job.coverageGaps.length > 0)
+  );
+  const ssTotalPhase1 = job.longScreenshots?.length ?? job.reconSummary?.batch1TotalScreenshots ?? 0;
+  const ssCapturedPhase1 = job.longScreenshots?.filter((s) => s.status === 'CAPTURED').length ?? job.reconSummary?.batch1CapturedCount ?? 0;
+  const vidTotalPhase1 = job.roleVideos?.length ?? job.reconSummary?.batch2TotalRoleVideos ?? 0;
+  const vidRecordedPhase1 = job.roleVideos?.filter((v) => v.status === 'RECORDED').length ?? job.reconSummary?.batch2RecordedCount ?? 0;
+  const gapsCountPhase1 = job.coverageGaps?.length ?? 0;
+
   const auditStatus = job.qualityAudit?.status || 'NOT_RUN';
-  const auditLabel = auditStatus === 'PASSED'
-    ? 'QUALITY AUDIT LULUS'
-    : auditStatus === 'PASSED_WITH_LIMITATIONS'
-      ? 'LULUS DENGAN BATASAN'
-      : auditStatus === 'FAILED'
-        ? 'ADA TEMUAN · PERLU PERBAIKAN'
-        : auditStatus === 'RUNNING' || auditStatus === 'QUEUED'
-          ? 'AUDIT BELUM SELESAI'
-          : auditStatus === 'SKIPPED'
-            ? 'QUALITY AUDIT DILEWATI'
-            : auditStatus === 'ERROR'
-              ? 'QUALITY AUDIT ERROR'
-              : 'BELUM DIAUDIT';
-  const auditColor = auditStatus === 'PASSED' ? '#047857' : auditStatus === 'PASSED_WITH_LIMITATIONS' ? '#a16207' : '#be123c';
+  const auditLabel = job.config.qualityAudit?.enabled !== false && auditStatus !== 'NOT_RUN' && auditStatus !== 'SKIPPED'
+    ? (auditStatus === 'PASSED'
+        ? 'QUALITY AUDIT LULUS'
+        : auditStatus === 'PASSED_WITH_LIMITATIONS'
+          ? 'LULUS DENGAN BATASAN'
+          : auditStatus === 'FAILED'
+            ? 'ADA TEMUAN · PERLU PERBAIKAN'
+            : auditStatus === 'RUNNING' || auditStatus === 'QUEUED'
+              ? 'AUDIT BELUM SELESAI'
+              : 'QUALITY AUDIT ERROR')
+    : hasPhase1Artifacts
+      ? (gapsCountPhase1 === 0 && ssCapturedPhase1 > 0 && vidRecordedPhase1 > 0
+          ? 'CAKUPAN FASE 1 LENGKAP'
+          : gapsCountPhase1 > 0
+            ? `CAKUPAN FASE 1 · ${gapsCountPhase1} KENDALA`
+            : 'AUDIT CAKUPAN FASE 1')
+      : 'BELUM DIAUDIT';
+
+  const auditColor = auditStatus === 'PASSED' || (hasPhase1Artifacts && gapsCountPhase1 === 0 && vidRecordedPhase1 > 0)
+    ? '#047857'
+    : (gapsCountPhase1 > 0 || auditStatus === 'PASSED_WITH_LIMITATIONS')
+      ? '#a16207'
+      : '#be123c';
 
   // Baca screenshot ke Base64 untuk setiap flow
-  const jobDir = path.join(artifactRoot, 'jobs', job.id);
   const flowsWithMedia = await Promise.all(
     rawFlowResults.map(async (res: any) => {
       const flowDef = job.flows.find(f => f.id === res.flowId);
@@ -241,7 +305,119 @@ export async function buildPdfHtml(
   const qualityCategoryRows = Object.entries(qualityReport?.categories || {}).map(([category, metrics]: [string, any]) => `
     <tr><td>${esc(category)}</td><td>${Number(metrics.total || 0)}</td><td style="color:#047857">${Number(metrics.passed || 0)}</td><td style="color:${Number(metrics.failed || 0) ? '#be123c' : '#64748b'}">${Number(metrics.failed || 0)}</td><td>${Number(metrics.notApplicable || 0)}</td></tr>
   `).join('');
-  const qualitySectionHtml = job.qualityAudit || qualityData ? `
+
+  const phase1SummarySectionHtml = hasPhase1Artifacts ? `
+    <div class="section-title">Cakupan Penuh Fase 1 (Stage 1 Recon → Long SS → Video Role)</div>
+    ${job.reconSummary?.aiExecutiveSummary ? `
+      <div class="p1-pdf-ai-banner">
+        <div class="p1-pdf-ai-label">✨ Ringkasan Eksekutif Gemini AI</div>
+        <p>${esc(job.reconSummary.aiExecutiveSummary)}</p>
+      </div>
+    ` : ''}
+    <div class="quality-summary">
+      <div><span>Role Terdeteksi</span><strong>${job.reconSummary?.totalRoles ?? 0}</strong></div>
+      <div><span>Halaman / Layar Unik</span><strong>${job.reconSummary?.totalPages ?? 0}</strong></div>
+      <div><span>Tab / Fitur Interaktif</span><strong>${job.reconSummary?.totalInteractiveFeatures ?? 0}</strong></div>
+      <div><span>Batch 1 Long SS</span><strong style="color:#047857">${ssCapturedPhase1}/${ssTotalPhase1}</strong></div>
+      <div><span>Batch 2 Video Role</span><strong style="color:#0284c7">${vidRecordedPhase1}/${vidTotalPhase1}</strong></div>
+    </div>
+
+    ${(job.envProvisioning?.entries?.length || job.provisionedAccounts?.length) ? `
+      <div class="section-title">Provisioning .env Demo &amp; Akun Role Runtime</div>
+      ${job.envProvisioning?.entries?.length ? `
+        <table class="data-table">
+          <thead><tr><th>Direktori</th><th>Template → Target</th><th>Key Terisi</th><th>Dibantu Gemini</th></tr></thead>
+          <tbody>
+            ${job.envProvisioning.entries.map((entry) => `
+              <tr>
+                <td><code>${esc(entry.directory || '.')}</code></td>
+                <td><code>${esc(entry.templateFile)}</code> → <code>${esc(entry.targetEnvFile)}</code></td>
+                <td>${entry.keysPopulated.length} keys</td>
+                <td>${entry.aiInferredKeys.length} keys</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      ` : ''}
+      ${job.provisionedAccounts?.length ? `
+        <table class="data-table">
+          <thead><tr><th>Role</th><th>Identifier</th><th>Sumber</th><th>Verifikasi</th><th>Rute</th></tr></thead>
+          <tbody>
+            ${job.provisionedAccounts.map((acc) => `
+              <tr>
+                <td><strong>${esc(acc.role)}</strong></td>
+                <td><code>${esc(acc.identifier || '—')}</code></td>
+                <td>${esc(acc.source)}</td>
+                <td style="color:${acc.verified ? '#047857' : '#a16207'};font-weight:700">${acc.verified ? '✓ TERVERIFIKASI' : 'BELUM'}</td>
+                <td><code>${esc(acc.homePath || acc.loginPath || '/')}</code></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      ` : ''}
+    ` : ''}
+
+    ${phase1LongScreenshots.length > 0 ? `
+      <div class="section-title">Batch 1: Long Screenshot Full-Page per Role (${ssCapturedPhase1}/${ssTotalPhase1})</div>
+      <div class="p1-pdf-ss-grid">
+        ${phase1LongScreenshots.map((ss) => `
+          <figure class="p1-pdf-ss-card">
+            ${ss.base64
+              ? `<img src="${ss.base64}" alt="${esc(ss.pageTitle || ss.pagePath)}">`
+              : `<div class="p1-pdf-ss-fail">✕ Gagal: ${esc(ss.error || 'Tidak ada gambar')}</div>`
+            }
+            <figcaption>
+              <div><strong>[${esc((ss.role || 'user').toUpperCase())}] ${esc(ss.pageTitle || ss.pagePath)}</strong></div>
+              <div><code>${esc(ss.pagePath)}</code> · ${ss.width}×${ss.height}px · ${ss.segmentCount || 1} seg</div>
+            </figcaption>
+          </figure>
+        `).join('')}
+      </div>
+      ${(job.longScreenshots?.length || 0) > 60 ? `<p class="quality-empty">Catatan: Menampilkan 60 dari ${job.longScreenshots?.length} Long Screenshot pertama pada dokumen PDF. Lihat HTML report untuk galeri lengkap.</p>` : ''}
+    ` : ''}
+
+    ${(job.roleVideos && job.roleVideos.length > 0) ? `
+      <div class="section-title">Batch 2: Video Perjalanan Lengkap per Role (${vidRecordedPhase1}/${vidTotalPhase1})</div>
+      <table class="data-table">
+        <thead><tr><th>Role</th><th>File Video</th><th>Durasi / Ukuran</th><th>Status</th><th>Chapters Halaman &amp; Tab</th></tr></thead>
+        <tbody>
+          ${job.roleVideos.map((v) => `
+            <tr>
+              <td><strong>${esc(v.role)}</strong></td>
+              <td><code>${esc(v.filename)}</code></td>
+              <td>${v.durationSec || 0}s · ${v.sizeBytes ? Math.round(v.sizeBytes / 1024) : 0} KB</td>
+              <td style="color:${v.status === 'RECORDED' ? '#047857' : '#be123c'};font-weight:700">${v.status === 'RECORDED' ? '✓ RECORDED' : '✕ FAILED'}</td>
+              <td style="font-size:8pt">${v.chapters && v.chapters.length ? v.chapters.map((ch) => `[${ch.startSec}s] ${esc(ch.page)}${ch.feature ? ' → ' + esc(ch.feature) : ''}`).join(' · ') : esc(v.error || '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
+
+    <div class="section-title">Halaman Tidak Bisa Dicek &amp; Kendala Detail (${gapsCountPhase1})</div>
+    ${phase1GapsWithMedia.length > 0 ? `
+      <div class="quality-finding-list">
+        ${phase1GapsWithMedia.map((gap, idx) => `
+          <article class="quality-finding-group">
+            <div class="quality-finding-heading">
+              <strong>${idx + 1}. [${esc((gap.role || 'public').toUpperCase())}] ${esc(gap.pageTitle || gap.pagePath)}</strong>
+              <span>${esc(gap.phaseFailed)} · ${esc(gap.category)}${gap.httpStatus ? ` · HTTP ${gap.httpStatus}` : ''}</span>
+            </div>
+            <ul>
+              <li><strong>Path Target:</strong> <code>${esc(gap.pagePath)}</code>${gap.redirectedTo ? ` · Redirect → <code>${esc(gap.redirectedTo)}</code>` : ''}</li>
+              <li><strong>Kendala Teknis:</strong> ${esc(gap.technicalReason)}</li>
+              ${gap.failedApiCalls?.length ? `<li><strong>API Gagal:</strong> ${gap.failedApiCalls.map((a) => `<code>${esc(`${a.method} ${a.url} → ${a.status}`)}</code>`).join(' · ')}</li>` : ''}
+              ${gap.consoleOrDeviceErrors?.length ? `<li><strong>Console / Device Error:</strong> <small>${esc(gap.consoleOrDeviceErrors.join(' | '))}</small></li>` : ''}
+              ${gap.aiDiagnosis ? `<li><strong>✨ Diagnosis Gemini AI (${esc(gap.aiDiagnosis.ownerRole)}):</strong> ${esc(gap.aiDiagnosis.summaryId)}<small>Penyebab: ${esc(gap.aiDiagnosis.likelyCause)} · Saran: ${esc(gap.aiDiagnosis.recommendedFix)}</small></li>` : ''}
+            </ul>
+            ${gap.errorBase64 ? `<div class="quality-evidence-grid"><figure><img src="${gap.errorBase64}" alt="Error snapshot ${esc(gap.pagePath)}"><figcaption>Snapshot error pada ${esc(gap.pagePath)}</figcaption></figure></div>` : ''}
+          </article>
+        `).join('')}
+      </div>
+    ` : '<p class="quality-empty">✅ Tidak ada halaman yang gagal diakses atau direkam pada eksekusi Fase 1 ini.</p>'}
+  ` : '';
+
+  const qualitySectionHtml = job.qualityAudit && job.config.qualityAudit?.enabled !== false && (job.qualityAudit.status !== 'SKIPPED' || qualityData) ? `
     <div class="section-title">UI Quality Audit</div>
     <div class="quality-summary">
       <div><span>Status</span><strong style="color:${auditColor}">${esc(auditLabel)}</strong></div>
@@ -267,17 +443,17 @@ export async function buildPdfHtml(
         ? '<p class="quality-empty">Tidak ada pemeriksaan UI/quality berstatus gagal pada report ini.</p>'
       : `<p class="quality-empty">${qualityFailedCount ? `Report detail tidak tersedia; ${qualityFailedCount} temuan tercatat, tetapi detail dan screenshot tidak dapat dimuat.` : 'Detail pemeriksaan dan screenshot belum tersedia untuk sesi ini.'}</p>`}
     ${job.qualityAudit?.message ? `<p class="quality-empty">Catatan audit: ${esc(job.qualityAudit.message)}</p>` : ''}
-  ` : `
+  ` : (hasPhase1Artifacts ? '' : `
     <div class="section-title">UI Quality Audit</div>
-    <p class="quality-empty">Quality Audit UI belum dijalankan. PDF ini tidak menyimpulkan bahwa UI sudah lulus.</p>
-  `;
+    <p class="quality-empty">Quality Audit UI belum dijalankan pada sesi ini.</p>
+  `);
 
-  const releaseLabel = qualityFailedCount > 0 || failedCount > 0
-    ? `Perlu perbaikan · ${qualityFailedCount + failedCount} temuan / kegagalan`
-    : auditStatus === 'PASSED' && totalCount > 0
-      ? 'Lulus pemeriksaan yang dijalankan · bukan jaminan siap produksi'
-      : auditStatus === 'PASSED'
-        ? 'UI Quality lulus · skenario flow tidak dijalankan'
+  const releaseLabel = qualityFailedCount > 0 || failedCount > 0 || gapsCountPhase1 > 0
+    ? `Perlu perhatian · ${qualityFailedCount + failedCount + gapsCountPhase1} temuan / kendala cakupan`
+    : hasPhase1Artifacts && ssCapturedPhase1 > 0 && vidRecordedPhase1 > 0
+      ? `Cakupan Fase 1 lengkap · ${ssCapturedPhase1} Long SS & ${vidRecordedPhase1} Video Role`
+      : auditStatus === 'PASSED' && totalCount > 0
+        ? 'Lulus pemeriksaan yang dijalankan'
         : 'Belum dinilai untuk kesiapan rilis';
 
   return `<!doctype html>
@@ -555,6 +731,14 @@ export async function buildPdfHtml(
     .quality-evidence-grid img { display:block; width:100%; max-height:300px; object-fit:contain; background:#111827; }
     .quality-evidence-grid figcaption { padding:4px 2px; color:#475569; font-size:7pt; overflow-wrap:anywhere; }
     .quality-empty { margin:8px 0 14px; padding:10px; border:1px solid #cbd5e1; border-radius:6px; color:#475569; background:#f8fafc; font-size:9pt; }
+    .p1-pdf-ai-banner { margin:8px 0 12px; padding:10px 12px; border:1px solid #bae6fd; border-left:4px solid #0284c7; border-radius:6px; background:#f0f9ff; break-inside:avoid; page-break-inside:avoid; }
+    .p1-pdf-ai-label { font-size:8pt; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; color:#0284c7; margin-bottom:4px; }
+    .p1-pdf-ai-banner p { font-size:8.8pt; color:#0f172a; line-height:1.45; white-space:pre-line; }
+    .p1-pdf-ss-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin:8px 0 14px; }
+    .p1-pdf-ss-card { margin:0; padding:6px; border:1px solid #cbd5e1; border-radius:6px; background:#f8fafc; break-inside:avoid; page-break-inside:avoid; }
+    .p1-pdf-ss-card img { display:block; width:100%; max-height:360px; object-fit:contain; border-radius:4px; background:#0f172a; }
+    .p1-pdf-ss-card figcaption { margin-top:5px; font-size:7.5pt; color:#334155; overflow-wrap:anywhere; }
+    .p1-pdf-ss-fail { padding:24px 8px; text-align:center; color:#be123c; background:#fff1f2; border-radius:4px; font-size:8pt; }
 
     /* FOOTER */
     .audit-footer {
@@ -596,15 +780,15 @@ export async function buildPdfHtml(
     <div class="meta-grid">
       <div class="meta-row">
         <div class="meta-cell">📱 <strong>Target:</strong> ${esc(job.config.platform.toUpperCase())} (${esc(job.config.appId || job.config.baseUrl)})</div>
-        <div class="meta-cell">🔄 <strong>Sesi Percobaan:</strong> <span style="color:#0284c7;font-weight:700">${esc(selectedAttempt?.name || 'Percobaan Terpilih')}</span></div>
+        <div class="meta-cell">🔄 <strong>Sesi Percobaan:</strong> <span style="color:#0284c7;font-weight:700">${esc(selectedAttempt?.name || 'Sesi Fase 1')}</span></div>
       </div>
       <div class="meta-row">
         <div class="meta-cell">📅 <strong>Waktu Pengujian:</strong> ${esc(formatWIB(selectedAttempt?.finishedAt || job.finishedAt))}</div>
         <div class="meta-cell">🆔 <strong>Job ID:</strong> <code>${esc(job.id.slice(0, 8))}</code></div>
       </div>
       <div class="meta-row">
-        <div class="meta-cell">🔧 <strong>Browser audit:</strong> ${esc(job.qualityAudit?.browsers?.join(', ') || 'Tidak tersedia')}</div>
-        <div class="meta-cell">📐 <strong>Viewport audit:</strong> ${esc(job.qualityAudit?.viewports?.join(', ') || 'Tidak tersedia')}</div>
+        <div class="meta-cell">🔧 <strong>Lingkungan Runner:</strong> ${esc(job.config.platform === 'android' ? (job.config.useServerEmulator !== false ? `Server Headless Emulator (${job.config.deviceId || 'qc_worker_headless'})` : (job.config.deviceId || 'Emulator')) : (job.qualityAudit?.browsers?.join(', ') || 'Chromium Headless Playwright'))}</div>
+        <div class="meta-cell">📦 <strong>Mode / Repo:</strong> ${esc(job.config.runMode)} ${job.config.frontendTarget?.repositoryUrl || job.config.mobileTarget?.repositoryUrl || job.config.repositoryUrl ? `(${esc(job.config.frontendTarget?.repositoryUrl || job.config.mobileTarget?.repositoryUrl || job.config.repositoryUrl)})` : ''}</div>
       </div>
     </div>
   </div>
@@ -613,8 +797,8 @@ export async function buildPdfHtml(
   <div class="kpi-container">
     <div class="kpi-cell">
       <div class="kpi-card kpi-highlight">
-        <div class="kpi-val ${healthScore !== null && healthScore === 100 ? 'val-passed' : ''}" style="color:${healthScore === null ? '#64748b' : healthScore === 100 ? '#059669' : '#e11d48'}">${healthScore === null ? '—' : `${healthScore}%`}</div>
-        <div class="kpi-label">Flow Pass Rate</div>
+        <div class="kpi-val ${healthScore !== null && healthScore === 100 ? 'val-passed' : ''}" style="color:${healthScore === null ? '#64748b' : healthScore === 100 ? '#059669' : '#e11d48'}">${healthScore === null ? (ssTotalPhase1 > 0 ? `${Math.round((ssCapturedPhase1 / ssTotalPhase1) * 100)}%` : '—') : `${healthScore}%`}</div>
+        <div class="kpi-label">${healthScore === null && ssTotalPhase1 > 0 ? 'Long SS Rate' : 'Flow Pass Rate'}</div>
       </div>
     </div>
     <div class="kpi-cell">
@@ -631,8 +815,8 @@ export async function buildPdfHtml(
     </div>
     <div class="kpi-cell">
       <div class="kpi-card">
-        <div class="kpi-val" style="color:${failedCount === 0 ? '#059669' : '#e11d48'}">${failedCount}</div>
-        <div class="kpi-label">Defect / Crash</div>
+        <div class="kpi-val" style="color:${failedCount === 0 && gapsCountPhase1 === 0 ? '#059669' : '#e11d48'}">${failedCount + gapsCountPhase1}</div>
+        <div class="kpi-label">Kendala / Defect</div>
       </div>
     </div>
   </div>
@@ -670,6 +854,8 @@ export async function buildPdfHtml(
       }).join('')}
     </tbody>
   </table>
+
+  ${phase1SummarySectionHtml}
 
   ${qualitySectionHtml}
 

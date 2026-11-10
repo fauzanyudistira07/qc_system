@@ -192,6 +192,15 @@ export async function startHeadlessAvd(
 const managedEmulators = new Set<string>();
 let idleWatchdogTimer: NodeJS.Timeout | null = null;
 let activeJobCount = 0;
+let reviewHoldCount = 0;
+
+export function setEmulatorReviewHold(hold: boolean): void {
+  reviewHoldCount = hold ? reviewHoldCount + 1 : Math.max(0, reviewHoldCount - 1);
+  if (hold && idleWatchdogTimer) {
+    clearTimeout(idleWatchdogTimer);
+    idleWatchdogTimer = null;
+  }
+}
 
 export function isManagedEmulator(serial: string): boolean {
   return managedEmulators.has(serial);
@@ -215,7 +224,7 @@ export function notifyAndroidJobStarted(): void {
 
 export function notifyAndroidJobFinished(): void {
   activeJobCount = Math.max(0, activeJobCount - 1);
-  if (activeJobCount === 0 && managedEmulators.size > 0) {
+  if (activeJobCount === 0 && reviewHoldCount === 0 && managedEmulators.size > 0) {
     scheduleIdleShutdown(30000);
   }
 }
@@ -225,8 +234,8 @@ export function scheduleIdleShutdown(delayMs = 30000): void {
     clearTimeout(idleWatchdogTimer);
   }
   idleWatchdogTimer = setTimeout(async () => {
-    if (activeJobCount === 0 && managedEmulators.size > 0) {
-      console.log(`[EMULATOR-LIFECYCLE] ⏱️ Tidak ada job aktif dalam ${Math.round(delayMs / 1000)}s. Mematikan Headless Emulator otomatis...`);
+    if (activeJobCount === 0 && reviewHoldCount === 0 && managedEmulators.size > 0) {
+      console.log(`[EMULATOR-LIFECYCLE] Tidak ada job aktif dalam ${Math.round(delayMs / 1000)}s. Mematikan Headless Emulator otomatis...`);
       await stopAllManagedEmulators();
     }
     idleWatchdogTimer = null;
@@ -241,7 +250,7 @@ export async function stopAllManagedEmulators(): Promise<void> {
   const serials = Array.from(managedEmulators);
   for (const serial of serials) {
     try {
-      console.log(`[EMULATOR-LIFECYCLE] 🛑 Mematikan managed emulator ${serial}...`);
+      console.log(`[EMULATOR-LIFECYCLE] Mematikan managed emulator ${serial}...`);
       await stopEmulator(serial);
       managedEmulators.delete(serial);
     } catch (err) {
@@ -251,23 +260,28 @@ export async function stopAllManagedEmulators(): Promise<void> {
 }
 
 /**
- * Memastikan ada perangkat Android siap pakai:
- * 1. Jika ada physical phone (misal 192.168.10.37:5555) -> Pakai langsung tanpa menyalakan emulator.
- * 2. Jika ada emulator yang sedang aktif -> Pakai langsung.
- * 3. Jika TIDAK ada sama sekali -> Nyalakan headless emulator (qc_worker_headless) on-demand,
- *    dan tandai sebagai managed (akan dimatikan otomatis saat job selesai/idle).
+ * Memastikan perangkat Emulator Server siap pakai (FR-03):
+ * Secara default (`useServerEmulator = true`), perangkat fisik diabaikan sepenuhnya.
+ * 1. Jika ada emulator aktif -> Pakai langsung.
+ * 2. Jika belum aktif -> Nyalakan headless emulator (`qc_worker_headless`) on-demand.
  */
-export async function ensureDeviceReady(requestedDeviceId?: string): Promise<{
+export async function ensureDeviceReady(
+  requestedDeviceId?: string,
+  useServerEmulator = true
+): Promise<{
   serial: string;
   managed: boolean;
   model?: string;
   error?: string;
 }> {
   const currentDevices = await listAdbDevices();
+  const candidates = useServerEmulator
+    ? currentDevices.filter((d) => d.type === 'emulator')
+    : currentDevices;
 
-  // 1. Cek spesifik device jika diminta dan valid
+  // 1. Cek spesifik device jika diminta dan memenuhi kebijakan server-emulator
   if (requestedDeviceId) {
-    const matched = currentDevices.find(
+    const matched = candidates.find(
       (d) => d.serial === requestedDeviceId || d.serial.includes(requestedDeviceId)
     );
     if (matched && matched.status === 'device') {
@@ -282,21 +296,23 @@ export async function ensureDeviceReady(requestedDeviceId?: string): Promise<{
     }
   }
 
-  // 2. Prioritaskan physical phone yang sedang terhubung
-  const physical = currentDevices.find((d) => d.type === 'physical' && d.status === 'device');
-  if (physical) {
-    const ready = await isPackageManagerReady(physical.serial);
-    if (ready) {
-      return {
-        serial: physical.serial,
-        managed: false,
-        model: physical.model
-      };
+  // 2. Jika mode non-server secara eksplisit diminta, barulah izinkan physical device
+  if (!useServerEmulator) {
+    const physical = candidates.find((d) => d.type === 'physical' && d.status === 'device');
+    if (physical) {
+      const ready = await isPackageManagerReady(physical.serial);
+      if (ready) {
+        return {
+          serial: physical.serial,
+          managed: false,
+          model: physical.model
+        };
+      }
     }
   }
 
-  // 3. Gunakan emulator yang sudah aktif jika ada
-  const runningEmulator = currentDevices.find((d) => d.type === 'emulator' && d.status === 'device');
+  // 3. Gunakan server emulator yang sudah aktif jika ada
+  const runningEmulator = candidates.find((d) => d.type === 'emulator' && d.status === 'device');
   if (runningEmulator) {
     const ready = await isPackageManagerReady(runningEmulator.serial);
     if (ready) {
@@ -308,15 +324,15 @@ export async function ensureDeviceReady(requestedDeviceId?: string): Promise<{
     }
   }
 
-  // 4. On-Demand: Tidak ada perangkat aktif -> nyalakan headless emulator
-  console.log('[EMULATOR-LIFECYCLE] 🚀 Tidak ada perangkat Android terhubung. Menyalakan Headless Android Emulator (qc_worker_headless)...');
+  // 4. On-Demand: Tidak ada emulator aktif -> nyalakan headless emulator server
+  console.log('[EMULATOR-LIFECYCLE] Menyalakan Headless Android Emulator server (qc_worker_headless)...');
   const avds = await listAvds();
   const targetAvd = avds.includes('qc_worker_headless') ? 'qc_worker_headless' : avds[0];
   if (!targetAvd) {
     return {
       serial: '',
       managed: false,
-      error: 'Tidak ada AVD yang terpasang di sistem. Pasang AVD qc_worker_headless terlebih dahulu.'
+      error: 'Tidak ada AVD yang terpasang di server. Pasang AVD qc_worker_headless terlebih dahulu.'
     };
   }
 

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Job } from './types';
+import { Job, View } from './types';
 import { Icon } from './ui';
 
 interface ProjectSwitcherProps {
@@ -8,6 +8,7 @@ interface ProjectSwitcherProps {
   activeJob: Job | null;
   onSelectJob: (jobId: string) => void;
   onNewJob: () => void;
+  onNavigateView?: (view: View) => void;
 }
 
 export interface RootProject {
@@ -22,58 +23,11 @@ export interface RootProject {
 }
 
 /**
- * Normalisasi cerdas nama projek utama:
- * Mengelompokkan seluruh commit update dan run uji terkait ke projek induknya (misal: Zannora).
+ * Normalisasi dinamis nama projek utama:
+ * Mengelompokkan seluruh commit update dan run uji terkait ke projek induknya via parentJobId / repo metadata.
  */
 export function getRootProjectName(job: Job, allJobs?: Job[]): string {
-  const lowerName = (job.name || '').toLowerCase();
-  const lowerUrl = (job.config?.baseUrl || '').toLowerCase();
-  const lowerRepo = (job.commitInfo?.repoUrl || '').toLowerCase();
-  const lowerPkg = (job.config?.apkPackageId || job.config?.appId || '').toLowerCase();
-
-  if (
-    (lowerName.includes('al-hikmah') || lowerName.includes('al hikmah') || lowerName.includes('alhikmah')) &&
-    (lowerName.includes('finance') || lowerName.includes('keuangan') || lowerUrl.includes('8000'))
-  ) {
-    return 'Al-Hikmah Finance';
-  }
-
-  if (
-    (lowerName.includes('al-hikmah') || lowerName.includes('al hikmah') || lowerName.includes('alhikmah')) &&
-    (lowerName.includes('school') || lowerName.includes('akademik') || lowerUrl.includes('5173'))
-  ) {
-    return 'Al-Hikmah School Web';
-  }
-
-  if (
-    lowerName.includes('al- hikmah') ||
-    lowerName.includes('al-hikmah') ||
-    lowerName.includes('al hikmah') ||
-    lowerName.includes('alhikmah') ||
-    lowerPkg.includes('alhikmah')
-  ) {
-    return 'Al-Hikmah Digital (Mobile)';
-  }
-
-  if (lowerName.includes('taskia') || lowerUrl.includes('taskia')) {
-    return 'Taskia Digital';
-  }
-  if (lowerName.includes('plane cmms') || lowerUrl.includes('plane') || lowerName.includes('simpul cmms')) {
-    return 'SIMPUL CMMS';
-  }
-  if (lowerName.includes('jamaahku') || lowerUrl.includes('jamaahku')) {
-    return 'Jamaahku Travel Agent';
-  }
-
-  if (
-    lowerName.includes('zannora') ||
-    lowerUrl.includes('zannora') ||
-    lowerRepo.includes('zannora')
-  ) {
-    return 'Zannora';
-  }
-
-  // Jika parentJob ada, telusuri parent
+  // Jika parentJob ada, telusuri parent root-nya terlebih dahulu
   if (job.parentJobId && allJobs) {
     const parent = allJobs.find((p) => p.id === job.parentJobId);
     if (parent && parent.id !== job.id) {
@@ -81,12 +35,22 @@ export function getRootProjectName(job: Job, allJobs?: Job[]): string {
     }
   }
 
-  // Khusus room update tanpa prefix jelas, asosiasikan ke Zannora jika pola commit cocok
-  if (job.kind === 'incremental-room' || job.name?.startsWith('[Update #')) {
-    return 'Zannora';
+  const repoUrl = (job.commitInfo?.repoUrl || job.config?.repositoryUrl || job.config?.frontendTarget?.repositoryUrl || '').trim();
+  if (repoUrl && (job.kind === 'incremental-room' || job.name?.startsWith('[Update #'))) {
+    try {
+      const parsed = new URL(repoUrl);
+      const repoSlug = parsed.pathname.split('/').filter(Boolean).pop()?.replace(/\.git$/i, '');
+      if (repoSlug) return repoSlug;
+    } catch { /* fallback below */ }
   }
 
-  return job.name || 'Project Tanpa Nama';
+  const rawName = (job.name || job.config?.name || '').trim();
+  if (rawName.startsWith('[Update #')) {
+    const stripped = rawName.replace(/^\[Update\s+#[^\]]+\]\s*/i, '').trim();
+    if (stripped) return stripped;
+  }
+
+  return rawName || 'Project Tanpa Nama';
 }
 
 function formatFileDisplay(fullPath: string): string {
@@ -218,27 +182,13 @@ export const RAINBOW_PALETTE: RainbowColorTheme[] = [
   },
 ];
 
-// Mapping eksplisit untuk memastikan tiap projek utama mendapat warna pelangi yang unik & bervariasi
-const PROJECT_RAINBOW_BASE_INDEX: Record<string, number> = {
-  'Al-Hikmah Finance': 3, // Hijau / Emerald (#10B981)
-  'Al-Hikmah School Web': 5, // Nila / Indigo (#6366F1)
-  'Al-Hikmah Digital (Mobile)': 8, // Tosca / Teal (#14B8A6)
-  'Taskia Digital': 0, // Merah / Rose (#F43F5E)
-  'SIMPUL CMMS': 6, // Ungu / Violet (#8B5CF6)
-  'Jamaahku Travel Agent': 2, // Kuning / Gold (#EAB308)
-  'Zannora': 4, // Biru / Sky (#0284C7)
-};
-
 export function getProjectRainbowTheme(projectName: string, indexOffset = 0): RainbowColorTheme {
-  let baseIndex = PROJECT_RAINBOW_BASE_INDEX[projectName];
-  if (baseIndex === undefined) {
-    let hash = 0;
-    for (let i = 0; i < projectName.length; i++) {
-      hash = (hash << 5) - hash + projectName.charCodeAt(i);
-      hash |= 0;
-    }
-    baseIndex = Math.abs(hash);
+  let hash = 0;
+  for (let i = 0; i < projectName.length; i++) {
+    hash = (hash << 5) - hash + projectName.charCodeAt(i);
+    hash |= 0;
   }
+  const baseIndex = Math.abs(hash);
   const finalIndex = (baseIndex + indexOffset) % RAINBOW_PALETTE.length;
   return RAINBOW_PALETTE[finalIndex];
 }
@@ -249,6 +199,7 @@ export function ProjectSwitcher({
   activeJob,
   onSelectJob,
   onNewJob,
+  onNavigateView,
 }: ProjectSwitcherProps) {
   // Modal Card di tengah layar terbuka/tertutup
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -340,7 +291,11 @@ export function ProjectSwitcher({
     const isPassed = !isRunning && (statusUpper === 'PASSED' || statusUpper === 'COMPLETED');
 
     let detail = '';
-    if (job.kind === 'incremental-room' && job.impactReport) {
+    const longShots = job.longScreenshots?.filter((s) => s.status === 'CAPTURED').length ?? 0;
+    const roleVids = job.roleVideos?.filter((v) => v.status === 'RECORDED').length ?? 0;
+    if (longShots > 0 || roleVids > 0) {
+      detail = `${longShots} SS · ${roleVids} Vid`;
+    } else if (job.kind === 'incremental-room' && job.impactReport) {
       const p = job.impactReport.passed ?? 0;
       const t = job.impactReport.totalFlowsTested ?? (job.flows?.length || 0);
       detail = `${p}/${t} flow`;
@@ -551,10 +506,17 @@ export function ProjectSwitcher({
                           setSelectedProjectName(proj.name);
                           setActiveCategoryTab('all');
                         }}
+                        onDoubleClick={() => {
+                          onSelectJob(proj.latestJob.id);
+                          setIsModalOpen(false);
+                        }}
                         role="button"
                         tabIndex={0}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
+                          if (e.key === 'Enter') {
+                            onSelectJob(proj.latestJob.id);
+                            setIsModalOpen(false);
+                          } else if (e.key === ' ') {
                             setSelectedProjectName(proj.name);
                           }
                         }}
@@ -580,7 +542,15 @@ export function ProjectSwitcher({
                               : `${proj.runs.length} Runs`}
                           </span>
                         </div>
-                        <div className="project-nav-arrow">
+                        <div
+                          className="project-nav-arrow"
+                          title={`Buka ${proj.name} (Run Terbaru) langsung`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectJob(proj.latestJob.id);
+                            setIsModalOpen(false);
+                          }}
+                        >
                           <Icon name="arrow" size={11} />
                         </div>
                       </div>
@@ -649,24 +619,53 @@ export function ProjectSwitcher({
                         </div>
                       </div>
 
-                      {/* Search Bar Input */}
-                      <div className="detail-header-search">
-                        <Icon name="search" size={13} />
-                        <input
-                          type="text"
-                          placeholder="Cari..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                        />
-                        {searchQuery && (
-                          <button
-                            type="button"
-                            className="search-clear-btn"
-                            onClick={() => setSearchQuery('')}
-                          >
-                            ✕
-                          </button>
-                        )}
+                      {/* Actions & Search */}
+                      <div className="detail-header-actions-wrap">
+                        <button
+                          type="button"
+                          className="detail-open-project-btn"
+                          onClick={() => {
+                            onSelectJob(selectedProject.latestJob.id);
+                            setIsModalOpen(false);
+                          }}
+                          title={`Buka ${selectedProject.name} (${selectedProject.runs.length > 1 ? 'Run Terakhir' : 'Buka'}) di Workspace`}
+                        >
+                          <Icon name="arrow" size={13} />
+                          <span>Buka Projek Ini &rarr;</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="detail-open-report-btn"
+                          onClick={() => {
+                            onSelectJob(selectedProject.latestJob.id);
+                            onNavigateView?.('reports');
+                            setIsModalOpen(false);
+                          }}
+                          title={`Buka Laporan Final Audit Mutu untuk ${selectedProject.name}`}
+                        >
+                          <Icon name="doc-text" size={13} />
+                          <span>Lihat Final Report &rarr;</span>
+                        </button>
+
+                        <div className="detail-header-search">
+                          <Icon name="search" size={13} />
+                          <input
+                            type="text"
+                            placeholder="Cari..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                          />
+                          {searchQuery && (
+                            <button
+                              type="button"
+                              className="search-clear-btn"
+                              onClick={() => setSearchQuery('')}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -723,7 +722,9 @@ export function ProjectSwitcher({
                             const shaShort = run.commitInfo?.sha ? run.commitInfo.sha.slice(0, 7) : null;
                             const commitMsg = run.commitInfo?.message || run.name;
                             const files = run.commitInfo?.filesChanged || [];
-                            const impactedMod = run.impactReport?.impactedModules?.[0] || (isIncremental ? 'Bandara' : 'FLIGHT');
+                            const impactedMod =
+                              run.impactReport?.impactedModules?.[0] ||
+                              `${(run.config?.platform || 'web').toUpperCase()} COVERAGE`;
 
                             const baseIdx = selectedProject.baselineRuns.findIndex((b) => b.id === run.id);
                             const baseNum = baseIdx !== -1 ? selectedProject.baselineRuns.length - baseIdx : idx + 1;
@@ -807,8 +808,20 @@ export function ProjectSwitcher({
                                   </div>
                                   <div className="meta-line">
                                     <span className="meta-key">File:</span>
-                                    <code className="meta-file-tag" title={files[0] || (isIncremental ? 'AdminAirportController.php' : 'AdminFlightController.php')}>
-                                      {files.length > 0 ? formatFileDisplay(files[0]) : (isIncremental ? 'AdminAirportController.php' : 'AdminFlightController.php')}
+                                    <code
+                                      className="meta-file-tag"
+                                      title={
+                                        files[0] ||
+                                        (run.config?.platform === 'android'
+                                          ? (run.config?.apkPackageId || run.config?.appId || 'Android App Target')
+                                          : (run.config?.baseUrl || 'Web App Target'))
+                                      }
+                                    >
+                                      {files.length > 0
+                                        ? formatFileDisplay(files[0])
+                                        : run.config?.platform === 'android'
+                                        ? (run.config?.apkPackageId || run.config?.appId || 'Android Target')
+                                        : (run.config?.baseUrl || 'Web Target')}
                                     </code>
                                   </div>
                                 </div>
@@ -819,18 +832,34 @@ export function ProjectSwitcher({
                                     <strong className="metric-count">{summary.detail}</strong>
                                     {summary.dateStr && <span className="metric-date"> · {summary.dateStr}</span>}
                                   </div>
-                                  <button
-                                    type="button"
-                                    className="run-card-open-btn"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      onSelectJob(run.id);
-                                      setIsModalOpen(false);
-                                    }}
-                                  >
-                                    <span>Buka Room</span>
-                                    <Icon name="arrow" size={11} />
-                                  </button>
+                                  <div className="run-card-actions-group">
+                                    <button
+                                      type="button"
+                                      className="run-card-report-btn"
+                                      title="Buka Laporan Final untuk run ini"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onSelectJob(run.id);
+                                        onNavigateView?.('reports');
+                                        setIsModalOpen(false);
+                                      }}
+                                    >
+                                      <Icon name="doc-text" size={11} />
+                                      <span>Report</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="run-card-open-btn"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onSelectJob(run.id);
+                                        setIsModalOpen(false);
+                                      }}
+                                    >
+                                      <span>Buka Room</span>
+                                      <Icon name="arrow" size={11} />
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             );

@@ -2,6 +2,13 @@ import { createHash } from 'node:crypto';
 import { lstat, opendir, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
+export type InteractiveFeatureItem = {
+  kind: 'tab' | 'accordion' | 'drawer' | 'filter' | 'modal-trigger' | 'link';
+  label: string;
+  selector?: string;
+  bounds?: { x: number; y: number };
+};
+
 export type InventoryPage = {
   id: string;
   path: string;
@@ -16,6 +23,13 @@ export type InventoryPage = {
   errors?: string[];
   links?: string[];
   network?: Array<{ url: string; status: number; method: string }>;
+  role?: string;
+  scrollHeight?: number;
+  viewportHeight?: number;
+  isScrollable?: boolean;
+  scrollContainerSelector?: string;
+  interactiveFeatures?: InteractiveFeatureItem[];
+  resolvedConcretePath?: string;
 };
 
 type SourceRoute = { path: string; method: string; source: string };
