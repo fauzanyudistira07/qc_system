@@ -44,11 +44,16 @@ async function authenticateForVideo(
   }
 
   if (cred.token) {
+    const parsedBase = new URL(baseUrl);
     try {
       await context.addCookies([
+        { name: 'session-travel-agent', value: cred.token, domain: parsedBase.hostname, path: '/' },
         { name: 'session-travel-agent', value: cred.token, url: baseUrl },
+        { name: 'token', value: cred.token, domain: parsedBase.hostname, path: '/' },
         { name: 'token', value: cred.token, url: baseUrl },
+        { name: 'auth_token', value: cred.token, domain: parsedBase.hostname, path: '/' },
         { name: 'auth_token', value: cred.token, url: baseUrl },
+        { name: 'id_user', value: '36', domain: parsedBase.hostname, path: '/' },
         { name: 'id_user', value: '36', url: baseUrl }
       ]);
     } catch {}
@@ -59,9 +64,11 @@ async function authenticateForVideo(
         localStorage.setItem('auth_token', token);
         document.cookie = `session-travel-agent=${token}; path=/`;
         document.cookie = `token=${token}; path=/`;
+        document.cookie = `auth_token=${token}; path=/`;
         document.cookie = `id_user=36; path=/`;
       } catch {}
     }, { token: cred.token });
+    return { ok: true };
   }
 
   const loginUrl = new URL(cred.loginPath || loginRules?.loginPath || '/login', baseUrl).toString();
@@ -325,7 +332,17 @@ export async function recordWebRoleVideos(options: {
               const finalPath = (() => {
                 try { return new URL(page!.url()).pathname.toLowerCase(); } catch { return ''; }
               })();
-              const redirectedLogin = needsAuth && !step.pagePath.toLowerCase().includes('login') && finalPath.includes('/login');
+              const isTargetPublic =
+                step.pagePath.toLowerCase().includes('login') ||
+                step.pagePath.toLowerCase().includes('landing') ||
+                step.pagePath.toLowerCase().includes('beranda');
+              const redirectedLogin =
+                needsAuth &&
+                !isTargetPublic &&
+                (finalPath.includes('/login') ||
+                 finalPath.includes('/signin') ||
+                 finalPath.includes('/landing') ||
+                 finalPath === '/');
 
               if (status >= 400 || redirectedLogin) {
                 currentPageBlocked = true;

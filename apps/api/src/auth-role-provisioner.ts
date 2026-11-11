@@ -394,10 +394,10 @@ export async function provisionRoleAccounts(options: {
   const publicAccounts: ProvisionedRoleAccount[] = [];
   const backendCheckBase = options.backendUrl || options.frontendUrl || '';
 
-  // Include roles from explicit overrides in the role list
+  // Include roles from explicit overrides in the role list (explicit accounts prioritized first)
   const targetRoles = [...new Set([
-    ...schema.roles,
     ...explicit.map((a) => sanitizeRole(a.role || 'user')).filter(Boolean),
+    ...schema.roles,
   ])];
 
   for (const [idx, role] of targetRoles.entries()) {

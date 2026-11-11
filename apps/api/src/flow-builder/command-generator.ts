@@ -92,7 +92,9 @@ export async function generatePostAccCommandPlan(options: {
       continue;
     }
 
-    const role = page.role || (credentials[0]?.role || 'public');
+    const primaryAuthCred = credentials.find((c) => c.token) || credentials.find((c) => c.source === 'manual') || credentials[0];
+    const isPublic = page.role === 'public' || (!page.role && (page.path.startsWith('/landing-page') || page.path === '/' || page.path.startsWith('/syarat') || page.path.startsWith('/kebijakan') || page.path === '/helptracker' || page.path.includes('login') || page.path.includes('password')));
+    const role = isPublic ? 'public' : (page.role && page.role !== 'public' ? page.role : (primaryAuthCred?.role || 'travel_agent'));
     const arr = byRole.get(role) ?? [];
     arr.push(page);
     byRole.set(role, arr);

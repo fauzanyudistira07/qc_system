@@ -42,11 +42,16 @@ async function authenticateWebContext(
   }
 
   if (cred.token) {
+    const parsedBase = new URL(baseUrl);
     try {
       await context.addCookies([
+        { name: 'session-travel-agent', value: cred.token, domain: parsedBase.hostname, path: '/' },
         { name: 'session-travel-agent', value: cred.token, url: baseUrl },
+        { name: 'token', value: cred.token, domain: parsedBase.hostname, path: '/' },
         { name: 'token', value: cred.token, url: baseUrl },
+        { name: 'auth_token', value: cred.token, domain: parsedBase.hostname, path: '/' },
         { name: 'auth_token', value: cred.token, url: baseUrl },
+        { name: 'id_user', value: '36', domain: parsedBase.hostname, path: '/' },
         { name: 'id_user', value: '36', url: baseUrl }
       ]);
     } catch {}
@@ -57,9 +62,11 @@ async function authenticateWebContext(
         localStorage.setItem('auth_token', token);
         document.cookie = `session-travel-agent=${token}; path=/`;
         document.cookie = `token=${token}; path=/`;
+        document.cookie = `auth_token=${token}; path=/`;
         document.cookie = `id_user=36; path=/`;
       } catch {}
     }, { token: cred.token });
+    return { ok: true };
   }
 
   const loginPath = cred.loginPath || loginRules?.loginPath || '/login';
@@ -276,17 +283,25 @@ export async function captureWebLongScreenshots(options: {
           const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25_000 });
           await page.waitForSelector('main, #app > *, #root > *, body > *', { timeout: 4_000 }).catch(() => {});
           await page.waitForLoadState('networkidle', { timeout: 2_500 }).catch(() => {});
-          await wait(450);
+          await wait(1200);
 
           const status = response?.status() ?? 200;
           const finalUrl = page.url();
           const finalPathname = (() => {
             try { return new URL(finalUrl).pathname.toLowerCase(); } catch { return ''; }
           })();
+          const isTargetPublic =
+            cmd.pagePath.toLowerCase().includes('login') ||
+            cmd.pagePath.toLowerCase().includes('landing') ||
+            cmd.pagePath.toLowerCase().includes('beranda');
+
           const redirectedToLogin =
             needsAuth &&
-            !cmd.pagePath.toLowerCase().includes('login') &&
-            (finalPathname.includes('/login') || finalPathname.includes('/signin'));
+            !isTargetPublic &&
+            (finalPathname.includes('/login') ||
+             finalPathname.includes('/signin') ||
+             finalPathname.includes('/landing') ||
+             finalPathname === '/');
 
           if (status >= 400 || redirectedToLogin) {
             const errName = `${cmd.id}-err.png`;

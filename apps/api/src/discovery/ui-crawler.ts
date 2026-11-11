@@ -267,7 +267,10 @@ export async function crawlUI(
     browser = await launchSafeChromium({ headless: true, timeout: 20_000 });
     check();
 
-    const effectiveAccounts: CrawlAccount[] = accounts.filter(a => Boolean(a.email && (a.password || a.token))).slice(0, 8);
+    const effectiveAccounts: CrawlAccount[] = [
+      ...accounts.filter(a => Boolean(a.token)),
+      ...accounts.filter(a => !a.token && a.email && a.password)
+    ].slice(0, 12);
     const sessions: Array<CrawlAccount | undefined> = effectiveAccounts.length > 0
       ? [...effectiveAccounts, undefined]
       : [undefined];
