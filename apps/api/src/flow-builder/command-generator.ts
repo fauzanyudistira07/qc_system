@@ -117,16 +117,9 @@ export async function generatePostAccCommandPlan(options: {
         const fromLinks = resolveDynamicPathFromLinks(concretePath, allObservedLinks);
         if (fromLinks) {
           concretePath = fromLinks;
-        } else if (GeminiService.isConfigured()) {
-          const aiResolved = await GeminiService.resolveSelfHealingTarget({
-            pagePath: concretePath,
-            reason: 'Dynamic route parameter detected before Batch Long SS & Video',
-            observedLinks: allObservedLinks.slice(0, 20),
-            interactiveTexts: (page.interactiveFeatures || []).map((f) => f.label),
-          }).catch(() => null);
-          if (aiResolved?.resolvedPath && aiResolved.resolvedPath.startsWith('/') && !hasUnresolvedDynamicParam(aiResolved.resolvedPath)) {
-            concretePath = aiResolved.resolvedPath;
-          }
+        } else {
+          // Fallback deterministik instan: ganti :id atau {id} dengan 1 agar rute dinamis tetap tertangkap
+          concretePath = concretePath.replace(/:[a-zA-Z_]\w*/g, '1').replace(/\{[^}]+\}/g, '1');
         }
       }
 
