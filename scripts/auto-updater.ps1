@@ -29,11 +29,24 @@ while ($true) {
             Write-Host "Local : $LocalHash" -ForegroundColor DarkGray
             Write-Host "Remote: $RemoteHash" -ForegroundColor DarkGray
 
+            Write-Host "[$Timestamp] Membersihkan perubahan lokal sementara & sinkronisasi..." -ForegroundColor Cyan
+            git checkout -- . 2>$null
+            git clean -fd -e ".qc-artifacts" 2>$null
+
             Write-Host "[$Timestamp] Melakukan 'git pull origin $Branch'..." -ForegroundColor Cyan
             git pull origin $Branch
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[$Timestamp] [WARNING] git pull bentrok, melakukan reset paksa ke origin/$Branch..." -ForegroundColor Yellow
+                git reset --hard "origin/$Branch"
+            }
 
             Write-Host "[$Timestamp] Memperbarui container Docker (docker compose up -d --build)..." -ForegroundColor Cyan
             docker compose up -d --build
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[$Timestamp] [ERROR] docker compose up gagal! Cek konflik port (4100/4180/6379)." -ForegroundColor Red
+                node "scripts\notify-deploy-wa.mjs" --sha "$RemoteHash" --msg "Gagal start container Docker (konflik port/build error)" --status "failed" 2>$null
+                continue
+            }
 
             Write-Host "[$Timestamp] SUKSES! Server QC Maestro berhasil diupdate & siap melayani." -ForegroundColor Green
             Write-Host "----------------------------------------------------------" -ForegroundColor DarkGray

@@ -51,8 +51,13 @@ while ($true) {
 
             # 1. Pull update
             Write-Host "`n[1/3] Melakukan git pull origin main..." -ForegroundColor Cyan
+            git checkout -- . 2>$null
             $pullOutput = git pull origin main 2>&1 | Out-String
             Write-Host $pullOutput
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[WARNING] git pull konflik, mereset working tree ke origin/main..." -ForegroundColor Yellow
+                git reset --hard origin/main 2>&1 | Out-Null
+            }
 
             # Simpan state agar tidak looping
             $lastDeployedSha = $remoteSha
