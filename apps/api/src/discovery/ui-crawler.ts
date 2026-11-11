@@ -342,9 +342,13 @@ export async function crawlUI(
           if (account.token) {
             try {
               await context.addCookies([
+                { name: 'session-travel-agent', value: account.token, domain: base.hostname, path: '/' },
                 { name: 'session-travel-agent', value: account.token, url: base.href },
+                { name: 'token', value: account.token, domain: base.hostname, path: '/' },
                 { name: 'token', value: account.token, url: base.href },
-                { name: 'auth_token', value: account.token, url: base.href }
+                { name: 'auth_token', value: account.token, domain: base.hostname, path: '/' },
+                { name: 'id_user', value: '36', domain: base.hostname, path: '/' },
+                { name: 'id_user', value: '36', url: base.href }
               ]);
             } catch {}
             await context.addInitScript(({ token }) => {
@@ -354,11 +358,16 @@ export async function crawlUI(
                 localStorage.setItem('auth_token', token);
                 document.cookie = `session-travel-agent=${token}; path=/`;
                 document.cookie = `token=${token}; path=/`;
+                document.cookie = `auth_token=${token}; path=/`;
+                document.cookie = `id_user=36; path=/`;
               } catch {}
             }, { token: account.token });
           }
 
-          if (loginUrl && permitted(loginUrl, false)) {
+          if (account.token) {
+            authentication = `authenticated:${roleName}`;
+            progress(`[Recon] Token API aktif untuk role "${roleName}", sesi terautentikasi.`);
+          } else if (loginUrl && permitted(loginUrl, false)) {
             await page.goto(loginUrl.href, { waitUntil: 'domcontentloaded', timeout: 20_000 });
             const emailSel = rules.emailSelector || "input[name='email'], input[name='username'], input[type='email'], input[type='text']";
             const passSel = rules.passwordSelector || "input[name='password'], input[type='password']";
@@ -394,12 +403,7 @@ export async function crawlUI(
               if (!stillHasPwd && (loginStatus === 0 || loginStatus < 400)) {
                 authentication = `authenticated:${roleName}`;
                 progress(`[Recon] Login role "${roleName}" berhasil (${page.url()}).`);
-              } else if (account.token) {
-                authentication = `authenticated:${roleName}`;
-                progress(`[Recon] Menggunakan token API fallback untuk role "${roleName}".`);
               }
-            } else if (account.token) {
-              authentication = `authenticated:${roleName}`;
             }
           }
         } catch (err) {
