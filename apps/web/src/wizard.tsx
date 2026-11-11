@@ -3,7 +3,7 @@ import { errorText, send, uploadApkFile } from './api';
 import { Config, initialConfig, Job, SystemStatus, ENABLE_MOBILE_SUPPORT, ServiceTargetConfig } from './types';
 import { Badge, Field, Icon, Notice, Panel } from './ui';
 
-const steps = ['Target & Backend', 'Env, Akun & DB', 'Review & Jalankan'];
+const steps = ['Target & Backend', 'Akun & Data Uji', 'Review & Jalankan'];
 const lines = (text: string) => text.split('\n').map(s => s.trim()).filter(Boolean);
 
 function pickHeadlessEmulatorId(system?: SystemStatus | null, preferred?: string): string {
@@ -604,10 +604,10 @@ export function Wizard({
           const isCurrent = step === i;
           const isDone = step > i;
           const statusText = isCurrent
-            ? 'Sedang diisi'
+            ? 'Sedang dikonfigurasi'
             : isDone
-            ? 'Selesai'
-            : 'Terkunci sampai langkah sebelumnya valid';
+            ? 'Selesai divalidasi'
+            : 'Menunggu langkah sebelumnya';
 
           return (
             <li key={name} className={isCurrent ? 'current' : isDone ? 'done' : 'locked'}>
@@ -619,10 +619,10 @@ export function Wizard({
                 className={`step-btn ${isCurrent ? 'active' : ''} ${isDone ? 'done' : ''}`}
               >
                 <span className="step-badge">
-                  {isDone ? <Icon name="check" size={14} /> : i + 1}
+                  {isDone ? <Icon name="check" size={14} /> : `0${i + 1}`}
                 </span>
                 <div className="step-content">
-                  <div className="step-kicker">Step {i + 1}</div>
+                  <div className="step-kicker">LANGKAH 0{i + 1}</div>
                   <div className="step-title">{name}</div>
                   <div className="step-status">{statusText}</div>
                 </div>
@@ -635,7 +635,13 @@ export function Wizard({
       <div className="wizard-layout">
         <Panel className="wizard-main">
           <div className="wizard-intro">
-            <span className="eyebrow">LANGKAH 0{step + 1} / 03</span>
+            <span className="eyebrow">
+              LANGKAH 0{step + 1} / 03 • {[
+                'TARGET RUNTIME & SERVICE',
+                'AKUN LOGIN & FIXTURE DATABASE',
+                'QUALITY AUDIT & RUN LAUNCHER'
+              ][step]}
+            </span>
             <h2>
               {[
                 'Target Aplikasi & Backend Service',

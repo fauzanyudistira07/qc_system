@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # QC MAESTRO - DEDICATED DOMAIN TUNNEL: https://timbang.tiraa.my.id
 # ==============================================================================
 # Skrip ini menjalankan Cloudflare Named Tunnel resmi untuk QC Maestro (Timbang)
@@ -74,3 +74,4 @@ Write-Host "🌐 Domain https://timbang.tiraa.my.id sedang diaktifkan..." -Foreg
 Write-Host "Tekan [Ctrl + C] untuk menghentikan tunnel.`n" -ForegroundColor DarkGray
 
 & $Binary tunnel --config "$ConfigFile" --cred-file "$CredFile" run a5d738a8-82b1-4304-a7ca-d208a308c5ef
+

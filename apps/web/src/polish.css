@@ -1880,16 +1880,16 @@
   max-width: 1060px !important;
   box-sizing: border-box !important;
   padding: 34px 40px !important;
-  background: var(--bg-panel, #0D131F) !important;
-  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.08)) !important;
+  background: #111317 !important;
+  border: 1px solid #23272E !important;
   border-radius: 14px !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45) !important;
 }
 
 .wizard-intro {
   margin-bottom: 24px !important;
   padding-bottom: 20px !important;
-  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08)) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
 .wizard-intro .eyebrow {
@@ -1897,24 +1897,25 @@
   font-size: 11px !important;
   font-family: var(--font-mono, "JetBrains Mono", monospace) !important;
   font-weight: 800 !important;
-  letter-spacing: 0.1em !important;
-  color: var(--accent-neon, #B5F934) !important;
-  margin-bottom: 6px !important;
+  letter-spacing: 0.12em !important;
+  color: #B5F934 !important;
+  margin-bottom: 8px !important;
   text-transform: uppercase !important;
 }
 
 .wizard-intro h2 {
-  font-size: 22px !important;
+  font-size: 24px !important;
   font-weight: 800 !important;
   color: #FFFFFF !important;
-  letter-spacing: -0.02em !important;
-  margin: 0 0 6px 0 !important;
+  letter-spacing: -0.025em !important;
+  margin: 0 0 8px 0 !important;
+  line-height: 1.25 !important;
 }
 
 .wizard-intro p {
-  font-size: 13.5px !important;
-  color: var(--text-secondary, #94A3B8) !important;
-  line-height: 1.5 !important;
+  font-size: 14px !important;
+  color: #94A3B8 !important;
+  line-height: 1.6 !important;
   margin: 0 !important;
 }
 
@@ -1926,7 +1927,7 @@
   box-sizing: border-box !important;
   display: grid !important;
   grid-template-columns: repeat(3, 1fr) !important;
-  gap: 16px !important;
+  gap: 14px !important;
   background: transparent !important;
   border: none !important;
   padding: 0 !important;
@@ -1949,14 +1950,14 @@
   align-items: center !important;
   justify-content: flex-start !important;
   gap: 12px !important;
-  padding: 10px 14px !important;
-  border-radius: 8px !important;
-  background: #171A1F !important;
-  border: 0.8px dashed rgba(255, 255, 255, 0.16) !important;
-  color: #A3A9B4 !important;
+  padding: 12px 16px !important;
+  border-radius: 10px !important;
+  background: #111317 !important;
+  border: 1px solid #23272E !important;
+  color: #94A3B8 !important;
   text-align: left !important;
   cursor: pointer !important;
-  opacity: 0.72 !important;
+  opacity: 0.88 !important;
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
   box-sizing: border-box !important;
 }
@@ -1964,8 +1965,9 @@
 .wizard-steps button:hover:not(:disabled),
 .wizard-steps .step-btn:hover:not(:disabled) {
   opacity: 1 !important;
-  border-color: rgba(255, 255, 255, 0.32) !important;
-  background: #1C2027 !important;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+  background: #161B22 !important;
+  color: #FFFFFF !important;
   transform: translateY(-1px) !important;
 }
 
@@ -1977,6 +1979,7 @@
 .wizard-steps button:disabled,
 .wizard-steps .step-btn:disabled {
   cursor: not-allowed !important;
+  opacity: 0.55 !important;
   transform: none !important;
 }
 
@@ -1984,23 +1987,23 @@
 .wizard-steps li.current button,
 .wizard-steps button[aria-current="step"],
 .wizard-steps .step-btn.active {
-  background: rgba(181, 249, 52, 0.08) !important;
-  border: 1px solid #B5F934 !important;
+  background: rgba(181, 249, 52, 0.06) !important;
+  border: 1.5px solid #B5F934 !important;
   color: #FFFFFF !important;
   opacity: 1 !important;
-  box-shadow: 0 0 0 1px rgba(181, 249, 52, 0.35), 0 8px 24px -8px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  box-shadow: 0 0 20px rgba(181, 249, 52, 0.18), inset 0 1px 0 rgba(181, 249, 52, 0.12) !important;
 }
 
 /* Completed Step */
 .wizard-steps li.done button,
 .wizard-steps .step-btn.done {
-  background: rgba(34, 197, 94, 0.08) !important;
-  border: 1px solid rgba(34, 197, 94, 0.45) !important;
-  color: #F1F5F9 !important;
+  background: rgba(34, 197, 94, 0.06) !important;
+  border: 1px solid rgba(34, 197, 94, 0.4) !important;
+  color: #F8FAFC !important;
   opacity: 0.95 !important;
 }
 
-/* Step Badge (Circle) */
+/* Step Badge */
 .wizard-steps button span,
 .wizard-steps .step-badge {
   display: inline-flex !important;
@@ -2009,13 +2012,13 @@
   width: 24px !important;
   height: 24px !important;
   min-width: 24px !important;
-  border-radius: 9999px !important;
+  border-radius: 6px !important;
   font-size: 11px !important;
   font-family: var(--font-mono, "JetBrains Mono", monospace) !important;
-  font-weight: 700 !important;
-  background: rgba(255, 255, 255, 0.04) !important;
-  color: #A3A9B4 !important;
-  border: 0.8px solid rgba(255, 255, 255, 0.2) !important;
+  font-weight: 800 !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #64748B !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
   flex-shrink: 0 !important;
   transition: all 0.16s ease !important;
 }

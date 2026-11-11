@@ -21,3 +21,4 @@ echo "   - Profesia (Laravel)   : Port 8000 -> https://profesia.tiraa.my.id"
 echo "================================================================"
 
 cloudflared tunnel --config "$CONFIG" --cred-file "$CRED" run a5d738a8-82b1-4304-a7ca-d208a308c5ef
+
