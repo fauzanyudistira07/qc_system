@@ -191,49 +191,33 @@ export class DiscoveryService {
     }
   }
 
-  public async persist(): Promise<void> {
-    try {
-      await mkdir(this.artifactRoot, { recursive: true });
-      const jobsFile = path.join(this.artifactRoot, 'discovery-jobs.json');
-      const jobsTmp = `${jobsFile}.tmp.${Date.now()}`;
-      await writeFile(jobsTmp, JSON.stringify(Array.from(this.jobs.values()), null, 2), 'utf8');
-      await rename(jobsTmp, jobsFile);
+  private persistTimer?: NodeJS.Timeout;
 
-      const uploadsFile = path.join(this.artifactRoot, 'discovery-uploads.json');
-      const uploadsTmp = `${uploadsFile}.tmp.${Date.now()}`;
-      await writeFile(uploadsTmp, JSON.stringify(Array.from(this.uploads.values()), null, 2), 'utf8');
-      await rename(uploadsTmp, uploadsFile);
-    } catch { /* ignore */ }
+  public async persist(): Promise<void> {
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(async () => {
+      this.persistTimer = undefined;
+      try {
+        await mkdir(this.artifactRoot, { recursive: true });
+        const jobsFile = path.join(this.artifactRoot, 'discovery-jobs.json');
+        const jobsTmp = `${jobsFile}.tmp.${Date.now()}`;
+        await writeFile(jobsTmp, JSON.stringify(Array.from(this.jobs.values())), 'utf8');
+        await rename(jobsTmp, jobsFile);
+
+        const uploadsFile = path.join(this.artifactRoot, 'discovery-uploads.json');
+        const uploadsTmp = `${uploadsFile}.tmp.${Date.now()}`;
+        await writeFile(uploadsTmp, JSON.stringify(Array.from(this.uploads.values())), 'utf8');
+        await rename(uploadsTmp, uploadsFile);
+      } catch { /* ignore */ }
+    }, 600);
   }
 
   public listJobs(): DiscoveryJob[] {
-    try {
-      const jobsFile = path.join(this.artifactRoot, 'discovery-jobs.json');
-      if (existsSync(jobsFile)) {
-        const diskJobs = JSON.parse(readFileSync(jobsFile, 'utf8')) as DiscoveryJob[];
-        for (const d of diskJobs) {
-          this.jobs.set(d.id, d);
-        }
-      }
-    } catch {}
     return Array.from(this.jobs.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   public getJob(id: string): DiscoveryJob | undefined {
-    const mem = this.jobs.get(id);
-    if (mem) return mem;
-    try {
-      const jobsFile = path.join(this.artifactRoot, 'discovery-jobs.json');
-      if (existsSync(jobsFile)) {
-        const diskJobs = JSON.parse(readFileSync(jobsFile, 'utf8')) as DiscoveryJob[];
-        const found = diskJobs.find((d) => d.id === id);
-        if (found) {
-          this.jobs.set(id, found);
-          return found;
-        }
-      }
-    } catch {}
-    return undefined;
+    return this.jobs.get(id);
   }
 
   public updateFindingStatus(id: string, findingKey: string, status: FindingWorkflowStatus): DiscoveryJob {
@@ -2185,6 +2169,7 @@ export class DiscoveryService {
       job.phase = 'PROVISIONING_ACCOUNTS';
       job.progress = 48;
       this.addLog(job, 'discovery', '▶ [Stage 4/6] Mendeteksi role aplikasi & menyiapkan kredensial runtime (tanpa hardcode)...');
+      console.log(`[DEBUG Stage 4/6] Memulai provisionRoleAccounts untuk job ${job.id}`);
       const provisioned = await provisionRoleAccounts({
         sourceDir: scanTargetDir || undefined,
         backendUrl: configuredBackendUrl || (!isMobile ? targetBaseUrl : undefined),
@@ -2194,6 +2179,7 @@ export class DiscoveryService {
         backendContainer: managedBackendContainer,
         secretsOut: jobSecretSet,
       });
+      console.log(`[DEBUG Stage 4/6] provisionRoleAccounts selesai: ${provisioned.runtimeCredentials.size} roles`);
       this.runtimeRoleCredentials.set(job.id, provisioned.runtimeCredentials);
       job.provisionedAccounts = provisioned.publicAccounts;
       this.addLog(job, 'discovery', `✓ Terdeteksi ${provisioned.runtimeCredentials.size} role akun (${provisioned.publicAccounts.map((a) => `${a.role}:${a.source}`).join(', ') || 'public only'}).`);
