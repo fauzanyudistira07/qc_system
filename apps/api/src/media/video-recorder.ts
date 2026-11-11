@@ -44,11 +44,22 @@ async function authenticateForVideo(
   }
 
   if (cred.token) {
+    try {
+      await context.addCookies([
+        { name: 'session-travel-agent', value: cred.token, url: baseUrl },
+        { name: 'token', value: cred.token, url: baseUrl },
+        { name: 'auth_token', value: cred.token, url: baseUrl },
+        { name: 'id_user', value: '36', url: baseUrl }
+      ]);
+    } catch {}
     await context.addInitScript(({ token }) => {
       try {
         localStorage.setItem('token', token);
         localStorage.setItem('access_token', token);
         localStorage.setItem('auth_token', token);
+        document.cookie = `session-travel-agent=${token}; path=/`;
+        document.cookie = `token=${token}; path=/`;
+        document.cookie = `id_user=36; path=/`;
       } catch {}
     }, { token: cred.token });
   }
@@ -62,7 +73,15 @@ async function authenticateForVideo(
     const passSel = loginRules?.passwordSelector || "input[name='password'], input[type='password']";
     const submitSel = loginRules?.submitSelector || "button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Masuk')";
 
-    const hasEmail = await page.locator(emailSel).first().isVisible({ timeout: 2000 }).catch(() => false);
+    let hasEmail = await page.locator(emailSel).first().isVisible({ timeout: 2000 }).catch(() => false);
+    if (!hasEmail) {
+      const openModalBtn = page.locator("button:has-text('Masuk'), button:has-text('Login'), a:has-text('Masuk'), .btn-login").first();
+      if (await openModalBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await openModalBtn.click().catch(() => {});
+        await wait(500);
+        hasEmail = await page.locator(emailSel).first().isVisible({ timeout: 2000 }).catch(() => false);
+      }
+    }
     const hasPass = await page.locator(passSel).first().isVisible({ timeout: 2000 }).catch(() => false);
 
     if (hasEmail && hasPass) {
