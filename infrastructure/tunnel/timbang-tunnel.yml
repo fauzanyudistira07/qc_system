@@ -1,0 +1,8 @@
+tunnel: a5d738a8-82b1-4304-a7ca-d208a308c5ef
+
+ingress:
+  - hostname: timbang.tiraa.my.id
+    service: http://127.0.0.1:4180
+    originRequest:
+      httpHostHeader: localhost:4180
+  - service: http_status:404
