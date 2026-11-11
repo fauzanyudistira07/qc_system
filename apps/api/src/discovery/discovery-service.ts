@@ -2169,7 +2169,6 @@ export class DiscoveryService {
       job.phase = 'PROVISIONING_ACCOUNTS';
       job.progress = 48;
       this.addLog(job, 'discovery', '▶ [Stage 4/6] Mendeteksi role aplikasi & menyiapkan kredensial runtime (tanpa hardcode)...');
-      console.log(`[DEBUG Stage 4/6] Memulai provisionRoleAccounts untuk job ${job.id}`);
       const provisioned = await provisionRoleAccounts({
         sourceDir: scanTargetDir || undefined,
         backendUrl: configuredBackendUrl || (!isMobile ? targetBaseUrl : undefined),
@@ -2179,7 +2178,6 @@ export class DiscoveryService {
         backendContainer: managedBackendContainer,
         secretsOut: jobSecretSet,
       });
-      console.log(`[DEBUG Stage 4/6] provisionRoleAccounts selesai: ${provisioned.runtimeCredentials.size} roles`);
       this.runtimeRoleCredentials.set(job.id, provisioned.runtimeCredentials);
       job.provisionedAccounts = provisioned.publicAccounts;
       this.addLog(job, 'discovery', `✓ Terdeteksi ${provisioned.runtimeCredentials.size} role akun (${provisioned.publicAccounts.map((a) => `${a.role}:${a.source}`).join(', ') || 'public only'}).`);
