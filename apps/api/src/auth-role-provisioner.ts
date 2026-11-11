@@ -220,6 +220,8 @@ export async function discoverAuthSchema(sourceDir: string, fallbackToDefaultUse
   const loginEndpoints = [...new Set([
     ...scanned.loginEndpoints,
     ...(aiSchema?.authEndpoints || []),
+    '/api/v1/web/auth/login',
+    '/api/v1/auth/login',
     '/api/v1/login',
     '/api/login',
     '/api/auth/login',
@@ -383,7 +385,7 @@ export async function provisionRoleAccounts(options: {
         roles: explicit.length > 0 ? [] : ['user'],
         identifierField: 'email',
         loginPath: '/login',
-        loginEndpoints: ['/api/v1/login', '/api/login', '/login'],
+        loginEndpoints: ['/api/v1/web/auth/login', '/api/v1/auth/login', '/api/v1/login', '/api/login', '/login'],
         registerEndpoints: ['/api/v1/register', '/api/register', '/register'],
         seederAccounts: [],
       };

@@ -300,7 +300,7 @@ export async function crawlUI(
         if (isSubresource || rType === 'fetch' || rType === 'xhr') {
           try {
             const parsed = new URL(rawUrl);
-            if (parsed.origin === base.origin || parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
+            if (parsed.origin === base.origin || parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' || parsed.hostname === base.hostname) {
               await route.continue();
               return;
             }
@@ -319,34 +319,54 @@ export async function crawlUI(
         loginActive = true;
         try {
           if (account.token) {
+            try {
+              await context.addCookies([
+                { name: 'session-travel-agent', value: account.token, url: base.href },
+                { name: 'token', value: account.token, url: base.href },
+                { name: 'auth_token', value: account.token, url: base.href }
+              ]);
+            } catch {}
             await context.addInitScript(({ token }) => {
               try {
                 localStorage.setItem('token', token);
                 localStorage.setItem('access_token', token);
                 localStorage.setItem('auth_token', token);
+                document.cookie = `session-travel-agent=${token}; path=/`;
+                document.cookie = `token=${token}; path=/`;
               } catch {}
             }, { token: account.token });
           }
 
           if (loginUrl && permitted(loginUrl, false)) {
-            await page.goto(loginUrl.href, { waitUntil: 'domcontentloaded' });
+            await page.goto(loginUrl.href, { waitUntil: 'domcontentloaded', timeout: 20_000 });
             const emailSel = rules.emailSelector || "input[name='email'], input[name='username'], input[type='email'], input[type='text']";
             const passSel = rules.passwordSelector || "input[name='password'], input[type='password']";
             const submitSel = rules.submitSelector || "button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Masuk')";
 
-            const hasEmailInput = await page.locator(emailSel).first().isVisible({ timeout: 3000 }).catch(() => false);
-            const hasPassInput = await page.locator(passSel).first().isVisible({ timeout: 2000 }).catch(() => false);
+            let hasEmailInput = await page.locator(emailSel).first().isVisible({ timeout: 2500 }).catch(() => false);
+            let hasPassInput = await page.locator(passSel).first().isVisible({ timeout: 1500 }).catch(() => false);
+
+            // Jika input login berada dalam modal/dialog, coba klik tombol pembuka login
+            if (!hasEmailInput) {
+              const modalOpener = page.locator("button:has-text('Masuk'), button:has-text('Login'), a:has-text('Masuk'), a:has-text('Login'), [data-login]").first();
+              if (await modalOpener.isVisible({ timeout: 1500 }).catch(() => false)) {
+                await modalOpener.click().catch(() => {});
+                await page.waitForTimeout(600);
+                hasEmailInput = await page.locator(emailSel).first().isVisible({ timeout: 2500 }).catch(() => false);
+                hasPassInput = await page.locator(passSel).first().isVisible({ timeout: 1500 }).catch(() => false);
+              }
+            }
 
             if (hasEmailInput && hasPassInput) {
-              await page.locator(emailSel).first().fill(account.email);
-              await page.locator(passSel).first().fill(account.password);
-              await page.locator(submitSel).first().click({ noWaitAfter: true });
+              await page.locator(emailSel).first().fill(account.email, { timeout: 4000 });
+              await page.locator(passSel).first().fill(account.password, { timeout: 4000 });
+              await page.locator(submitSel).first().click({ noWaitAfter: true, timeout: 4000 }).catch(() => {});
 
               await page.waitForURL(url => {
                 const u = url.pathname.replace(/\/$/, '');
                 const s = successUrl?.pathname.replace(/\/$/, '') || '';
                 return (successUrl && url.href === successUrl.href) || (s.length > 1 && u.includes(s)) || !url.pathname.includes('login');
-              }, { waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
+              }, { waitUntil: 'domcontentloaded', timeout: 8_000 }).catch(() => {});
               await page.waitForTimeout(500);
 
               const stillHasPwd = await page.locator(passSel).first().isVisible().catch(() => false);
