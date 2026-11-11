@@ -26,6 +26,32 @@ export type WebRunResult = {
 type Target = { strategy: string; value: string; role?: string; name?: string; exact?: boolean };
 const activePages = new Map<string, Page>();
 
+let playwrightAutoInstallPromise: Promise<void> | null = null;
+
+export async function launchSafeChromium(options?: Parameters<typeof chromium.launch>[0]): Promise<Browser> {
+  try {
+    return await chromium.launch(options);
+  } catch (err) {
+    const msg = String(err);
+    if (msg.includes("doesn't exist") || msg.includes('npx playwright install') || msg.includes('Executable')) {
+      if (!playwrightAutoInstallPromise) {
+        playwrightAutoInstallPromise = (async () => {
+          try {
+            const { execSync } = await import('node:child_process');
+            execSync('npx playwright install chromium', { stdio: 'inherit', timeout: 300_000 });
+          } catch (e) {
+            playwrightAutoInstallPromise = null;
+            throw e;
+          }
+        })();
+      }
+      await playwrightAutoInstallPromise;
+      return await chromium.launch(options);
+    }
+    throw err;
+  }
+}
+
 async function closeWithTimeout(action: Promise<void> | undefined, timeoutMs = 8_000): Promise<void> {
   if (!action) return;
   await Promise.race([
@@ -234,7 +260,7 @@ export type WebRecordingSession = {
 
 export async function createWebRecordingSession(baseUrl: string, rawVideoDir: string): Promise<WebRecordingSession> {
   await mkdir(rawVideoDir, { recursive: true });
-  const browser = await chromium.launch({
+  const browser = await launchSafeChromium({
     headless: true,
     args: [
       '--no-sandbox',

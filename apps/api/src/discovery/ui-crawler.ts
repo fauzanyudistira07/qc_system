@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { launchSafeChromium } from '../playwright-adapter.ts';
 import type { InteractiveFeatureItem, InventoryPage } from './source-scanner.ts';
 
 type CrawlRules = {
@@ -245,7 +246,7 @@ export async function crawlUI(
   const check = () => { signal.throwIfAborted(); };
 
   try {
-    browser = await chromium.launch({ headless: true, timeout: 20_000 });
+    browser = await launchSafeChromium({ headless: true, timeout: 20_000 });
     check();
 
     const effectiveAccounts: CrawlAccount[] = accounts.filter(a => Boolean(a.email && (a.password || a.token))).slice(0, 8);

@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { copyFile, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { launchSafeChromium } from '../playwright-adapter.ts';
 import type {
   BatchCommandPlan,
   BatchVideoFeatureStep,
@@ -229,7 +230,7 @@ export async function recordWebRoleVideos(options: {
 
   let browser: Browser | undefined;
   try {
-    browser = await chromium.launch({
+    browser = await launchSafeChromium({
       headless: true,
       timeout: 25_000,
       args: [

@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { launchSafeChromium } from '../playwright-adapter.ts';
 import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { DiscoveryJob } from '../discovery/types.ts';
@@ -939,7 +940,7 @@ export async function generatePdfReport(
   const tempFile = path.resolve(tempDir, `pdf-render-${job.id.slice(0, 8)}-${Date.now()}.html`);
   await writeFile(tempFile, html, 'utf8');
 
-  const browser = await chromium.launch({
+  const browser = await launchSafeChromium({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
   });

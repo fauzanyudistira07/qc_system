@@ -64,8 +64,9 @@ while ($true) {
             Set-Content -Path $StateFile -Value $remoteSha -Force
 
             if ($LASTEXITCODE -eq 0 -and $pullOutput -notmatch "Already up to date.") {
-                # 2. Pastikan kontainer infrastruktur tetap sehat
-                Write-Host "`n[2/3] Memastikan kontainer database & cache aktif..." -ForegroundColor Cyan
+                # 2. Pastikan kontainer infrastruktur tetap sehat & browser Playwright siap
+                Write-Host "`n[2/3] Memastikan kontainer database, cache, & browser Playwright aktif..." -ForegroundColor Cyan
+                npx playwright install chromium 2>$null
                 docker compose -f infrastructure\compose\docker-compose.yml up -d 2>$null
                 Write-Host "`n[SUCCESS] Server QC Maestro berhasil diperbarui ke commit terbaru ($remoteSha)!" -ForegroundColor Green
 

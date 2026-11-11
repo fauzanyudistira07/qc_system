@@ -40,6 +40,9 @@ while ($true) {
                 git reset --hard "origin/$Branch"
             }
 
+            Write-Host "[$Timestamp] Memastikan runtime browser Playwright terpasang..." -ForegroundColor Cyan
+            npx playwright install chromium 2>$null
+
             Write-Host "[$Timestamp] Memperbarui container Docker (docker compose up -d --build)..." -ForegroundColor Cyan
             docker compose up -d --build
             if ($LASTEXITCODE -ne 0) {

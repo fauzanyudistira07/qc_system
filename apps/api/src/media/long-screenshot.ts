@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { launchSafeChromium } from '../playwright-adapter.ts';
 import type {
   BatchCommandPlan,
   BatchLongScreenshotCommand,
@@ -155,7 +156,7 @@ export async function captureWebLongScreenshots(options: {
 
   let browser: Browser | undefined;
   try {
-    browser = await chromium.launch({
+    browser = await launchSafeChromium({
       headless: true,
       timeout: 25_000,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
