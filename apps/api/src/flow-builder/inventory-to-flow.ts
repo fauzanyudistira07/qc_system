@@ -81,6 +81,27 @@ function buildGenericAndroidFlows(inventory: Inventory, config: DiscoveryConfig)
   return flows;
 }
 
+function getFeatureModuleName(path: string): string {
+  const clean = path.replace(/^\/+/, '').split('?')[0];
+  const parts = clean.split('/');
+  if (!clean || parts[0] === 'landing-page' || parts[0] === 'beranda' || parts[0] === '') return 'Portal Publik & Beranda';
+  if (parts[0] === 'dashboard' || parts[0] === 'profil') return 'Dashboard & Monitoring Profil';
+  if (parts[0] === 'master') {
+    const sub = parts[1] || 'umum';
+    if (sub.includes('batch')) return 'Master Batch & Keberangkatan';
+    if (sub.includes('jamaah')) return 'Master Data Jamaah';
+    if (sub.includes('pengurus')) return 'Pengurus & Tour Leader';
+    if (sub.includes('hotel')) return 'Akomodasi Hotel & Penginapan';
+    if (sub.includes('doa')) return 'Panduan Doa & Manasik';
+    if (sub.includes('gps') || sub.includes('smartwatch')) return 'Integrasi IoT & Pelacak GPS';
+    if (sub.includes('feedback')) return 'Evaluasi & Feedback Layanan';
+    return `Master Data ${sub.charAt(0).toUpperCase() + sub.slice(1)}`;
+  }
+  if (parts[0] === 'pesan') return 'Pusat Komunikasi & Pesan';
+  if (parts[0] === 'transaksi' || parts[0] === 'keuangan') return 'Keuangan & Pembayaran';
+  return parts[0].charAt(0).toUpperCase() + parts[0].slice(1).replace(/[-_]/g, ' ');
+}
+
 export function buildFlows(inventory: Inventory, config: DiscoveryConfig): GeneratedFlow[] {
   if (config.platform === 'android') {
     return buildGenericAndroidFlows(inventory, config);
@@ -120,7 +141,44 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
     { id: 'login-success', action: 'assertUrl', value: successUrl },
   ] : [];
 
-  // Group observed & candidate pages by role generically
+  // 1. Group observed & candidate pages by functional business module for modular execution
+  const moduleGroups = new Map<string, typeof inventory.pages>();
+  for (const page of inventory.pages) {
+    if (/\/api(?:\/|$)/i.test(page.path)) continue;
+    const mod = getFeatureModuleName(page.path);
+    const list = moduleGroups.get(mod) ?? [];
+    list.push(page);
+    moduleGroups.set(mod, list);
+  }
+
+  for (const [modName, pages] of moduleGroups.entries()) {
+    const isPublic = pages.every((p) => p.role === 'public' || (!p.role && p.path.includes('landing-page')));
+    const steps: FlowStep[] = !isPublic ? [...loginSteps()] : [];
+    for (const [idx, page] of pages.slice(0, 20).entries()) {
+      const targetPath = (page.resolvedConcretePath || page.path).replace(/:[a-zA-Z_]\w*/g, '1').replace(/\{[^}]+\}/g, '1');
+      const slug = targetPath.replace(/[^a-z0-9]/gi, '-').replace(/^-+|-+$/g, '') || `page-${idx}`;
+      steps.push({ id: `mod-${idx}-open`, action: 'open', url: targetPath });
+      steps.push({ id: `mod-${idx}-body`, action: 'assertVisible', target: { selector: 'body' } });
+      for (const [fIdx, feat] of (page.interactiveFeatures || []).slice(0, 5).entries()) {
+        if (feat.selector) {
+          steps.push({ id: `mod-${idx}-feat-${fIdx}`, action: 'click', target: { selector: feat.selector } });
+        }
+      }
+      steps.push({ id: `mod-${idx}-snap`, action: 'screenshot', name: `${slug}__full` });
+    }
+    if (steps.length > 0) {
+      const modSlug = modName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+      flows.push({
+        id: `web-mod-${modSlug}`,
+        name: `Alur Modul · ${modName} (${pages.length} layar)`,
+        source: toSource(`Alur Modul · ${modName}`, steps),
+        platform: 'web',
+        status: 'READY',
+      });
+    }
+  }
+
+  // 2. Comprehensive role-wide coverage suites
   const roleGroups = new Map<string, typeof inventory.pages>();
   for (const page of inventory.pages) {
     if (/\/api(?:\/|$)/i.test(page.path)) continue;
@@ -147,7 +205,7 @@ export function buildFlows(inventory: Inventory, config: DiscoveryConfig): Gener
     if (steps.length > 0) {
       flows.push({
         id: `web-role-${role}`,
-        name: `Audit Cakupan Halaman Role ${role} (${pages.length} halaman)`,
+        name: `Audit Cakupan Penuh Role ${role} (${pages.length} halaman)`,
         source: toSource(`Audit Role ${role}`, steps),
         platform: 'web',
         status: 'READY',

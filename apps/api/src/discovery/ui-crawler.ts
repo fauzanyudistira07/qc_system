@@ -214,6 +214,24 @@ export async function crawlUI(
   const loginUrl = rules.loginPath ? resolve(rules.loginPath) : resolve('/login');
   const successUrl = rules.successUrl ? resolve(rules.successUrl) : undefined;
   const candidates = pages.slice(0, 5_000).map(p => ({ ...p, elements: p.elements.map(e => ({ ...e })), errors: p.errors ? [...p.errors] : undefined }));
+
+  // Bila candidates kosong (mode remote / existing-target tanpa static source), gunakan includePaths sebagai seed
+  if (candidates.length === 0 && rules.includePaths?.length) {
+    for (const p of rules.includePaths) {
+      if (typeof p === 'string' && p.startsWith('/')) {
+        const cleanTitle = p.replace(/^\//, '').replace(/[-_/]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        candidates.push({
+          id: idFor(`seed:${p}`),
+          path: p,
+          title: cleanTitle || 'Halaman',
+          state: 'candidate',
+          elements: [],
+          errors: []
+        });
+      }
+    }
+  }
+
   const output = new Map<string, InventoryPage>();
   const visitedCanonicalPaths = new Set<string>();
 
